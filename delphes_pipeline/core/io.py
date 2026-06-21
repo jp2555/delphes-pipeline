@@ -76,18 +76,6 @@ def resolve_paths(path: PathLike) -> list[str]:
     return files
 
 
-def _per_file_stops(counts: Sequence[int], entry_stop: Optional[int]) -> list[int]:
-    """Per-file event caps; if ``entry_stop`` is set, cap the running total."""
-    if entry_stop is None:
-        return list(counts)
-    stops, remaining = [], entry_stop
-    for c in counts:
-        take = min(c, max(remaining, 0))
-        stops.append(take)
-        remaining -= take
-    return stops
-
-
 class DelphesEvents:
     """Lazy uproot-backed view of one or more Delphes ROOT files.
 
@@ -106,11 +94,27 @@ class DelphesEvents:
         self.treename = treename
         self.entry_stop = entry_stop
         self.paths = resolve_paths(path)
-        self._files = [uproot.open(p) for p in self.paths]
-        self._trees = [f[treename] for f in self._files]
-        # branches present in every file (dotted sub-branches like "Jet.PT")
+        # Open files lazily and stop once entry_stop is satisfied, so a fast run
+        # over a 200-file sample does not open all 200 just to read the first few.
+        self._files, self._trees, self._stops, self._used = [], [], [], []
+        remaining = entry_stop
+        for p in self.paths:
+            if entry_stop is not None and remaining <= 0:
+                break
+            f = uproot.open(p)
+            t = f[treename]
+            count = t.num_entries
+            stop = count if entry_stop is None else min(count, remaining)
+            self._files.append(f)
+            self._trees.append(t)
+            self._stops.append(stop)
+            self._used.append(p)
+            if entry_stop is not None:
+                remaining -= stop
+        if not self._trees:
+            raise ValueError(f"no readable trees for input {path!r}")
+        # branches present in every opened file (dotted sub-branches like "Jet.PT")
         self._keys = set.intersection(*[set(t.keys()) for t in self._trees])
-        self._stops = _per_file_stops([t.num_entries for t in self._trees], entry_stop)
         self._n = int(sum(self._stops))
 
     @property
@@ -193,9 +197,9 @@ class DelphesEvents:
 
     @property
     def bytes_per_event(self) -> float:
-        """On-disk size per event across all files (storage projection)."""
+        """On-disk size per event over the files actually read (storage projection)."""
         try:
-            total = sum(os.path.getsize(p) for p in self.paths)
+            total = sum(os.path.getsize(p) for p in self._used)
             return total / max(self.n, 1)
         except OSError:
             return float("nan")

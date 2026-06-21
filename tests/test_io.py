@@ -35,3 +35,26 @@ def test_entry_stop_caps_total_across_files(tmp_path):
     ev = DelphesEvents(str(sample), entry_stop=400)  # spans into the second file
     assert ev.n == 400
     assert len(ev.weights) == 400
+
+
+def test_reader_finds_nested_tree_subdir(tmp_path):
+    # real layout: <sample>/delphes-tree-<hash>/delphes-tree_N.root
+    sub = tmp_path / "kl-1p00_Delphes" / "delphes-tree-edccf8a6"
+    sub.mkdir(parents=True)
+    make_fixture(str(sub / "delphes-tree_0.root"), n_events=200, seed=1)
+    make_fixture(str(sub / "delphes-tree_1.root"), n_events=200, seed=2)
+
+    ev = DelphesEvents(str(tmp_path / "kl-1p00_Delphes"))  # point at the sample dir
+    assert len(ev.paths) == 2
+    assert ev.n == 400
+
+
+def test_lazy_open_stops_early(tmp_path):
+    sample = tmp_path / "sample"
+    sample.mkdir()
+    for i in range(3):
+        make_fixture(str(sample / f"f{i}.root"), n_events=300, seed=i)
+
+    ev = DelphesEvents(str(sample), entry_stop=100)  # satisfied by the first file
+    assert ev.n == 100
+    assert len(ev._used) == 1  # did not open the other two files
