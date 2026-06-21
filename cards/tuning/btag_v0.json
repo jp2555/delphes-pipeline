@@ -1,0 +1,10 @@
+{
+  "quantity": "btag_eff_b",
+  "source": "PLACEHOLDER — card currently carries the stock Delphes b-tag formula (arXiv:1211.4462). Retune to CMS BTV UParT-2024 Medium (CMS-DP-2024-066) for tuning set v0.",
+  "source_id": "CMS-DP-2024-066 (target); arXiv:1211.4462 (current stock)",
+  "date": "2026-06-21",
+  "working_point": "TODO: UParT BvAll Medium (~1% light misid)",
+  "parametrisation": "0.85*tanh(0.0025*pt)*(25.0/(1+0.063*pt))  [stock, pre-v0]",
+  "card_module": "BTagging",
+  "notes": "STUB. v0 not applied. The Level-0 closure target is read from cards/cms_card_v0.tcl via card_formulas.py until this is filled and the card is retuned."
+}

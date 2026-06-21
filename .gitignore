@@ -1,0 +1,24 @@
+# outputs & artifacts
+outputs/
+*.root
+!tests/fixtures/*.root
+*.parquet
+plots/
+report.json
+summary.md
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+build/
+dist/
+
+# pixi
+.pixi/
+
+# os / editor
+.DS_Store
+*.swp

@@ -1,0 +1,10 @@
+{
+  "quantity": "met_resolution",
+  "source": "PLACEHOLDER — tune Delphes pᵀᵐⁱˢˢ resolution to published PUPPI performance vs sum-E_T; synthesise the covariance for the τʈ mass estimator (decision D1).",
+  "source_id": "JINST 14 P07004 (arXiv:1903.06078) (target)",
+  "date": "2026-06-21",
+  "working_point": "TODO: PUPPI type-1 pᵀᵐⁱˢˢ, resolution σ(ΣE_T)",
+  "parametrisation": "stock EFlowMerger-based MissingET  [pre-v0]",
+  "card_module": "MissingET / EFlowMerger",
+  "notes": "STUB. pᵀᵐⁱˢˢ is the most consequential of the three response knobs (note §3.3); covariance synthesis is out of card scope and handled in the ntuplizer/estimator layer."
+}

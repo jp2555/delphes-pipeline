@@ -1,0 +1,10 @@
+{
+  "quantity": "tau_eff",
+  "source": "PLACEHOLDER — card currently carries the stock Delphes tau formula. Retune to DeepTau v2p5 Medium VSjet (incl. 4-mode acceptance) for tuning set v0.",
+  "source_id": "arXiv:2201.08458 + DeepTau v2p5 updates (target)",
+  "date": "2026-06-21",
+  "working_point": "TODO: DeepTau v2p5 Medium VSjet, Tight VSmu, VVLoose VSe",
+  "parametrisation": "0.6 genuine, 0.01 mistag  [stock, pre-v0]",
+  "card_module": "TauTagging",
+  "notes": "STUB. v0 not applied. Energy-response correction (tau-jet -> visible-tau scale) also pending; this directly shifts m_tautau and must precede any m_tautau-based validation."
+}

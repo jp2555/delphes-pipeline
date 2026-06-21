@@ -1,0 +1,32 @@
+# Pixi environment for the delphes-pipeline validation gate.
+# Mirrors the conda-forge stack used by the NSBI workflow on Perlmutter.
+# Platform is linux-64 (Perlmutter); on macOS use a plain venv with the
+# pyproject deps for local self-tests (uproot/awkward/numpy/scipy/matplotlib).
+[workspace]
+channels = ["conda-forge"]
+name = "delphes-pipeline"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[tasks]
+validate = "python -m delphes_pipeline.validation.run_validation --config delphes_pipeline/validation/config.example.yml"
+test = "pytest -q"
+
+[dependencies]
+python = ">=3.12,<3.13"
+numpy = ">=1.26,<2"
+scipy = ">=1.16,<2"
+uproot = ">=5.6,<6"
+awkward = ">=2.8,<3"
+matplotlib-base = ">=3.10,<4"
+mplhep = ">=0.4,<0.5"
+pyyaml = "*"
+pandas = ">=2.3,<3"
+pyarrow = "*"
+pytest = "*"
+
+[pypi-dependencies]
+delphes-pipeline = { path = ".", editable = true }
+
+[environments]
+nsbi-env-gpu = { features = [], no-default-feature = false }

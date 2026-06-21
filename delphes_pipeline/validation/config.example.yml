@@ -1,0 +1,53 @@
+# Example config for the Delphes card-validation gate.
+# Copy to config.yml, edit `input.delphes_root`, and run:
+#   python -m delphes_pipeline.validation.run_validation --config config.yml
+
+input:
+  # The finished signal HH -> bb tautau Delphes output (Perlmutter):
+  delphes_root: /pscratch/sd/j/jing/dihiggs/raw/signal.root
+  treename: Delphes
+  max_events: null            # null = all; set an int for a fast smoke run
+
+card: cards/cms_card_v0.tcl
+
+references:
+  dir: delphes_pipeline/validation/references/data   # digitised POG JSONs (optional)
+
+output:
+  dir: outputs/validation
+
+# Which ladder levels to run. pilot_gate + level0 + ntuplizer are implemented;
+# level1-4 are stubs and stay disabled until background samples / v0 land.
+levels:
+  pilot_gate:
+    enabled: true
+  level0:
+    enabled: true
+    # (pT, |eta|) binning for the object-response measurements
+    pt_bins:  [20, 30, 40, 50, 70, 100, 150, 200, 300]
+    eta_bins: [0.0, 0.8, 1.5, 2.4]
+    sumet_bins: [0, 100, 200, 300, 500, 800, 1200]   # MET resolution vs sum E_T
+    min_bin_count: 25         # bins with fewer entries are not closure-tested
+  ntuplizer:
+    enabled: true             # convert a slice and validate the flat schema + counts
+    max_events: 2000
+  level1: { enabled: false }
+  level2: { enabled: false }
+  level3: { enabled: false }
+  level4: { enabled: false }
+
+# Pass/fail thresholds. Placeholders pending the v0 anchor targets (note §3,§7);
+# tune against the private NanoAOD anchor once available.
+tolerances:
+  pilot_gate:
+    neg_weight_fraction_max: 0.30   # signal is Powheg; small negative fraction
+    min_gen_taus: 1                 # signal events must contain gen taus
+    mbb_width_max_gev: 30.0         # m_bb core-window std ceiling
+    mbb_core_fraction_min: 0.30     # min fraction of leading pairs in the 100-150 GeV core
+    met_resolution_max_gev: 40.0    # width of (MET - GenMET) sanity ceiling
+    kb_per_event_max: 150.0         # storage projection ceiling (full TreeWriter)
+  level0:
+    closure_rel_tol: 0.05           # per-bin systematic tolerance on |measured/expected - 1|
+    closure_nsigma: 2.0             # a bin fails only if it also misses by > this many stat sigma
+    max_failing_bin_fraction: 0.20  # closure passes if <= this fraction of tested bins fail
+    met_resolution_max_gev: 40.0    # MET resolution sanity ceiling (vs sum E_T)

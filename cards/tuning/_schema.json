@@ -1,0 +1,37 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Delphes tuning-quantity provenance record",
+  "description": "One record per tuned object-response quantity in tuning set v0.",
+  "type": "object",
+  "required": ["quantity", "source", "date", "working_point", "parametrisation"],
+  "properties": {
+    "quantity": {
+      "type": "string",
+      "description": "Tuned quantity key",
+      "enum": ["btag_eff_b", "btag_eff_c", "btag_mistag_light",
+               "tau_eff", "tau_mistag", "electron_eff", "muon_eff", "met_resolution"]
+    },
+    "source": {
+      "type": "string",
+      "description": "Public result encoded, e.g. 'CMS-DP-2024-066, Fig. 7'"
+    },
+    "source_id": {
+      "type": "string",
+      "description": "arXiv / CMS-DP / JINST identifier"
+    },
+    "date": {"type": "string", "description": "Transcription date (YYYY-MM-DD)"},
+    "working_point": {
+      "type": "string",
+      "description": "WP definition, e.g. 'UParT BvAll Medium (~1% light misid)'"
+    },
+    "parametrisation": {
+      "type": "string",
+      "description": "The functional form written into the card (the tcl EfficiencyFormula)"
+    },
+    "card_module": {
+      "type": "string",
+      "description": "Which card module this drives, e.g. 'BTagging'"
+    },
+    "notes": {"type": "string"}
+  }
+}
