@@ -53,6 +53,10 @@ def run(ctx: ValidationContext) -> list[CheckResult]:
     near_tau = matched_to_any(acc, gen_taus, _DR_MATCH)
     fake_jets = acc[~near_tau]
 
+    # Per-quantity severity (e.g. tau_mistag → warn for the pre-v0 card, where the
+    # stock per-parton EfficiencyFormula under-counts the per-jet TauTag rate by
+    # ~1.5x in busy bb̄ττ topologies) is taken from the config by
+    # efficiency_closure via tolerances.level0.closure_severity.<quantity>.
     return [
         efficiency_closure(
             ctx,

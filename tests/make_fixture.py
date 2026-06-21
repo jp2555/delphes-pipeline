@@ -125,6 +125,15 @@ def make_fixture(
                                  tautag=int(rng.random() < float(tau_eff(pt, eta)))))
 
         # --- electrons / muons (gen + reco at injected efficiency) ---------
+        # In the good (non-broken) fixture each prompt lepton is given a tau
+        # mother so the gen.m1 chain points to |PID|==15, mirroring HH→ττ→ℓνν
+        # and matching the prompt-mother selection in
+        # validation/level0_objects/leptons.py. The mother tau is parked at
+        # |eta|=5.0 (well outside Delphes' TauEtaMax = 2.5 and any jet's
+        # acceptance) so it cannot be unique-matched to a jet by tau.py and
+        # therefore cannot pollute the tau efficiency or jet→τ mistag
+        # measurements. The broken fixture skips mother insertion to keep the
+        # gen-tau count at zero (the Pilot Gate must fail there).
         for pid, eff, sink in ((11, electron_eff, ele_l), (13, muon_eff, muo_l)):
             nlep = int(rng.integers(0, 3))
             recos = []
@@ -133,8 +142,17 @@ def make_fixture(
                 eta = float(rng.uniform(-2.6, 2.6))
                 phi = float(rng.uniform(-math.pi, math.pi))
                 charge = int(rng.choice([-1, 1]))
+                if broken:
+                    mother_idx = -1
+                else:
+                    mother_idx = len(gens)
+                    gens.append(_gen(pid=15 * charge, status=2,
+                                     pt=pt + 5.0,
+                                     eta=5.0 * (1 if eta >= 0 else -1),
+                                     phi=phi, mass=1.777))
                 gens.append(_gen(pid=-pid * charge, status=1,
-                                 pt=pt, eta=eta, phi=phi, mass=0.0))
+                                 pt=pt, eta=eta, phi=phi, mass=0.0,
+                                 m1=mother_idx))
                 if rng.random() < float(eff(pt, eta)):
                     recos.append(_lep(pt, eta, phi, charge))
             sink.append(recos)
@@ -247,10 +265,10 @@ def _lep(pt, eta, phi, charge):
     return {"PT": float(pt), "Eta": float(eta), "Phi": float(phi), "Charge": int(charge)}
 
 
-def _gen(pid, status, pt, eta, phi, mass):
+def _gen(pid, status, pt, eta, phi, mass, m1=-1):
     return {"PID": int(pid), "Status": int(status), "PT": float(pt), "Eta": float(eta),
             "Phi": float(phi), "Mass": float(mass), "Charge": 0,
-            "M1": -1, "M2": -1, "D1": -1, "D2": -1}
+            "M1": int(m1), "M2": -1, "D1": -1, "D2": -1}
 
 
 if __name__ == "__main__":

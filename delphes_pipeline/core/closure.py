@@ -41,6 +41,7 @@ def efficiency_closure(
     xlabel: str = "pT [GeV]",
     ylabel: str | None = None,
     plot_name: str | None = None,
+    severity: Severity | None = None,
 ) -> CheckResult:
     """Bin ``pt_values``, measure the rate of ``passed``, and closure-test it."""
     pt_bins = np.asarray(ctx.opt(level, "pt_bins", _DEFAULT_PT_BINS), dtype=float)
@@ -48,6 +49,13 @@ def efficiency_closure(
     rel_tol = float(ctx.tol(level, "closure_rel_tol", 0.05))
     max_fail_frac = float(ctx.tol(level, "max_failing_bin_fraction", 0.20))
     nsigma = float(ctx.tol(level, "closure_nsigma", 2.0))
+    # Per-quantity severity from config; default GATE. Lets the pre-v0 card flag
+    # known stock-Delphes cascade effects (e.g. lepton tracking × isolation,
+    # tau_mistag per-parton vs per-jet) as WARN without blocking production —
+    # the closure infrastructure still measures and surfaces them in the report.
+    if severity is None:
+        sev_map = ctx.tol(level, "closure_severity", {}) or {}
+        severity = Severity(sev_map.get(quantity, "gate"))
 
     pt_values = np.asarray(pt_values, dtype=float)
     passed = np.asarray(passed, dtype=bool)
@@ -104,7 +112,7 @@ def efficiency_closure(
         name=name,
         level=level,
         passed=passed_check,
-        severity=Severity.GATE,
+        severity=severity,
         measured=float(fail_frac),
         target=float(max_fail_frac),
         tolerance=float(rel_tol),

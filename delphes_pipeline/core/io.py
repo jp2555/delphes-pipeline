@@ -113,8 +113,12 @@ class DelphesEvents:
                 remaining -= stop
         if not self._trees:
             raise ValueError(f"no readable trees for input {path!r}")
-        # branches present in every opened file (dotted sub-branches like "Jet.PT")
-        self._keys = set.intersection(*[set(t.keys()) for t in self._trees])
+        # branches present in every opened file (dotted sub-branches like "Jet.PT").
+        # uproot lists them as "Jet/Jet.PT" (sub-branch path); take the trailing
+        # dotted leaf so callers can query the natural name they read directly.
+        self._keys = set.intersection(
+            *[{k.split("/")[-1] for k in t.keys()} for t in self._trees]
+        )
         self._n = int(sum(self._stops))
 
     @property
