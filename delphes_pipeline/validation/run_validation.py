@@ -105,12 +105,16 @@ def run(config: dict[str, Any], *, max_events: int | None = None) -> Report:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Delphes card-validation gate")
     ap.add_argument("--config", required=True, help="path to the YAML config")
+    ap.add_argument("--delphes-root", default=None,
+                    help="override input.delphes_root (a file, glob, or sample directory)")
     ap.add_argument("--max-events", type=int, default=None,
                     help="override: read only the first N events (fast run)")
     ap.add_argument("--output-dir", default=None, help="override output.dir")
     args = ap.parse_args(argv)
 
     config = load_config(args.config)
+    if args.delphes_root:
+        config.setdefault("input", {})["delphes_root"] = args.delphes_root
     if args.output_dir:
         config.setdefault("output", {})["dir"] = args.output_dir
 

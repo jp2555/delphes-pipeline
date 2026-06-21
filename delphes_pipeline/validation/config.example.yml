@@ -3,8 +3,18 @@
 #   python -m delphes_pipeline.validation.run_validation --config config.yml
 
 input:
-  # The finished signal HH -> bb tautau Delphes output (Perlmutter):
-  delphes_root: /pscratch/sd/j/jing/dihiggs/raw/signal.root
+  # A signal sample is one Delphes *directory* of ROOT files; the reader reads
+  # every *.root inside it (recursively). Set delphes_root to the kappa_lambda
+  # point to validate (default: the SM kl=1 point). The six GluGluHHto2B2Tau
+  # points under /pscratch/sd/j/jing/dihiggs/raw (c2=0.00, kt=1.00) are:
+  #   kl=-1.00  GluGluHHto2B2Tau_Par-c2-0p00-kl-m1p00-kt-1p00_TuneCP5_13p6TeV_powheg-pythia8_Delphes
+  #   kl= 0.00  GluGluHHto2B2Tau_Par-c2-0p00-kl-0p00-kt-1p00_TuneCP5_13p6TeV_powheg-pythia8_Delphes
+  #   kl= 1.00  GluGluHHto2B2Tau_Par-c2-0p00-kl-1p00-kt-1p00_TuneCP5_13p6TeV_powheg-pythia8_Delphes  (SM)
+  #   kl= 2.45  GluGluHHto2B2Tau_Par-c2-0p00-kl-2p45-kt-1p00_TuneCP5_13p6TeV_powheg-pythia8_Delphes
+  #   kl= 3.00  GluGluHHto2B2Tau_Par-c2-0p00-kl-3p00-kt-1p00_TuneCP5_13p6TeV_powheg-pythia8_Delphes
+  #   kl= 5.00  GluGluHHto2B2Tau_Par-c2-0p00-kl-5p00-kt-1p00_TuneCP5_13p6TeV_powheg-pythia8_Delphes
+  # To validate the card across all six at once, use runners/validate_all.sh.
+  delphes_root: /pscratch/sd/j/jing/dihiggs/raw/GluGluHHto2B2Tau_Par-c2-0p00-kl-1p00-kt-1p00_TuneCP5_13p6TeV_powheg-pythia8_Delphes
   treename: Delphes
   max_events: null            # null = all; set an int for a fast smoke run
 
