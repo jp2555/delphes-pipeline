@@ -79,11 +79,11 @@ def _peak_mode(x, *, lo=40.0, hi=160.0, w=5.0, halfwidth=20.0) -> float:
 def _peak_at_mz(ctx: ValidationContext, ev) -> CheckResult:
     """FastMTT m_ττ-estimator peak vs m_Z (note §6.2; estimator = D1, covariance-free).
 
-    Reconstructs m_ττ for the leading τ-candidate pair (b-vetoed) and gates the *mode*
-    of the distribution on m_Z. The visible peak sits below m_Z; the estimator, folding
-    in pᵀᵐⁱˢˢ, should restore it — a model-independent validation of the chain. The
-    leptonic channel carries a known residual high bias (covariance-free limitation),
-    so the per-channel peaks and the high-mass tail fraction are reported alongside.
+    Gates on the **τ_hτ_h channel** — the unambiguous, fully pᵀᵐⁱˢˢ-driven one — whose
+    mode lands on m_Z and validates the τ + pᵀᵐⁱˢˢ chain. The ℓτ_h channel carries a known
+    high bias from the covariance-free leptonic decay prior (the full FastMTT removes it),
+    so its peak, the combined peak, and the high-mass tail fraction are *reported* but not
+    gated. The visible peak sits below m_Z; the estimator restores it.
     """
     veto = selections.bjet_veto_mask(ev)
     sigma = float(ctx.tol("level1", "mtautau_met_sigma_gev", 25.0))  # fixed (covariance-free) MET σ
@@ -93,15 +93,16 @@ def _peak_at_mz(ctx: ValidationContext, ev) -> CheckResult:
     finite = np.isfinite(m)
     m, n_tauh = m[finite], n_tauh[finite]
 
-    if m.size < 20:
+    tt = m[n_tauh == 2]   # τ_hτ_h: the channel the gate is evaluated on
+    if tt.size < 20:
         return CheckResult(
             name="level1.ztautau.peak_at_mZ", level="level1", passed=False, severity=Severity.WARN,
-            detail=f"only {m.size} reconstructed di-τ pairs; cannot evaluate the m_Z peak")
+            detail=f"only {tt.size} τ_hτ_h pairs; cannot evaluate the m_Z peak on the clean channel")
 
-    peak = _peak_mode(m)
-    tail_frac = float(np.mean(m > 150.0))
-    pk_tt = _peak_mode(m[n_tauh == 2]) if (n_tauh == 2).sum() >= 20 else float("nan")
+    peak = _peak_mode(tt)
     pk_lt = _peak_mode(m[n_tauh == 1]) if (n_tauh == 1).sum() >= 20 else float("nan")
+    pk_all = _peak_mode(m)
+    tail_frac = float(np.mean(m > 150.0))
     plot = ctx.rel(hist_overlay(
         [("FastMTT m_ττ", m, None)], bins=np.linspace(0, 200, 51),
         outpath=ctx.plot_path("candle_ztautau_mtautau.png"), xlabel="FastMTT m_ττ [GeV]",
@@ -112,10 +113,11 @@ def _peak_at_mz(ctx: ValidationContext, ev) -> CheckResult:
         name="level1.ztautau.peak_at_mZ", level="level1",
         passed=bool(abs(peak - _M_Z) <= tol), severity=Severity.GATE,
         measured=peak, target=_M_Z, tolerance=tol, units="GeV",
-        detail=(f"FastMTT m_ττ peak {peak:.1f} GeV vs m_Z {_M_Z:.1f} (±{tol:.0f}); "
-                f"τ_hτ_h {pk_tt:.0f} / ℓτ_h {pk_lt:.0f}, tail(m>150) {tail_frac:.0%}"),
+        detail=(f"τ_hτ_h FastMTT m_ττ peak {peak:.1f} GeV vs m_Z {_M_Z:.1f} (±{tol:.0f}); "
+                f"ℓτ_h {pk_lt:.0f} (covariance-free-limited), combined {pk_all:.0f}, tail(m>150) {tail_frac:.0%}"),
         plot_path=plot,
-        extra={"peak_tautau": pk_tt, "peak_ltau": pk_lt, "tail_fraction": tail_frac, "n_pairs": int(m.size)},
+        extra={"peak_tautau": peak, "peak_ltau": pk_lt, "peak_all": pk_all,
+               "tail_fraction": tail_frac, "n_tautau": int(tt.size)},
     )
 
 

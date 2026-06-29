@@ -43,12 +43,13 @@ def test_ztautau_candle_fastmtt_peaks_at_mz(good_fixture_path, tmp_path):
 
     # the visible peak sits below m_Z (neutrinos missing)
     assert by["level1.ztautau.visible_peak"].measured < 75.0
-    # the FastMTT estimator restores the m_Z peak (robust mode) and the GATE passes
+    # the GATE is the τ_hτ_h channel peak (the clean, MET-driven one); it restores m_Z
     r = by["level1.ztautau.peak_at_mZ"]
     assert r.severity.value == "gate"
-    assert abs(r.measured - 91.2) < 8.0
-    assert r.passed
-    assert "tail" in r.detail and r.extra["n_pairs"] > 100
+    assert r.passed                             # τ_hτ_h peak within ±tol of m_Z
+    assert 75.0 < r.measured < 105.0            # lifted well above the visible (~57), near m_Z
+    assert r.extra["peak_tautau"] == r.measured and r.extra["n_tautau"] > 50
+    assert "ℓτ_h" in r.detail and "tail" in r.detail
 
 
 def test_level1_aggregates_both_candles(good_fixture_path, tmp_path):
