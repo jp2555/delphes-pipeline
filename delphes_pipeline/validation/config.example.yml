@@ -79,9 +79,10 @@ levels:
     enabled: true             # convert a slice and validate the flat schema + counts
     max_events: 2000
   level1: { enabled: false }  # set true once candles.{ttbar,ztautau} point at the samples
-  level2: { enabled: false }
-  level3: { enabled: false }
-  level4: { enabled: false }
+  level2: { enabled: false }  # stub
+  level3: { enabled: false }  # stub
+  level4:                     # κ_λ-critical m_HH faithfulness (runs on the signal sample)
+    enabled: false            # set true on the HH→bb̄ττ signal to gate the m_HH lineshape
 
 # Pass/fail thresholds. Placeholders pending the v0 anchor targets (note §3,§7);
 # tune against the private NanoAOD anchor once available.
@@ -97,6 +98,9 @@ tolerances:
     eb_closure_rel_tol: 0.10        # tt̄ in-situ ε_b vs the tuned input
     mtautau_peak_tol_gev: 10.0      # Z→ττ FastMTT m_ττ peak must sit within this of m_Z
     mtautau_met_sigma_gev: 25.0     # fixed (covariance-free) per-component MET σ for FastMTT
+  level4:
+    mhh_scale_tol: 0.10             # |median(reco/gen m_HH) − 1| ceiling in 250–400 GeV
+    mhh_resolution_max: 0.20        # σ(reco/gen m_HH) ceiling so the κ_λ lineshape survives
   level0:
     closure_rel_tol: 0.05           # per-bin systematic tolerance on |measured/expected - 1|
     closure_nsigma: 2.0             # a bin fails only if it also misses by > this many stat sigma
