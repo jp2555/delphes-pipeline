@@ -21,7 +21,14 @@ def run(ctx: ValidationContext) -> list[CheckResult]:
     """Convert a slice and validate the flat schema + counts."""
     n = int(ctx.opt("ntuplizer", "max_events", 2000))
     ev = DelphesEvents(ctx.events.path, treename=ctx.events.treename, entry_stop=n)
-    rec = convert.to_record(ev)
+    # apply the downstream tuning re-tag if a maps file is configured, so the gate
+    # validates the tuned ntuple (note D2-A); schema/counts are unchanged by it.
+    maps_path = ctx.config.get("tuning_maps")
+    tuning_maps = None
+    if maps_path:
+        from delphes_pipeline.tuning.maps import TuningMaps
+        tuning_maps = TuningMaps.load(maps_path)
+    rec = convert.to_record(ev, tuning_maps=tuning_maps)
 
     missing: list[str] = []
     for coll, fields in schema.FLAT_SCHEMA.items():

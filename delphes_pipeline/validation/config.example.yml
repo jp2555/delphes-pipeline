@@ -42,6 +42,14 @@ anchor:
     jet: { btag_disc: Jet_btagUParTAK4B }
     tau: { vsjet: Tau_idDeepTau2018v2p5VSjet }
 
+# Downstream tuning maps (note §3, D2 option A). The Delphes card's tagger bits
+# are ignored; the b-tag is re-derived downstream from Jet.Flavor + the per-flavour
+# efficiency measured on the NanoAOD anchor (stochastic re-tag). Derive the maps with
+#   python -m delphes_pipeline.tuning.derive_maps --config config.yml
+# then set the path below: the ntuplizer applies it so the Delphes b-tag matches the
+# anchor (no card edit, no re-production). Leave null to keep the stock Jet.BTag.
+tuning_maps: null              # e.g. cards/tuning/maps_v0.json
+
 output:
   dir: outputs/validation
 

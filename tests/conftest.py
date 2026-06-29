@@ -118,6 +118,9 @@ def make_config(path: str) -> dict:
         config = yaml.safe_load(fh)
     config["input"]["delphes_root"] = str(path)
     config["input"]["max_events"] = None
+    # the fixture suite has no external NanoAOD anchor (the example path points at
+    # deepthought + CVMFS); tests that exercise the anchor set it explicitly.
+    config.setdefault("anchor", {})["enabled"] = False
     # write the report next to the fixture so each test gets an isolated output
     config.setdefault("output", {})["dir"] = str(Path(path).parent / "validation_out")
     return config
