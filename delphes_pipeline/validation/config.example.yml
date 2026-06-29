@@ -23,6 +23,22 @@ card: cards/cms_card_v0.tcl
 references:
   dir: delphes_pipeline/validation/references/data   # digitised POG JSONs (optional)
 
+# Private NanoAOD tuning anchor (note Sec.3, 6.4). When enabled, the tuning lens
+# measures the SAME object response on this CMS NanoAOD and uses it as the target
+# (b-tag/lepton via the shared observables, tau_eff via GenVisTau+DeepTau, MET
+# overall). Fill nanoaod_path and the two working points; adjust branch names to
+# your NanoAOD era (defaults are 2024 NanoAODv14/15).
+anchor:
+  enabled: false
+  nanoaod_path: /pscratch/sd/j/jing/dihiggs/nanoaod/<your_2024_MC_sample>   # file/glob/dir
+  max_events: 200000           # cap for the anchor measurement (shape only)
+  wp:
+    btag_medium: null          # REQUIRED: UParT-AK4 Medium discriminant threshold (BTV 2024)
+    deeptau_vsjet_medium: null # REQUIRED: DeepTau v2p5 VSjet Medium WP integer (TAU)
+  branches:                    # override only what differs from the NanoAODv14/15 defaults
+    jet: { btag_disc: Jet_btagUParTAK4B }
+    tau: { vsjet: Tau_idDeepTau2018v2p5VSjet }
+
 output:
   dir: outputs/validation
 

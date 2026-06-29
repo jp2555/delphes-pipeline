@@ -188,3 +188,18 @@ GenJets being neutrino-filtered = visible reference; §3.2, §4.3) and the
 (`trigger.py`, the AN-25-103 Table-2 2024 menu encoded; §4.1) and the m_ττ
 estimator (`mtautau.py`, decision D1: FastMTT / covariance-free; §3.3). The
 Level-1 candles (Z→ττ, tt̄) remain stubs under `validation/level1_candles`.
+
+### NanoAOD anchor target mode (note §3, §6.4)
+
+The note's primary tuning anchor is the private CMS NanoAOD: tune Delphes object
+response until it matches the *same* response measured on the NanoAOD. With
+`anchor.enabled: true` in the config, `core/nanoaod.py` (`NanoAODEvents`,
+duck-typed to `DelphesEvents` — `jets.btag` is the tagger discriminant
+thresholded at the working point) lets the shared `observables` measure the
+b-tag and lepton targets directly; `tuning/anchor.py` adds the τ_h efficiency
+(NanoAOD `GenVisTau` matched to a DeepTau-Medium `Tau`) and the overall MET
+resolution. The anchor target supersedes the digitised-curve/card-formula target,
+so the efficiency/MET observables become actionable (residual + knob) without any
+hand-digitisation. Branch names and WPs are config (`anchor.branches`,
+`anchor.wp`), so a different NanoAOD era is a config edit. This is the recommended
+way to tune against CMS 2024 MC.

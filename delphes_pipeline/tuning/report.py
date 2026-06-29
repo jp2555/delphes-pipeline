@@ -44,8 +44,12 @@ def _weighted_mean(dev, counts):
     return float(np.sum(np.abs(dev) * counts) / np.sum(counts)) if counts.sum() else float("nan")
 
 
-def tune_observable(ctx: ValidationContext, observable: str, *, bins) -> TuningResult:
-    """Measure one observable, compare to its target, return a TuningResult."""
+def tune_observable(ctx: ValidationContext, observable: str, *, bins, anchor_target=None) -> TuningResult:
+    """Measure one observable, compare to its target, return a TuningResult.
+
+    If ``anchor_target`` (a Profile measured on the NanoAOD anchor) is given it
+    takes precedence over the digitised-curve / card-formula target.
+    """
     diag = T.diagnostic_map()[observable]
     kind = diag["target_kind"]
     tol = float(T.scalar_targets()["tuning_tolerance"])
@@ -65,6 +69,22 @@ def tune_observable(ctx: ValidationContext, observable: str, *, bins) -> TuningR
     counts = np.asarray(prof.counts, dtype=float)
     card = (np.asarray(ctx.references.expected(observable, centers, np.zeros_like(centers)), dtype=float)
             if observable in QUANTITIES else None)
+
+    if anchor_target is not None and np.asarray(anchor_target.centers).size:
+        a_centers = np.asarray(anchor_target.centers, dtype=float)
+        a_values = np.asarray(anchor_target.values, dtype=float)
+        tgt = np.interp(centers, a_centers, a_values)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            dev = np.where(tgt != 0, measured / tgt - 1.0, np.nan)
+        ok = np.isfinite(dev)
+        residual = _weighted_mean(dev[ok], counts[ok])
+        status = "on_target" if residual <= tol else "needs_tuning"
+        detail = f"Delphes deviates {residual:.1%} from the NanoAOD anchor (count-weighted)"
+        plot = _overlay(ctx, observable, prof, expected=card, ref_centers=a_centers,
+                        ref_values=a_values, ref_errors=anchor_target.errors, ref_label="NanoAOD anchor")
+        extra = {"target": "nanoaod_anchor", "anchor": anchor_target.to_dict(), **prof.to_dict()}
+        return TuningResult(status=status, residual=residual, tolerance=tol,
+                            plot_path=plot, detail=detail, extra=extra, **common)
 
     if kind == "unity":
         target = np.ones_like(centers)
@@ -112,7 +132,7 @@ def _tune_peak(ctx: ValidationContext, common: dict, tol: float) -> TuningResult
 
 
 def _overlay(ctx, observable, prof, *, expected=None, expected_label="card formula",
-             ref_centers=None, ref_values=None, ref_errors=None) -> str:
+             ref_centers=None, ref_values=None, ref_errors=None, ref_label="tuning target") -> str:
     """Render a measured / card / target overlay for a tuning observable."""
     outpath = ctx.plot_path(f"tuning_{observable}.png")
     if expected is None:
@@ -123,7 +143,7 @@ def _overlay(ctx, observable, prof, *, expected=None, expected_label="card formu
         outpath=str(outpath), xlabel=prof.xlabel or "pT [GeV]", ylabel=prof.ylabel or observable,
         measured_label="Delphes (measured)", expected_label=expected_label,
         ref_centers=ref_centers, ref_values=ref_values, ref_errors=ref_errors,
-        ref_label="tuning target",
+        ref_label=ref_label,
     )
     return ctx.rel(Path(outpath))
 
@@ -132,8 +152,14 @@ def run_tuning(ctx: ValidationContext) -> list[TuningResult]:
     """Measure every tuning observable, write tuning_report.{json,md}, return results."""
     import json
 
+    from . import anchor as anchor_mod
+
     bins = ctx.opt("level0", "pt_bins", obs.DEFAULT_PT_BINS)
-    results = [tune_observable(ctx, name, bins=bins) for name in T.tuning_observables()]
+    anchors = anchor_mod.anchor_profiles(ctx.config, bins=bins)  # {} unless anchor.enabled
+    if anchors:
+        print(f"[tuning] NanoAOD anchor enabled: targets for {sorted(anchors)}")
+    results = [tune_observable(ctx, name, bins=bins, anchor_target=anchors.get(name))
+               for name in T.tuning_observables()]
 
     ctx.output_dir.mkdir(parents=True, exist_ok=True)
     payload = {"provenance": ctx.provenance, "results": [r.to_dict() for r in results]}
