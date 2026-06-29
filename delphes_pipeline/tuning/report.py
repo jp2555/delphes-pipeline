@@ -20,6 +20,12 @@ from delphes_pipeline.core.plotting import efficiency_overlay
 from delphes_pipeline.core.references import QUANTITIES
 from . import targets as T
 
+# Only the b-tag efficiency observables are re-measured on the re-tagged view. Other
+# diagnostics (energy scale, leptons, τ_h, MET) read different knobs and stay on stock
+# tags; in particular the m_bb b-pair selection sorts on btag, so re-tagging it would
+# confound the energy-scale check.
+_RETAG_OBSERVABLES = frozenset(obs.BTAG_FLAVORS)
+
 
 @dataclass
 class TuningResult:
@@ -44,12 +50,15 @@ def _weighted_mean(dev, counts):
     return float(np.sum(np.abs(dev) * counts) / np.sum(counts)) if counts.sum() else float("nan")
 
 
-def tune_observable(ctx: ValidationContext, observable: str, *, bins, anchor_target=None) -> TuningResult:
+def tune_observable(ctx: ValidationContext, observable: str, *, bins, anchor_target=None,
+                    measure_events=None) -> TuningResult:
     """Measure one observable, compare to its target, return a TuningResult.
 
     If ``anchor_target`` (a Profile measured on the NanoAOD anchor) is given it
-    takes precedence over the digitised-curve / card-formula target.
+    takes precedence over the digitised-curve / card-formula target. ``measure_events``
+    overrides where the Delphes side is measured (e.g. a downstream-re-tagged view).
     """
+    events = measure_events if measure_events is not None else ctx.events
     diag = T.diagnostic_map()[observable]
     kind = diag["target_kind"]
     tol = float(T.scalar_targets()["tuning_tolerance"])
@@ -57,9 +66,9 @@ def tune_observable(ctx: ValidationContext, observable: str, *, bins, anchor_tar
                   action=diag["action"], note_section=diag["note_section"])
 
     if observable == "mbb_peak":
-        return _tune_peak(ctx, common, tol)
+        return _tune_peak(ctx, common, tol, events)
 
-    prof = T.PROFILE_OBSERVABLES[observable](ctx.events, bins)
+    prof = T.PROFILE_OBSERVABLES[observable](events, bins)
     if not prof.centers.size:
         return TuningResult(status="no_data", residual=float("nan"), tolerance=tol,
                             detail="no populated bins", **common)
@@ -115,11 +124,11 @@ def tune_observable(ctx: ValidationContext, observable: str, *, bins, anchor_tar
                         plot_path=plot, detail=detail, extra=extra, **common)
 
 
-def _tune_peak(ctx: ValidationContext, common: dict, tol: float) -> TuningResult:
+def _tune_peak(ctx: ValidationContext, common: dict, tol: float, events=None) -> TuningResult:
     st = T.scalar_targets()
     target = float(st["mbb_peak_gev"])
     peaktol = float(st["mbb_peak_tolerance_gev"])
-    pk = obs.mbb_peak(ctx.events)
+    pk = obs.mbb_peak(events if events is not None else ctx.events)
     if pk.n_core == 0:
         return TuningResult(status="no_data", residual=float("nan"), tolerance=peaktol,
                             detail="empty m_bb core window", **common)
@@ -161,10 +170,26 @@ def run_tuning(ctx: ValidationContext) -> list[TuningResult]:
     anchors = anchor_mod.anchor_profiles(ctx.config, bins=bins, max_events=cap)  # {} unless enabled
     if anchors:
         print(f"[tuning] anchor targets ready: {sorted(anchors)}", flush=True)
+
+    # Close the loop: when tuning maps are configured, re-measure the b-tag observables on a
+    # downstream-re-tagged view so their residual reflects the *tuned* tags (note D2-A). Seed 0
+    # matches the ntuplizer default so the re-validated tags equal the shipped ntuple's.
+    retag_view = None
+    maps_path = ctx.config.get("tuning_maps")
+    if maps_path:
+        from .maps import RetaggedEvents, TuningMaps
+        retag_view = RetaggedEvents(ctx.events, TuningMaps.load(maps_path), np.random.default_rng(0))
+        print(f"[tuning] re-validating the b-tag observables with the downstream re-tag "
+              f"from {maps_path}", flush=True)
+
     results = []
     for name in T.tuning_observables():
         print(f"[tuning]   measuring Delphes {name} ...", flush=True)
-        results.append(tune_observable(ctx, name, bins=bins, anchor_target=anchors.get(name)))
+        me = retag_view if (retag_view is not None and name in _RETAG_OBSERVABLES) else None
+        r = tune_observable(ctx, name, bins=bins, anchor_target=anchors.get(name), measure_events=me)
+        if me is not None and isinstance(r.extra, dict):
+            r.extra["retagged"] = True
+        results.append(r)
 
     ctx.output_dir.mkdir(parents=True, exist_ok=True)
     payload = {"provenance": ctx.provenance, "results": [r.to_dict() for r in results]}
@@ -198,11 +223,15 @@ _STATUS_MARK = {"on_target": "✅ on target", "needs_tuning": "🔧 needs tuning
 
 def _render_md(ctx: ValidationContext, results: list[TuningResult]) -> str:
     prov = ctx.provenance
+    retagged = any(isinstance(r.extra, dict) and r.extra.get("retagged") for r in results)
     lines = [
         "# Delphes object-tuning report", "",
         f"input: `{prov.get('input_path', '?')}` ({prov.get('n_events', '?')} events)  ·  "
         f"card sha256 `{str(prov.get('card_sha256'))[:12]}`  ·  tuning set {prov.get('tuning_set', '?')}",
         "",
+        *(["> **Downstream re-tag applied** (`tuning_maps`): the b-tag observables below are "
+           "re-measured with `Jet.btag` re-derived from `Jet.Flavor` + the anchor map (tuned tags).", ""]
+          if retagged else []),
         "_Status: ✅ on target · 🔧 needs tuning · ○ **measured, but no digitised target curve "
         "to tune toward** (drop `validation/references/data/<observable>.json`) · — no data._",
         "",

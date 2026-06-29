@@ -9,7 +9,6 @@ array. The downstream reader is ``core.io.load_ntuple``.
 
 from __future__ import annotations
 
-import sys
 from typing import Optional
 
 import awkward as ak
@@ -63,5 +62,36 @@ def convert(
     return out
 
 
+def main(argv=None) -> int:
+    """CLI: convert a Delphes file, applying the downstream tuning re-tag if configured.
+
+        python -m delphes_pipeline.ntuplizer.convert in.root out.parquet [--config config.yml]
+        python -m delphes_pipeline.ntuplizer.convert in.root out.parquet --tuning-maps maps_v0.json
+
+    With ``--config`` the maps path is read from the config's ``tuning_maps`` key, so the
+    shipped ntuple carries the same tuned tags the tuning lens re-validates (seed 0 on both).
+    """
+    import argparse
+
+    ap = argparse.ArgumentParser(description="Delphes ROOT -> flat parquet ntuple")
+    ap.add_argument("delphes")
+    ap.add_argument("out")
+    ap.add_argument("--treename", default="Delphes")
+    ap.add_argument("--entry-stop", type=int, default=None)
+    ap.add_argument("--config", help="validation config; reads tuning_maps from it")
+    ap.add_argument("--tuning-maps", help="apply this maps JSON downstream (overrides --config)")
+    args = ap.parse_args(argv)
+
+    tuning_maps = args.tuning_maps
+    if tuning_maps is None and args.config:
+        from ..validation.run_validation import load_config
+        tuning_maps = load_config(args.config).get("tuning_maps")
+    if tuning_maps:
+        print(f"[ntuplizer] applying downstream re-tag from {tuning_maps}", flush=True)
+    convert(args.delphes, args.out, treename=args.treename,
+            entry_stop=args.entry_stop, tuning_maps=tuning_maps)
+    return 0
+
+
 if __name__ == "__main__":
-    convert(sys.argv[1], sys.argv[2])
+    raise SystemExit(main())

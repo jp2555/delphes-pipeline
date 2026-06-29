@@ -87,3 +87,33 @@ def retag_btag(events, maps: TuningMaps, rng: np.random.Generator) -> ak.Array:
     eff[is_l] = maps.efficiency("btag_mistag_light", pt[is_l])
     tag = (rng.random(pt.shape) < eff).astype(np.int32)
     return ak.unflatten(tag, counts)
+
+
+class RetaggedEvents:
+    """An events view whose ``Jet.btag`` is the downstream re-tag (note D2-A).
+
+    Proxies every attribute to the wrapped events; only ``.jets`` is overridden so
+    its ``btag`` field is the stochastic re-tag from ``Jet.Flavor`` + the maps. All
+    other collections (taus, leptons, gen, MET) are unchanged, so every observable
+    re-measures the *tuned* response through the same ``core.observables`` path.
+    Used by the tuning lens to close the loop: re-tagged b-tag → matches the anchor.
+    """
+
+    def __init__(self, events, maps: TuningMaps, rng: np.random.Generator):
+        self._events = events
+        self._jets = ak.with_field(events.jets, retag_btag(events, maps, rng), "btag")
+
+    @property
+    def jets(self) -> ak.Array:
+        return self._jets
+
+    def __getattr__(self, name):
+        # Reject dunders and the pre-init state so copy/pickle fail with a normal
+        # AttributeError instead of recursing on a missing self._events.
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
+        try:
+            events = object.__getattribute__(self, "_events")
+        except AttributeError:
+            raise AttributeError(name)
+        return getattr(events, name)

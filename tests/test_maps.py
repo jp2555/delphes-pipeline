@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import awkward as ak
 import numpy as np
+import pytest
+from conftest import build_ctx
 from make_nano_fixture import BTAG_WP, DEEPTAU_MEDIUM, make_nano_fixture
 
 from delphes_pipeline.core import observables as obs
 from delphes_pipeline.core.io import DelphesEvents
+from delphes_pipeline.ntuplizer import convert as convert_mod
 from delphes_pipeline.ntuplizer.convert import convert
+from delphes_pipeline.tuning import report as treport
 from delphes_pipeline.tuning.maps import (
     BTAG_MAP_QUANTITIES,
+    RetaggedEvents,
     TuningMaps,
     derive_maps,
     retag_btag,
@@ -77,3 +82,65 @@ def test_convert_applies_maps(good_fixture_path, tmp_path):
     heavy = (fl == 5) | (fl == 4)
     assert bt[heavy].min() == 1            # b/c always tagged
     assert bt[~heavy].max() == 0           # light never tagged
+
+
+def test_retag_closes_the_tuning_loop(good_fixture_path, tmp_path):
+    """The tuning lens re-validates the re-tagged b-tag against the anchor (loop closed).
+
+    The good fixture injects the *card* b-tag formula (~0.63), the anchor injects
+    0.70, so the stock b-tag needs tuning. After re-tagging toward the anchor maps
+    the measured b-tag matches the anchor -> on_target.
+    """
+    nano = tmp_path / "nano.root"
+    make_nano_fixture(str(nano), n_events=8000, seed=3)
+    anchor_cfg = {"enabled": True, "nanoaod_path": str(nano), "wp": _wp()}
+
+    maps = derive_maps({"anchor": anchor_cfg}, bins=obs.DEFAULT_PT_BINS)
+    mpath = tmp_path / "maps_v0.json"
+    save_maps(maps, mpath, {"tuning_set": "v0"})
+
+    ctx = build_ctx(good_fixture_path)
+    ctx.config["anchor"] = anchor_cfg
+
+    base = {r.observable: r for r in treport.run_tuning(ctx)}
+    assert base["btag_eff_b"].status == "needs_tuning"
+    assert not base["btag_eff_b"].extra.get("retagged")
+
+    ctx.config["tuning_maps"] = str(mpath)
+    tuned = {r.observable: r for r in treport.run_tuning(ctx)}
+    assert tuned["btag_eff_b"].status == "on_target"
+    assert tuned["btag_eff_b"].extra.get("retagged") is True
+    assert tuned["btag_eff_b"].residual < base["btag_eff_b"].residual
+    # only the b-tag observables are routed through the re-tagged view
+    assert tuned["electron_eff"].residual == base["electron_eff"].residual
+    assert not tuned["electron_eff"].extra.get("retagged")
+    # the m_bb b-pair selection reads btag, but it stays on stock tags -> energy-scale
+    # diagnostic is unconfounded by the re-tag (residual identical to the stock run)
+    assert tuned["mbb_peak"].residual == base["mbb_peak"].residual
+    assert not tuned["mbb_peak"].extra.get("retagged")
+
+
+def test_convert_cli_applies_maps_from_flag(good_fixture_path, tmp_path):
+    """The production CLI re-tags when --tuning-maps is passed (seed 0, matching the lens)."""
+    mpath = tmp_path / "maps.json"
+    save_maps(_const_maps(1.0, 1.0, 0.0).maps, mpath, {"tuning_set": "v0"})
+    out = tmp_path / "tuned.parquet"
+    convert_mod.main([good_fixture_path, str(out), "--tuning-maps", str(mpath)])
+
+    arr = ak.from_parquet(str(out))
+    fl = ak.to_numpy(ak.flatten(arr["Jet"].hadronFlavour))
+    bt = ak.to_numpy(ak.flatten(arr["Jet"].btag))
+    heavy = (fl == 5) | (fl == 4)
+    assert bt[heavy].min() == 1 and bt[~heavy].max() == 0
+
+
+def test_retagged_view_forwards_and_guards(good_fixture_path):
+    """Proxy forwards non-jet attributes; the __getattr__ guard prevents pickle recursion."""
+    ev = DelphesEvents(good_fixture_path)
+    view = RetaggedEvents(ev, _const_maps(0.7, 0.2, 0.05), np.random.default_rng(0))
+    assert view.n == ev.n                      # forwarded to the wrapped events
+    assert view.jets is not None
+    # a bare (pre-__init__) instance must raise AttributeError, not recurse forever
+    bare = RetaggedEvents.__new__(RetaggedEvents)
+    with pytest.raises(AttributeError):
+        bare.anything
