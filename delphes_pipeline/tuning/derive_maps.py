@@ -41,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     M.save_maps(maps, args.output, provenance)
 
     print(f"[maps] wrote {args.output}")
-    for q in M.BTAG_MAP_QUANTITIES:
+    for q in (*M.BTAG_MAP_QUANTITIES, *M.TAU_MAP_QUANTITIES):
         if q in maps and maps[q]["values"]:
             v = maps[q]["values"]
             print(f"  {q:18s} eff(pT) {[round(x, 3) for x in v]}")

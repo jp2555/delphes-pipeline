@@ -42,6 +42,9 @@ def test_anchor_profiles_recover_injection(tmp_path):
     # tau efficiency recovers ~0.60
     t = prof["tau_eff"]
     assert abs(np.average(t.values, weights=t.counts) - truth.tau_eff(0, 0)) < 0.06
+    # jet->tau_h mistag recovers the injected ~0.03
+    tm = prof["tau_mistag"]
+    assert abs(np.average(tm.values, weights=tm.counts) - truth.tau_mistag(0, 0)) < 0.02
     # overall MET resolution ~ injected 18 GeV
     assert abs(prof["met_resolution"].values[0] - 18.0) < 2.5
 

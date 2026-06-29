@@ -21,23 +21,21 @@ def _cast(arr: ak.Array, dtype) -> ak.Array:
     return ak.values_astype(arr, dtype)
 
 
-def build_jets(ev: DelphesEvents, btag_override=None) -> ak.Array:
+def build_jets(ev: DelphesEvents) -> ak.Array:
     """``Jet`` collection: {pt,eta,phi,mass,btag,tautag,hadronFlavour}.
 
-    ``btag_override`` (a jagged array aligned with ``ev.jets``) replaces the stock
-    ``Jet.BTag`` — used by the downstream tuning re-tag, where the b-tag decision
-    is re-derived from ``Jet.Flavor`` + the anchor efficiency map.
+    When ``ev`` is a ``tuning.maps.RetaggedEvents`` view, ``ev.jets`` already carries
+    the downstream-re-tagged ``btag``/``tautag``, so the ntuple inherits the tuned tags.
     """
     j = ev.jets
     s = schema.FLAT_SCHEMA["Jet"]
-    btag = j.btag if btag_override is None else btag_override
     return ak.zip(
         {
             "pt": _cast(j.pt, s["pt"]),
             "eta": _cast(j.eta, s["eta"]),
             "phi": _cast(j.phi, s["phi"]),
             "mass": _cast(j.mass, s["mass"]),
-            "btag": _cast(btag, s["btag"]),
+            "btag": _cast(j.btag, s["btag"]),
             "tautag": _cast(j.tautag, s["tautag"]),
             "hadronFlavour": _cast(j.flavor, s["hadronFlavour"]),
         }

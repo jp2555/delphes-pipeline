@@ -23,6 +23,7 @@ DEF_BTAG_EFF: Eff = lambda pt, eta: 0.70
 DEF_CTAG_EFF: Eff = lambda pt, eta: 0.15
 DEF_LTAG_MISTAG: Eff = lambda pt, eta: 0.02
 DEF_TAU_EFF: Eff = lambda pt, eta: 0.60
+DEF_TAU_MISTAG: Eff = lambda pt, eta: 0.03
 DEF_LEP_EFF: Eff = lambda pt, eta: 0.90
 
 BTAG_WP = 0.5            # the anchor reader thresholds the discriminant here
@@ -37,6 +38,7 @@ class NanoTruth:
     ltag_mistag: Eff
     tau_eff: Eff
     lep_eff: Eff
+    tau_mistag: Eff = DEF_TAU_MISTAG
     btag_wp: float = BTAG_WP
     deeptau_medium: int = DEEPTAU_MEDIUM
 
@@ -44,7 +46,7 @@ class NanoTruth:
 def make_nano_fixture(path: str, *, n_events: int = 4000, seed: int = 0,
                       met_resolution_gev: float = 18.0,
                       btag_eff=DEF_BTAG_EFF, ctag_eff=DEF_CTAG_EFF, ltag_mistag=DEF_LTAG_MISTAG,
-                      tau_eff=DEF_TAU_EFF, lep_eff=DEF_LEP_EFF) -> NanoTruth:
+                      tau_eff=DEF_TAU_EFF, tau_mistag=DEF_TAU_MISTAG, lep_eff=DEF_LEP_EFF) -> NanoTruth:
     rng = np.random.default_rng(seed)
     cols: dict[str, list] = {k: [] for k in (
         "Jet_pt", "Jet_eta", "Jet_phi", "Jet_mass", "Jet_hadronFlavour", "Jet_btagUParTAK4B",
@@ -67,6 +69,9 @@ def make_nano_fixture(path: str, *, n_events: int = 4000, seed: int = 0,
             fl = int(rng.choice([5, 4, 0], p=[0.3, 0.2, 0.5]))
             e = btag_eff(pt, eta) if fl == 5 else ctag_eff(pt, eta) if fl == 4 else ltag_mistag(pt, eta)
             _push(ev, "Jet", pt, eta, phi, 8.0); ev["Jet_hadronFlavour"].append(fl); ev["Jet_btagUParTAK4B"].append(disc(e))
+            if rng.random() < tau_mistag(pt, eta):  # jet fakes a τ_h: a Medium Tau at the jet
+                _push(ev, "Tau", pt, eta, phi, 1.0)
+                ev["Tau_idDeepTau2018v2p5VSjet"].append(31); ev["Tau_genPartFlav"].append(0)
 
         ntau = int(rng.integers(0, 3))
         for _t in range(ntau):
@@ -101,7 +106,7 @@ def make_nano_fixture(path: str, *, n_events: int = 4000, seed: int = 0,
     payload.update({k: np.asarray(v, dtype=np.float32) for k, v in scal.items()})
     with uproot.recreate(path) as f:
         f["Events"] = payload
-    return NanoTruth(n_events, btag_eff, ctag_eff, ltag_mistag, tau_eff, lep_eff)
+    return NanoTruth(n_events, btag_eff, ctag_eff, ltag_mistag, tau_eff, lep_eff, tau_mistag=tau_mistag)
 
 
 def _push(ev, coll, pt, eta, phi, mass=None):

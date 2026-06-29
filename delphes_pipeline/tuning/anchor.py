@@ -16,13 +16,13 @@ import awkward as ak
 import numpy as np
 
 from delphes_pipeline.core import observables as obs
-from delphes_pipeline.core.matching import nearest_target_field
+from delphes_pipeline.core.matching import matched_to_any, nearest_target_field
 from delphes_pipeline.core.nanoaod import NanoAODEvents
 from delphes_pipeline.core.observables import Profile
 
 # observables for which the NanoAOD anchor provides a target
 ANCHOR_OBSERVABLES = ("btag_eff_b", "btag_eff_c", "btag_mistag_light",
-                      "electron_eff", "muon_eff", "tau_eff", "met_resolution")
+                      "electron_eff", "muon_eff", "tau_eff", "tau_mistag", "met_resolution")
 
 
 def anchor_profiles(config: dict, *, bins, max_events: Optional[int] = None) -> dict[str, Profile]:
@@ -49,6 +49,7 @@ def anchor_profiles(config: dict, *, bins, max_events: Optional[int] = None) -> 
         out[q] = obs.lepton_efficiency(nano, q, bins=bins)
     print("[tuning] anchor: tau + MET ...", flush=True)
     out["tau_eff"] = _nano_tau_eff(nano, bins)
+    out["tau_mistag"] = _nano_tau_mistag(nano, bins)
     out["met_resolution"] = _nano_met_resolution(nano)
     # label the source for the report/plot
     for p in out.values():
@@ -74,6 +75,20 @@ def _nano_tau_eff(nano: NanoAODEvents, bins, *, dr=0.4, eta_max=2.5, pt_min=20.0
     passed = matched & (np.nan_to_num(np.asarray(vsjet), nan=-1.0) >= nano.deeptau_medium())
     prof = obs.binned_efficiency(ak.to_numpy(ak.flatten(acc.pt)), passed, bins, quantity="tau_eff", x="pt")
     prof.xlabel, prof.ylabel = "tau pT [GeV]", "tau_eff"
+    return prof
+
+
+def _nano_tau_mistag(nano: NanoAODEvents, bins, *, dr=0.4, eta_max=2.5, pt_min=20.0) -> Profile:
+    """jet→τ_h mistag on NanoAOD: acceptance jets *not* near a GenVisTau that match a
+    DeepTau-Medium ``Tau`` (mirrors ``observables.tau_mistag``, where the Delphes TauTag
+    bit is replaced by a ΔR match to a Medium reco τ)."""
+    jets = nano.jets
+    acc = jets[(np.abs(jets.eta) <= eta_max) & (jets.pt > pt_min)]
+    fake = acc[~matched_to_any(acc, nano.genvistau, dr)]
+    medium = nano.taus[nano.taus.vsjet >= nano.deeptau_medium()]
+    tagged = ak.to_numpy(ak.flatten(matched_to_any(fake, medium, dr)))
+    prof = obs.binned_efficiency(ak.to_numpy(ak.flatten(fake.pt)), tagged, bins, quantity="tau_mistag", x="pt")
+    prof.xlabel, prof.ylabel = "jet pT [GeV]", "tau_mistag"
     return prof
 
 

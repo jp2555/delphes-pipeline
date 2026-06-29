@@ -120,6 +120,40 @@ def test_retag_closes_the_tuning_loop(good_fixture_path, tmp_path):
     assert not tuned["mbb_peak"].extra.get("retagged")
 
 
+def test_tau_retag_closes_the_loop(good_fixture_path, tmp_path):
+    """τ_h re-tag: tau_eff (genuine) and tau_mistag (fake) re-validate against the anchor.
+
+    Stock card τ response (eff 0.60, mistag ~0.01) differs from the injected anchor
+    (eff 0.72, mistag 0.06), so both need tuning; after the gen-record-keyed re-tag they
+    land on target.
+    """
+    nano = tmp_path / "nano.root"
+    make_nano_fixture(str(nano), n_events=8000, seed=4,
+                      tau_eff=lambda pt, eta: 0.72, tau_mistag=lambda pt, eta: 0.06)
+    anchor_cfg = {"enabled": True, "nanoaod_path": str(nano), "wp": _wp()}
+    maps = derive_maps({"anchor": anchor_cfg}, bins=obs.DEFAULT_PT_BINS)
+    assert {"tau_eff", "tau_mistag"} <= set(maps)
+    mpath = tmp_path / "maps_v0.json"
+    save_maps(maps, mpath, {"tuning_set": "v0"})
+
+    ctx = build_ctx(good_fixture_path)
+    ctx.config["anchor"] = anchor_cfg
+    base = {r.observable: r for r in treport.run_tuning(ctx)}
+
+    ctx.config["tuning_maps"] = str(mpath)
+    tuned = {r.observable: r for r in treport.run_tuning(ctx)}
+
+    for q in ("tau_eff", "tau_mistag"):
+        assert base[q].status == "needs_tuning"
+        assert tuned[q].status == "on_target"
+        assert tuned[q].extra.get("retagged") is True
+        assert tuned[q].residual < base[q].residual
+    # b-tag is co-tagged in the same run; the τ-energy-scale diagnostic stays on stock tags
+    assert tuned["btag_eff_b"].extra.get("retagged") is True
+    assert not tuned["tau_energy_response"].extra.get("retagged")
+    assert tuned["mbb_peak"].residual == base["mbb_peak"].residual
+
+
 def test_convert_cli_applies_maps_from_flag(good_fixture_path, tmp_path):
     """The production CLI re-tags when --tuning-maps is passed (seed 0, matching the lens)."""
     mpath = tmp_path / "maps.json"

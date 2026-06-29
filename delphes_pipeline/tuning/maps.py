@@ -21,10 +21,13 @@ import awkward as ak
 import numpy as np
 
 from delphes_pipeline.core import observables as obs
+from delphes_pipeline.core.matching import matched_to_any
 
 # flavour -> the map quantity that gives its tag probability
 _FLAVOUR_QUANTITY = {5: "btag_eff_b", 4: "btag_eff_c"}  # everything else -> light
 BTAG_MAP_QUANTITIES = ("btag_eff_b", "btag_eff_c", "btag_mistag_light")
+TAU_MAP_QUANTITIES = ("tau_eff", "tau_mistag")
+_GEN_TAU_PID = 15
 
 
 def derive_maps(config: dict, *, bins=None, max_events=None) -> dict:
@@ -89,19 +92,56 @@ def retag_btag(events, maps: TuningMaps, rng: np.random.Generator) -> ak.Array:
     return ak.unflatten(tag, counts)
 
 
-class RetaggedEvents:
-    """An events view whose ``Jet.btag`` is the downstream re-tag (note D2-A).
+def retag_tautag(events, maps: TuningMaps, rng: np.random.Generator) -> ak.Array:
+    """Stochastic τ_h tag from the gen record + maps (note D2-A): TauTag = Bernoulli(ε),
+    ε = ``tau_eff`` for jets matched (ΔR<0.4) to a gen hadronic τ, else ``tau_mistag``.
 
-    Proxies every attribute to the wrapped events; only ``.jets`` is overridden so
-    its ``btag`` field is the stochastic re-tag from ``Jet.Flavor`` + the maps. All
-    other collections (taus, leptons, gen, MET) are unchanged, so every observable
+    Returns a jagged int array aligned with ``events.jets`` (replaces ``Jet.TauTag``).
+    Mirrors the ``observables.tau_efficiency`` / ``tau_mistag`` genuine-vs-fake split, so
+    re-measuring those observables on the re-tagged jets recovers the maps by construction.
+    """
+    jets = events.jets
+    counts = ak.num(jets)
+    gen_taus = events.gen[np.abs(events.gen.pid) == _GEN_TAU_PID]
+    genuine = ak.to_numpy(ak.flatten(matched_to_any(jets, gen_taus, 0.4)))
+    pt = ak.to_numpy(ak.flatten(jets.pt))
+    eff = np.where(genuine, maps.efficiency("tau_eff", pt), maps.efficiency("tau_mistag", pt))
+    tag = (rng.random(pt.shape) < eff).astype(np.int32)
+    return ak.unflatten(tag, counts)
+
+
+def retag_jets(events, maps: TuningMaps, rng: np.random.Generator):
+    """Re-derive ``jet.btag`` and/or ``jet.tautag`` from the maps downstream.
+
+    btag is re-tagged when the three flavour maps are present; tautag when both
+    ``tau_eff`` and ``tau_mistag`` are present. Fixed order (btag, then tautag) so the
+    same seed yields identical tags in the tuning lens and the ntuplizer. Returns
+    ``(jets, fields_retagged)`` where ``fields_retagged`` is the set actually replaced.
+    """
+    jets = events.jets
+    fields = set()
+    if all(q in maps.maps for q in BTAG_MAP_QUANTITIES):
+        jets = ak.with_field(jets, retag_btag(events, maps, rng), "btag")
+        fields.add("btag")
+    if all(q in maps.maps for q in TAU_MAP_QUANTITIES):
+        jets = ak.with_field(jets, retag_tautag(events, maps, rng), "tautag")
+        fields.add("tautag")
+    return jets, frozenset(fields)
+
+
+class RetaggedEvents:
+    """An events view whose ``Jet.btag``/``Jet.tautag`` are the downstream re-tag (D2-A).
+
+    Proxies every attribute to the wrapped events; only ``.jets`` is overridden so its
+    tag bits are re-derived from ``Jet.Flavor`` (b-tag) and the gen record (τ_h) + the
+    maps. All other collections (leptons, gen, MET) are unchanged, so every observable
     re-measures the *tuned* response through the same ``core.observables`` path.
-    Used by the tuning lens to close the loop: re-tagged b-tag → matches the anchor.
+    ``retagged_fields`` reports which jet tags were actually replaced.
     """
 
     def __init__(self, events, maps: TuningMaps, rng: np.random.Generator):
         self._events = events
-        self._jets = ak.with_field(events.jets, retag_btag(events, maps, rng), "btag")
+        self._jets, self.retagged_fields = retag_jets(events, maps, rng)
 
     @property
     def jets(self) -> ak.Array:

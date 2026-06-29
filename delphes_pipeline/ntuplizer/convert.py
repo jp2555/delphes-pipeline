@@ -21,22 +21,23 @@ from . import objects
 def to_record(ev: DelphesEvents, tuning_maps=None, seed: int = 0) -> ak.Array:
     """Combine collections and scalars into one record per event.
 
-    When ``tuning_maps`` (a ``tuning.maps.TuningMaps``) is given, the b-tag is
-    re-derived downstream from ``Jet.Flavor`` + the anchor efficiency map
-    (stochastic re-tag) instead of copying the stock ``Jet.BTag``.
+    When ``tuning_maps`` (a ``tuning.maps.TuningMaps``) is given, the jets are wrapped
+    in a ``RetaggedEvents`` view so ``Jet.BTag`` (from ``Jet.Flavor``) and ``Jet.TauTag``
+    (from the gen record) are re-derived downstream from the anchor maps — and the τ_h
+    collection, keyed on the re-tagged ``TauTag``, follows. Seed 0 matches the lens.
     """
-    btag_override = None
+    source = ev
     if tuning_maps is not None:
-        from ..tuning.maps import retag_btag
-        btag_override = retag_btag(ev, tuning_maps, np.random.default_rng(seed))
+        from ..tuning.maps import RetaggedEvents
+        source = RetaggedEvents(ev, tuning_maps, np.random.default_rng(seed))
     fields = {
-        "Jet": objects.build_jets(ev, btag_override=btag_override),
-        "Tau": objects.build_taus(ev),
-        "Electron": objects.build_electrons(ev),
-        "Muon": objects.build_muons(ev),
-        "GenPart": objects.build_genpart(ev),
+        "Jet": objects.build_jets(source),
+        "Tau": objects.build_taus(source),
+        "Electron": objects.build_electrons(source),
+        "Muon": objects.build_muons(source),
+        "GenPart": objects.build_genpart(source),
     }
-    fields.update(objects.scalars(ev))
+    fields.update(objects.scalars(source))
     return ak.zip(fields, depth_limit=1)
 
 

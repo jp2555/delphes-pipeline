@@ -20,11 +20,13 @@ from delphes_pipeline.core.plotting import efficiency_overlay
 from delphes_pipeline.core.references import QUANTITIES
 from . import targets as T
 
-# Only the b-tag efficiency observables are re-measured on the re-tagged view. Other
-# diagnostics (energy scale, leptons, τ_h, MET) read different knobs and stay on stock
-# tags; in particular the m_bb b-pair selection sorts on btag, so re-tagging it would
-# confound the energy-scale check.
-_RETAG_OBSERVABLES = frozenset(obs.BTAG_FLAVORS)
+# Observable -> the jet tag field whose re-tag its residual reflects. Only these are
+# re-measured on the re-tagged view, and only when that field was actually re-tagged.
+# Energy-scale / lepton / MET diagnostics read different knobs and stay on stock tags;
+# m_bb (sorts on btag) and τ-energy (selects τ-jets by gen-matching, not the tag) would
+# be confounded by the re-tag, so they are deliberately excluded.
+_RETAG_FIELD = {**{q: "btag" for q in obs.BTAG_FLAVORS},
+                "tau_eff": "tautag", "tau_mistag": "tautag"}
 
 
 @dataclass
@@ -171,23 +173,25 @@ def run_tuning(ctx: ValidationContext) -> list[TuningResult]:
     if anchors:
         print(f"[tuning] anchor targets ready: {sorted(anchors)}", flush=True)
 
-    # Close the loop: when tuning maps are configured, re-measure the b-tag observables on a
-    # downstream-re-tagged view so their residual reflects the *tuned* tags (note D2-A). Seed 0
-    # matches the ntuplizer default so the re-validated tags equal the shipped ntuple's.
+    # Close the loop: when tuning maps are configured, re-measure the b-tag and τ_h
+    # observables on a downstream-re-tagged view so their residual reflects the *tuned*
+    # tags (note D2-A). Seed 0 matches the ntuplizer default so the re-validated tags
+    # equal the shipped ntuple's. Only fields the maps actually cover are re-tagged.
     retag_view = None
     maps_path = ctx.config.get("tuning_maps")
     if maps_path:
         from .maps import RetaggedEvents, TuningMaps
         retag_view = RetaggedEvents(ctx.events, TuningMaps.load(maps_path), np.random.default_rng(0))
-        print(f"[tuning] re-validating the b-tag observables with the downstream re-tag "
-              f"from {maps_path}", flush=True)
+        print(f"[tuning] re-validating {sorted(retag_view.retagged_fields)} observables "
+              f"with the downstream re-tag from {maps_path}", flush=True)
 
     results = []
     for name in T.tuning_observables():
         print(f"[tuning]   measuring Delphes {name} ...", flush=True)
-        me = retag_view if (retag_view is not None and name in _RETAG_OBSERVABLES) else None
+        use_view = retag_view is not None and _RETAG_FIELD.get(name) in retag_view.retagged_fields
+        me = retag_view if use_view else None
         r = tune_observable(ctx, name, bins=bins, anchor_target=anchors.get(name), measure_events=me)
-        if me is not None and isinstance(r.extra, dict):
+        if use_view and isinstance(r.extra, dict):
             r.extra["retagged"] = True
         results.append(r)
 
@@ -229,8 +233,9 @@ def _render_md(ctx: ValidationContext, results: list[TuningResult]) -> str:
         f"input: `{prov.get('input_path', '?')}` ({prov.get('n_events', '?')} events)  ·  "
         f"card sha256 `{str(prov.get('card_sha256'))[:12]}`  ·  tuning set {prov.get('tuning_set', '?')}",
         "",
-        *(["> **Downstream re-tag applied** (`tuning_maps`): the b-tag observables below are "
-           "re-measured with `Jet.btag` re-derived from `Jet.Flavor` + the anchor map (tuned tags).", ""]
+        *(["> **Downstream re-tag applied** (`tuning_maps`): the b-tag/τ_h observables below "
+           "are re-measured with `Jet.btag`/`Jet.tautag` re-derived from `Jet.Flavor` + the "
+           "gen record + the anchor maps (tuned tags).", ""]
           if retagged else []),
         "_Status: ✅ on target · 🔧 needs tuning · ○ **measured, but no digitised target curve "
         "to tune toward** (drop `validation/references/data/<observable>.json`) · — no data._",
