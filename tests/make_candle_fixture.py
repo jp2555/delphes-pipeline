@@ -116,3 +116,64 @@ def _ditau(rng, mass, width):
         pt = math.hypot(px, py)
         out.append((pt, math.asinh(pz / pt) if pt > 1e-6 else 0.0, math.atan2(py, px)))
     return out
+
+
+def _ditau_taus(rng, mass, width):
+    """Two boosted τ 4-vectors ``(E,px,py,pz)`` with di-τ invariant mass ~``mass``."""
+    mh = max(float(rng.normal(mass, width)), 40.0)
+    mtau = 1.777
+    e = mh / 2.0
+    p = math.sqrt(max(e * e - mtau * mtau, 0.0))
+    ct = rng.uniform(-1, 1); st = math.sqrt(max(1 - ct * ct, 0.0)); ph = rng.uniform(-math.pi, math.pi)
+    d = (st * math.cos(ph), st * math.sin(ph), ct)
+    rest = [(e, p * d[0], p * d[1], p * d[2]), (e, -p * d[0], -p * d[1], -p * d[2])]
+    pth = float(rng.exponential(35))
+    etah, phih = rng.uniform(-1.5, 1.5), rng.uniform(-math.pi, math.pi)
+    pxh, pyh, pzh = pth * math.cos(phih), pth * math.sin(phih), pth * math.sinh(etah)
+    eh = math.sqrt(pxh**2 + pyh**2 + pzh**2 + mh**2)
+    beta = (pxh / eh, pyh / eh, pzh / eh)
+    return [_boost(vr, beta) for vr in rest]
+
+
+def _visfrac(rng, is_lep):
+    """Visible energy fraction x = E_vis/E_τ (lepton carries less; hadron more)."""
+    return float(rng.uniform(0.2, 0.6) if is_lep else rng.uniform(0.45, 0.95))
+
+
+def make_dy_fixture_nu(path, *, n_events=3000, seed=0, true_mass=91.2, width=3.0, met_res=10.0) -> float:
+    """Z→ττ with *modelled* τ decays: each visible leg is ``x_i`` × the τ momentum and
+    pᵀᵐⁱˢˢ is the Σ neutrino pT (+ resolution). The visible mass sits below ``true_mass``;
+    the FastMTT estimator should recover ``true_mass`` (= m_Z by default)."""
+    rng = np.random.default_rng(seed)
+    jets, ele, muo, gen, met, genmet = [], [], [], [], [], []
+    for _ in range(n_events):
+        js, gs, es, ms = [], [], [], []
+        leptonic = rng.random() < 0.5
+        nu_x = nu_y = 0.0
+        for i, t in enumerate(_ditau_taus(rng, true_mass, width)):
+            _e, tx, ty, tz = t
+            pt_t = math.hypot(tx, ty)
+            gs.append({"PID": 15 * (1 if i == 0 else -1), "Status": 2, "PT": float(pt_t),
+                       "Eta": math.asinh(tz / pt_t) if pt_t > 1e-6 else 0.0, "Phi": math.atan2(ty, tx),
+                       "Mass": 1.777, "Charge": 0, "M1": -1, "M2": -1, "D1": -1, "D2": -1})
+            is_lep = leptonic and i == 0
+            x = _visfrac(rng, is_lep)
+            vx, vy, vz = tx * x, ty * x, tz * x
+            pt_v = math.hypot(vx, vy)
+            eta_v = math.asinh(vz / pt_v) if pt_v > 1e-6 else 0.0
+            phi_v = math.atan2(vy, vx)
+            nu_x += tx * (1 - x); nu_y += ty * (1 - x)
+            if is_lep:
+                (es if rng.random() < 0.5 else ms).append(_lep(pt_v, eta_v, phi_v, int(rng.choice([-1, 1]))))
+            else:
+                js.append(_jet(pt_v, eta_v, phi_v, flavor=0, btag=0, tautag=1, mass=1.0))
+        mx, my = nu_x + rng.normal(0, met_res), nu_y + rng.normal(0, met_res)
+        met.append([{"MET": math.hypot(mx, my), "Eta": 0.0, "Phi": math.atan2(my, mx)}])
+        genmet.append([{"MET": math.hypot(nu_x, nu_y), "Eta": 0.0, "Phi": math.atan2(nu_y, nu_x)}])
+        jets.append(js); gen.append(gs); ele.append(es); muo.append(ms)
+    if not any(ele):
+        ele[0] = [_lep(30, 0, 0, 1)]
+    if not any(muo):
+        muo[0] = [_lep(30, 0, 0, 1)]
+    _write(path, jets=jets, electrons=ele, muons=muo, gen=gen, met=met, genmet=genmet)
+    return true_mass

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 from conftest import build_ctx
-from make_candle_fixture import make_dy_fixture, make_ttbar_fixture
+from make_candle_fixture import make_dy_fixture, make_dy_fixture_nu, make_ttbar_fixture
 
 from delphes_pipeline.core.io import DelphesEvents
 from delphes_pipeline.validation.level1_candles import selections, ttbar, ztautau
@@ -35,15 +35,20 @@ def test_ttbar_candle_gate_passes_when_eb_matches_card(good_fixture_path, tmp_pa
     assert r.passed, f"in-situ ε_b {r.measured} should match the card input {r.target}"
 
 
-def test_ztautau_candle_reports_visible_peak_and_pending_estimator(good_fixture_path, tmp_path):
+def test_ztautau_candle_fastmtt_peaks_at_mz(good_fixture_path, tmp_path):
     p = tmp_path / "dy.root"
-    make_dy_fixture(str(p), n_events=6000, seed=3, vis_mass=65.0)
+    make_dy_fixture_nu(str(p), n_events=6000, seed=3)
     ctx = build_ctx(good_fixture_path)
+    ctx.config.setdefault("tolerances", {}).setdefault("level1", {})["mtautau_met_sigma_gev"] = 10.0
     by = {r.name: r for r in ztautau.run(ctx, DelphesEvents(str(p)))}
 
-    assert abs(by["level1.ztautau.visible_peak"].measured - 65.0) < 8.0
-    # the m_Z check is deferred to the estimator (D1)
-    assert "estimator" in by["level1.ztautau.peak_at_mZ"].detail.lower()
+    # the visible peak sits below m_Z (neutrinos missing)
+    assert by["level1.ztautau.visible_peak"].measured < 75.0
+    # the FastMTT estimator restores the m_Z peak and the GATE passes
+    r = by["level1.ztautau.peak_at_mZ"]
+    assert r.severity.value == "gate"
+    assert abs(r.measured - 91.2) < 8.0
+    assert r.passed
 
 
 def test_level1_aggregates_both_candles(good_fixture_path, tmp_path):

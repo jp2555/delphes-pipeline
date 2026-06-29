@@ -184,10 +184,12 @@ observables the note calls for: **τ-jet and b-jet energy response** (reco/GenJe
 GenJets being neutrino-filtered = visible reference; §3.2, §4.3) and the
 **m_bb peak** position/width (§4.3). MET resolution vs ΣE_T is shared.
 
-**Extension points** (`extensions/`, documented stubs): trigger emulation
-(`trigger.py`, the AN-25-103 Table-2 2024 menu encoded; §4.1) and the m_ττ
-estimator (`mtautau.py`, decision D1: FastMTT / covariance-free; §3.3). The
-Level-1 candles (Z→ττ, tt̄) remain stubs under `validation/level1_candles`.
+**Extension points** (`extensions/`): the m_ττ estimator (`mtautau.py`, decision
+D1: **covariance-free FastMTT**, §3.3) is implemented — a per-event likelihood
+over the visible energy fractions with a fixed pᵀᵐⁱˢˢ resolution; the full-FastMTT
+upgrade swaps the fixed σ for a covariance synthesised from the MET tuning.
+Trigger emulation (`trigger.py`, the AN-25-103 Table-2 2024 menu; §4.1) remains a
+documented stub.
 
 ### NanoAOD anchor target mode (note §3, §6.4)
 
@@ -218,10 +220,10 @@ aggregated by `validation/level1_candles/run(ctx)`:
 - **tt̄ dilepton** (`TTto2L2Nu`) — eμ-OS selection; the GATE is the in-situ
   tag-counting closure ε_b = 2N₂/(N₁+2N₂) (note Eq. 2) vs the tuned input
   (card formula / anchor); plus A×ε and the pᵀᵐⁱˢˢ tail.
-- **Z→ττ** (`DYto2Tau`) — ℓτ_h/τ_hτ_h with a b-veto; visible m_ττ peak/width,
-  channel ratio, and the low-mass jet→τ_h fake sideband. The model-independent
-  "peak at m_Z" check is hooked to the m_ττ estimator (decision D1,
-  `extensions/mtautau.py`) and reports *pending* until that is built.
+- **Z→ττ** (`DYto2Tau`) — ℓτ_h/τ_hτ_h with a b-veto; the GATE is the FastMTT m_ττ
+  peak sitting at m_Z (the visible peak sits below it; the estimator restores it).
+  Also reports the visible m_ττ peak/width, channel ratio, and the low-mass
+  jet→τ_h fake sideband.
 
-The estimator-dependent checks and the POG/anchor yield targets are the
-documented remainder; the tt̄ ε_b closure is the one GATE today.
+Both candle GATEs (tt̄ ε_b closure, Z→ττ m_Z peak) are live; the POG/anchor yield
+targets are the documented remainder.

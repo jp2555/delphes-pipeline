@@ -2,11 +2,11 @@
 
 Runs on the ``DYto2Tau`` Delphes sample with an opposite-sign ℓτ_h / τ_hτ_h
 selection and a **b-jet veto** (decouples the candle from the b-tag tuning and
-suppresses tt̄). The headline check is the m_ττ estimator peak sitting at m_Z —
-which needs the m_ττ estimator (decision D1, ``extensions.mtautau``). Until that
-is built this candle reports the **visible** m_ττ peak/width (which sits below
-m_Z), the channel yield ratio, and the low-mass fake-τ_h sideband, and marks the
-m_Z check pending.
+suppresses tt̄). The headline GATE is the covariance-free FastMTT m_ττ estimator
+(decision D1, ``extensions.mtautau``) peak sitting at m_Z — a model-independent
+validation of the τ + pᵀᵐⁱˢˢ chain. The candle also reports the **visible** m_ττ
+peak/width (which sits below m_Z), the channel yield ratio, and the low-mass
+fake-τ_h sideband.
 """
 
 from __future__ import annotations
@@ -17,7 +17,8 @@ import numpy as np
 from delphes_pipeline.core.context import ValidationContext
 from delphes_pipeline.core.matching import matched_to_any
 from delphes_pipeline.core.plotting import hist_overlay
-from delphes_pipeline.core.result import CheckResult, info
+from delphes_pipeline.core.result import CheckResult, Severity, info
+from delphes_pipeline.extensions.mtautau import estimate_mtautau
 from . import selections
 
 _M_Z = 91.2
@@ -58,16 +59,35 @@ def run(ctx: ValidationContext, ev) -> list[CheckResult]:
 
 
 def _peak_at_mz(ctx: ValidationContext, ev) -> CheckResult:
-    """m_ττ-estimator peak vs m_Z — pending the estimator (decision D1)."""
-    try:
-        from delphes_pipeline.extensions.mtautau import estimate_mtautau
+    """FastMTT m_ττ-estimator peak vs m_Z (note §6.2; estimator = D1, covariance-free).
 
-        estimate_mtautau(ev, method="collinear")  # not implemented yet
-    except NotImplementedError:
+    Reconstructs m_ττ for the leading τ-candidate pair (b-vetoed) and gates the median
+    of the [50,150] GeV core on m_Z. The visible peak sits below m_Z; the estimator,
+    folding in pᵀᵐⁱˢˢ, should restore it — a model-independent validation of the chain.
+    """
+    veto = selections.bjet_veto_mask(ev)
+    sigma = float(ctx.tol("level1", "mtautau_met_sigma_gev", 25.0))  # fixed (covariance-free) MET σ
+    m = estimate_mtautau(ev, mask=veto, met_sigma=sigma)
+    m = m[np.isfinite(m)]
+    core = m[(m > 50) & (m < 150)]
+    tol = float(ctx.tol("level1", "mtautau_peak_tol_gev", 10.0))
+    if core.size < 20:
         return info("level1.ztautau.peak_at_mZ", "level1",
-                    detail="needs the m_ττ estimator (D1, extensions.mtautau); "
-                           "the model-independent 'peak at m_Z' check turns on once it is built")
-    return info("level1.ztautau.peak_at_mZ", "level1", detail="estimator available")  # pragma: no cover
+                    detail=f"only {core.size} di-τ pairs in [50,150] GeV; need >=20 for the m_Z peak")
+    peak = float(np.median(core))
+    plot = ctx.rel(hist_overlay(
+        [("FastMTT m_ττ", m, None)], bins=np.linspace(0, 200, 51),
+        outpath=ctx.plot_path("candle_ztautau_mtautau.png"), xlabel="FastMTT m_ττ [GeV]",
+        ylabel="events (norm.)", vlines=[(_M_Z, "m_Z")],
+        title="Z→ττ FastMTT m_ττ (covariance-free)",
+    ))
+    return CheckResult(
+        name="level1.ztautau.peak_at_mZ", level="level1",
+        passed=abs(peak - _M_Z) <= tol, severity=Severity.GATE,
+        measured=peak, target=_M_Z, tolerance=tol, units="GeV",
+        detail=f"FastMTT m_ττ peak {peak:.1f} GeV vs m_Z {_M_Z:.1f} (±{tol:.0f})",
+        plot_path=plot,
+    )
 
 
 def _low_mass_sideband(ev, mass) -> CheckResult:

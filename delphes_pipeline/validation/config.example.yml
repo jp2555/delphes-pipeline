@@ -95,6 +95,8 @@ tolerances:
     kb_per_event_max: 150.0         # storage projection ceiling (full TreeWriter)
   level1:
     eb_closure_rel_tol: 0.10        # tt̄ in-situ ε_b vs the tuned input
+    mtautau_peak_tol_gev: 10.0      # Z→ττ FastMTT m_ττ peak must sit within this of m_Z
+    mtautau_met_sigma_gev: 25.0     # fixed (covariance-free) per-component MET σ for FastMTT
   level0:
     closure_rel_tol: 0.05           # per-bin systematic tolerance on |measured/expected - 1|
     closure_nsigma: 2.0             # a bin fails only if it also misses by > this many stat sigma
