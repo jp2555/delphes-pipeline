@@ -42,10 +42,10 @@ def _two_body(rng, parent, m1, m2):
     return _boost(rest1, beta), _boost(rest2, beta)
 
 
-def _gen(pid, p4):
+def _gen(pid, p4, *, m1=-1, status=22):
     pt, eta, phi = _ptetaphi(p4)
-    return {"PID": int(pid), "Status": 22, "PT": float(pt), "Eta": float(eta), "Phi": float(phi),
-            "Mass": float(_mass(p4)), "Charge": 0, "M1": -1, "M2": -1, "D1": -1, "D2": -1}
+    return {"PID": int(pid), "Status": int(status), "PT": float(pt), "Eta": float(eta), "Phi": float(phi),
+            "Mass": float(_mass(p4)), "Charge": 0, "M1": int(m1), "M2": -1, "D1": -1, "D2": -1}
 
 
 def make_hhbbtt_fixture(path, *, n_events=3000, seed=0, mhh_lo=250.0, mhh_hi=800.0,
@@ -60,22 +60,23 @@ def make_hhbbtt_fixture(path, *, n_events=3000, seed=0, mhh_lo=250.0, mhh_hi=800
         px, py, pz = hh_pt * math.cos(hh_phi), hh_pt * math.sin(hh_phi), hh_pt * math.sinh(hh_eta)
         hh = (math.sqrt(px * px + py * py + pz * pz + mhh * mhh), px, py, pz)
         h_bb, h_tt = _two_body(rng, hh, 125.0, 125.0)
-        gs.append(_gen(25, h_bb)); gs.append(_gen(25, h_tt))
+        i_hbb = len(gs); gs.append(_gen(25, h_bb))
+        i_htt = len(gs); gs.append(_gen(25, h_tt))
 
-        # H -> b b̄: gen quarks + reco b-jets (reco pT = gen × response × smear)
+        # H -> b b̄: gen quarks (mother = the bb Higgs) + reco b-jets (reco pT = gen × response × smear)
         b_pair = _two_body(rng, h_bb, 4.7, 4.7)
         for b in b_pair:
-            gs.append(_gen(5, b))
+            gs.append(_gen(5, b, m1=i_hbb))
             pt, eta, phi = _ptetaphi(b)
             reco_pt = pt * bjet_response * (1.0 + rng.normal(0, bjet_smear))
             js.append(_jet(reco_pt, eta, phi, flavor=5, btag=1, mass=8.0))
 
-        # H -> τ τ: gen τ's + visible legs (x) with neutrinos -> reco τ_h/lepton + MET
+        # H -> τ τ: gen τ's (mother = the ττ Higgs) + visible legs (x) with neutrinos -> reco τ_h/lepton + MET
         leptonic = rng.random() < 0.5
         nu_x = nu_y = 0.0
         tau_pair = _two_body(rng, h_tt, 1.777, 1.777)
         for i, t in enumerate(tau_pair):
-            gs.append(_gen(15 * (1 if i == 0 else -1), t))
+            gs.append(_gen(15 * (1 if i == 0 else -1), t, m1=i_htt))
             _e, tx, ty, tz = t
             is_lep = leptonic and i == 0
             x = _visfrac(rng, is_lep)

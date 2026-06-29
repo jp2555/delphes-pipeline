@@ -14,6 +14,7 @@ from __future__ import annotations
 import awkward as ak
 import numpy as np
 
+from delphes_pipeline.core import observables as obs
 from delphes_pipeline.core.context import ValidationContext
 from delphes_pipeline.core.result import CheckResult, Severity, info
 from delphes_pipeline.extensions.mtautau import ditau_system
@@ -38,21 +39,22 @@ def _mass(px, py, pz, e):
 
 
 def _gen_mhh(ev) -> np.ndarray:
-    """gen m_HH = invariant mass of the two gen Higgs (|pid|==25); NaN if <2 are present.
-
-    Selects the two leading-pT Higgs after preferring hard/intermediate copies (status>=20)
-    — the b-quarks and τ's proliferate into many shower/status copies in the full Pythia
-    record, so the Higgs are the robust gen handle (same heuristic as plots.quantities.gen_mhh).
+    """gen m_HH = mass of the H decay products: the two b-quarks + two τ's whose **mother is a
+    Higgs** (via the ``m1`` links). The full Pythia record has many shower/status copies of each
+    b/τ *and* of each Higgs — but a copy's mother is the previous b/τ, not the Higgs, so the
+    mother cut isolates exactly the four hard decay products (robust where a leading-pT or even a
+    2-Higgs selection picks duplicate copies of one particle). NaN if the four aren't found.
     """
     gen = ev.gen
-    h = gen[np.abs(gen.pid) == _HIGGS_PID]
-    if "status" in h.fields:
-        hard = h[h.status >= 20]
-        h = ak.where(ak.num(hard) >= 2, hard, h)
-    h2 = h[ak.argsort(h.pt, axis=1, ascending=False, stable=True)][:, :2]
-    px, py, pz, e = _coll_p4_sum(h2)
-    m = _mass(px, py, pz, e)
-    m[ak.to_numpy(ak.num(h2) < 2)] = np.nan
+    from_higgs = np.abs(obs.mother_pid(gen)) == _HIGGS_PID
+    b = gen[(np.abs(gen.pid) == 5) & from_higgs]
+    t = gen[(np.abs(gen.pid) == 15) & from_higgs]
+    b2 = b[ak.argsort(b.pt, axis=1, ascending=False, stable=True)][:, :2]
+    t2 = t[ak.argsort(t.pt, axis=1, ascending=False, stable=True)][:, :2]
+    bx, by, bz, be = _coll_p4_sum(b2)
+    tx, ty, tz, te = _coll_p4_sum(t2)
+    m = _mass(bx + tx, by + ty, bz + tz, be + te)
+    m[ak.to_numpy((ak.num(b2) < 2) | (ak.num(t2) < 2))] = np.nan
     return m
 
 
@@ -94,6 +96,12 @@ def run(ctx: ValidationContext) -> list[CheckResult]:
     if have_gen.sum() < 50:
         return [info("level4.mhh.no_gen", "level4",
                      detail="no gen HH (need gen b-quarks + τ's); is this the signal sample?")]
+
+    gm = gen[have_gen]
+    results.append(info("level4.mhh.gen_check", "level4", float(np.median(gm)),
+                        detail=(f"gen m_HH median {np.median(gm):.0f} GeV, IQR "
+                                f"[{np.percentile(gm, 25):.0f},{np.percentile(gm, 75):.0f}] — should span the "
+                                f"spectrum; a flat ~250 GeV would signal a duplicate-Higgs gen selection")))
 
     bins = np.asarray(ctx.opt("level4", "mhh_bins", _MHH_BINS), dtype=float)
     lo, hi = _THRESHOLD
