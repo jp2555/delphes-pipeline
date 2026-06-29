@@ -56,10 +56,17 @@ def _gen_mhh(ev) -> np.ndarray:
     return m
 
 
-def _reco_mhh(ev) -> np.ndarray:
-    """reco m_HH = mass(two highest-b-tag jets + FastMTT di-τ); NaN where the reco is incomplete."""
+def _reco_mhh(ev):
+    """reco (m_HH, m_bb, m_ditau): two highest-b-tag NON-τ jets + the FastMTT di-τ.
+
+    The bb pair is drawn from ``tautag==0`` jets so a τ_h jet can't be double-counted into
+    both the bb and the di-τ system. Returns NaN where the reco is incomplete; m_bb / m_ditau
+    are the per-Higgs masses so the Delphes (bb) and FastMTT (di-τ) contributions to the m_HH
+    resolution can be separated (the di-τ carries the estimator floor, not a Delphes effect).
+    """
     jets = ev.jets
-    pt_sorted = jets[ak.argsort(jets.pt, axis=1, ascending=False, stable=True)]
+    bjets = jets[jets.tautag == 0]                                   # exclude τ_h jets from the bb pair
+    pt_sorted = bjets[ak.argsort(bjets.pt, axis=1, ascending=False, stable=True)]
     bb = pt_sorted[ak.argsort(pt_sorted.btag, axis=1, ascending=False, stable=True)][:, :2]
     n_jet = ak.to_numpy(ak.num(bb))
     bx, by, bz, be = _coll_p4_sum(bb)
@@ -69,17 +76,20 @@ def _reco_mhh(ev) -> np.ndarray:
     dpx, dpy, dpz, de = (np.full(n, np.nan) for _ in range(4))
     dpx[sel], dpy[sel], dpz[sel], de[sel] = ditau["px"], ditau["py"], ditau["pz"], ditau["e"]
 
-    m = _mass(bx + dpx, by + dpy, bz + dpz, be + de)
     ok = (n_jet >= 2) & np.isfinite(dpx)
-    m[~ok] = np.nan
-    return m
+    m_hh = _mass(bx + dpx, by + dpy, bz + dpz, be + de)
+    m_bb = _mass(bx, by, bz, be)
+    m_ditau = _mass(dpx, dpy, dpz, de)
+    for a in (m_hh, m_bb, m_ditau):
+        a[~ok] = np.nan
+    return m_hh, m_bb, m_ditau
 
 
 def run(ctx: ValidationContext) -> list[CheckResult]:
     """κ_λ-critical m_HH faithfulness on the signal sample ``ctx.events``."""
     ev = ctx.events
     gen = _gen_mhh(ev)
-    reco = _reco_mhh(ev)
+    reco, m_bb, m_ditau = _reco_mhh(ev)
     have_gen = np.isfinite(gen)
     if have_gen.sum() < 50:
         return [info("level4.mhh.no_gen", "level4",
@@ -125,6 +135,18 @@ def run(ctx: ValidationContext) -> list[CheckResult]:
         measured=resolution, target=res_max, tolerance=res_max, units="σ(reco/gen)",
         detail=(f"m_HH resolution {resolution:.1%} in [{lo:.0f},{hi:.0f}] GeV (≤{res_max:.0%}); "
                 f"keeps the κ_λ lineshape from washing out")))
+
+    # separate the Delphes (bb) and FastMTT (di-τ) contributions so the b-jet part isn't
+    # masked in the combined m_HH (the di-τ carries the estimator floor, not a Delphes effect)
+    def _peak_width(x):
+        x = x[np.isfinite(x)]
+        return (float(np.median(x)), float(0.5 * (np.percentile(x, 84) - np.percentile(x, 16)))) if x.size >= 30 else (float("nan"), float("nan"))
+    bb_m, bb_w = _peak_width(m_bb[win])
+    dt_m, dt_w = _peak_width(m_ditau[win])
+    results.append(info("level4.mhh.components", "level4", bb_w / bb_m if bb_m else float("nan"),
+                        detail=(f"m_bb {bb_m:.0f}±{bb_w:.0f} (Delphes b-jet); "
+                                f"m_ττ {dt_m:.0f}±{dt_w:.0f} GeV (FastMTT floor) — the di-τ dominates "
+                                f"the m_HH resolution, so read it next to the b-jet part")))
 
     # migration: gen→reco bin diagonal fraction (the lineshape-preservation summary)
     gi = np.digitize(gen[passed], bins)
