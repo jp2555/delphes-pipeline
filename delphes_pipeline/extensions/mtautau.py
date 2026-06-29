@@ -51,12 +51,13 @@ def _pair_inv_mass(leg1, leg2, sel):
     return np.sqrt(np.maximum(e * e - px * px - py * py - pz * pz, 0.0))
 
 
-def fastmtt_mass(leg1, leg2, met_x, met_y, *, met_sigma=25.0, grid=40, chunk=4000):
+def fastmtt_mass(leg1, leg2, met_x, met_y, *, met_sigma=25.0, grid=40, chunk=4000, with_x=False):
     """Per-event covariance-free FastMTT di-τ mass over a (grid×grid) x scan.
 
     ``leg1``/``leg2`` are dicts of numpy arrays (``px,py,pz,e,mass,is_had``); ``met_x``,
-    ``met_y`` the pᵀᵐⁱˢˢ components. Returns ``m_ττ`` per event (NaN where the
-    likelihood is everywhere zero).
+    ``met_y`` the pᵀᵐⁱˢˢ components. Returns ``m_ττ`` per event (NaN where the likelihood
+    is everywhere zero). With ``with_x`` also returns the best-fit ``(x1, x2)`` so the full
+    di-τ 4-vector (τᵢ = p_vis,ᵢ/xᵢ) can be reconstructed.
     """
     met_x = np.asarray(met_x, dtype=float)
     met_y = np.asarray(met_y, dtype=float)
@@ -67,6 +68,7 @@ def fastmtt_mass(leg1, leg2, met_x, met_y, *, met_sigma=25.0, grid=40, chunk=400
     x2 = xs[None, None, :]                          # (1,1,G)
     r1, r2 = (1.0 - x1) / x1, (1.0 - x2) / x2
     out = np.full(n, np.nan)
+    x1_out, x2_out = np.full(n, np.nan), np.full(n, np.nan)
     for s in range(0, n, chunk):
         e = slice(s, min(s + chunk, n))
         col = lambda a: np.asarray(a[e], dtype=float)[:, None, None]
@@ -79,10 +81,16 @@ def fastmtt_mass(leg1, leg2, met_x, met_y, *, met_sigma=25.0, grid=40, chunk=400
         flat = like.reshape(like.shape[0], -1)
         best = np.argmax(flat, axis=1)
         i1, i2 = np.divmod(best, grid)
-        m = _pair_inv_mass(leg1, leg2, e) / np.sqrt(xs[i1] * xs[i2])
-        m[flat[np.arange(flat.shape[0]), best] <= 0.0] = np.nan
-        out[e] = m
+        bx1, bx2 = xs[i1], xs[i2]
+        m = _pair_inv_mass(leg1, leg2, e) / np.sqrt(bx1 * bx2)
+        bad = flat[np.arange(flat.shape[0]), best] <= 0.0
+        m[bad] = np.nan
+        bx1, bx2 = np.where(bad, np.nan, bx1), np.where(bad, np.nan, bx2)
+        out[e], x1_out[e], x2_out[e] = m, bx1, bx2
     out[bad_met] = np.nan
+    if with_x:
+        x1_out[bad_met], x2_out[bad_met] = np.nan, np.nan
+        return out, x1_out, x2_out
     return out
 
 
@@ -94,6 +102,24 @@ def _leg(cand):
             "mass": m, "is_had": ak.to_numpy(cand.is_tauh).astype(bool)}
 
 
+def _select_pair(ev, mask):
+    """Leading two τ-candidates (τ_h jets + reco e/μ) per event; returns (pair, sel_mask)."""
+    from delphes_pipeline.validation.level1_candles.selections import tau_candidates
+
+    cand = tau_candidates(ev)
+    sel = ak.to_numpy(ak.num(cand) >= 2)
+    if mask is not None:
+        sel = sel & np.asarray(mask, dtype=bool)
+    pair = cand[sel]
+    return pair[ak.argsort(pair.pt, axis=1, ascending=False)][:, :2], sel
+
+
+def _met_xy(ev, sel):
+    met = ev.met[sel]
+    return (ak.to_numpy(ak.fill_none(met.met * np.cos(met.phi), np.nan)),
+            ak.to_numpy(ak.fill_none(met.met * np.sin(met.phi), np.nan)))
+
+
 def estimate_mtautau(ev, *, mask=None, method: str = "fastmtt", met_sigma=25.0, grid=40):
     """Per-event di-τ mass for the leading τ-candidate pair (τ_h jets + reco e/μ).
 
@@ -102,16 +128,27 @@ def estimate_mtautau(ev, *, mask=None, method: str = "fastmtt", met_sigma=25.0, 
     """
     if method != "fastmtt":
         raise ValueError(f"only the covariance-free FastMTT method is implemented (got {method!r})")
-    from delphes_pipeline.validation.level1_candles.selections import tau_candidates
+    pair, sel = _select_pair(ev, mask)
+    met_x, met_y = _met_xy(ev, sel)
+    return fastmtt_mass(_leg(pair[:, 0]), _leg(pair[:, 1]), met_x, met_y, met_sigma=met_sigma, grid=grid)
 
-    cand = tau_candidates(ev)
-    sel = ak.to_numpy(ak.num(cand) >= 2)
-    if mask is not None:
-        sel = sel & np.asarray(mask, dtype=bool)
-    pair = cand[sel]
-    pair = pair[ak.argsort(pair.pt, axis=1, ascending=False)][:, :2]
-    met = ev.met[sel]
-    met_x = ak.to_numpy(ak.fill_none(met.met * np.cos(met.phi), np.nan))
-    met_y = ak.to_numpy(ak.fill_none(met.met * np.sin(met.phi), np.nan))
-    return fastmtt_mass(_leg(pair[:, 0]), _leg(pair[:, 1]), met_x, met_y,
-                        met_sigma=met_sigma, grid=grid)
+
+def ditau_system(ev, *, mask=None, met_sigma=25.0, grid=40):
+    """Reconstructed di-τ 4-vector ``{px,py,pz,e}`` at the FastMTT best fit + the event mask.
+
+    Each τ is its visible leg scaled to full momentum (τ = p_vis/x, collinear) plus the
+    collinear neutrino energy; the di-τ system feeds the m_HH reconstruction. Events with
+    no fit get NaN components.
+    """
+    pair, sel = _select_pair(ev, mask)
+    leg1, leg2 = _leg(pair[:, 0]), _leg(pair[:, 1])
+    met_x, met_y = _met_xy(ev, sel)
+    _, x1, x2 = fastmtt_mass(leg1, leg2, met_x, met_y, met_sigma=met_sigma, grid=grid, with_x=True)
+
+    def tau_p4(leg, x):
+        nu = np.sqrt(leg["px"] ** 2 + leg["py"] ** 2 + leg["pz"] ** 2) * (1.0 - x) / x  # massless ν
+        return leg["px"] / x, leg["py"] / x, leg["pz"] / x, leg["e"] + nu
+
+    px1, py1, pz1, e1 = tau_p4(leg1, x1)
+    px2, py2, pz2, e2 = tau_p4(leg2, x2)
+    return {"px": px1 + px2, "py": py1 + py2, "pz": pz1 + pz2, "e": e1 + e2}, sel

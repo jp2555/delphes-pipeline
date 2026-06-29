@@ -6,7 +6,7 @@ import numpy as np
 from make_candle_fixture import make_dy_fixture_nu
 
 from delphes_pipeline.core.io import DelphesEvents
-from delphes_pipeline.extensions.mtautau import estimate_mtautau, fastmtt_mass
+from delphes_pipeline.extensions.mtautau import ditau_system, estimate_mtautau, fastmtt_mass
 from delphes_pipeline.validation.level1_candles import selections
 
 
@@ -70,6 +70,20 @@ def test_estimate_mtautau_peaks_at_mz(tmp_path):
     m = m[np.isfinite(m)]
     assert np.median(vis[(vis > 40) & (vis < 120)]) < 75.0   # visible sits below m_Z
     assert abs(_peak_mode(m) - 91.2) < 8.0                   # estimator restores m_Z (robust peak)
+
+
+def test_ditau_system_mass_matches_estimate(tmp_path):
+    """The reconstructed di-τ 4-vector's invariant mass equals the FastMTT m_ττ (for m_HH)."""
+    p = tmp_path / "dy.root"
+    make_dy_fixture_nu(str(p), n_events=3000, seed=1)
+    ev = DelphesEvents(str(p))
+    veto = selections.bjet_veto_mask(ev)
+    m = estimate_mtautau(ev, mask=veto)
+    p4, sel = ditau_system(ev, mask=veto)
+    m_p4 = np.sqrt(np.maximum(p4["e"] ** 2 - p4["px"] ** 2 - p4["py"] ** 2 - p4["pz"] ** 2, 0.0))
+    ok = np.isfinite(m) & np.isfinite(m_p4)
+    assert ok.sum() > 100
+    assert np.nanmax(np.abs(m[ok] - m_p4[ok])) < 1.0   # equal up to the massless-visible approx
 
 
 def test_estimate_mtautau_robust_to_non_collinear(tmp_path):
