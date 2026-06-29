@@ -87,7 +87,7 @@ def binned_efficiency(x_values, passed, bins, *, quantity="", x="pt") -> Profile
         if n == 0:
             continue
         p = float(passed[in_bin].sum()) / n
-        centers.append(0.5 * (lo + hi))
+        centers.append(float(x_values[in_bin].mean()))  # bin mean, not midpoint
         values.append(p)
         errors.append(float(np.sqrt(max(p * (1.0 - p), 0.0) / n)))
         counts.append(n)
@@ -110,7 +110,7 @@ def binned_response(x_values, ratio, bins, *, quantity="", x="pt") -> Profile:
         med = float(np.median(r))
         # robust spread / sqrt(n) as the error on the median
         sigma = 1.4826 * float(np.median(np.abs(r - med)))
-        centers.append(0.5 * (lo + hi))
+        centers.append(float(x_values[in_bin].mean()))  # bin mean, not midpoint
         values.append(med)
         errors.append(sigma / np.sqrt(n) if n else float("nan"))
         counts.append(n)
@@ -131,7 +131,7 @@ def binned_resolution(x_values, dx, dy, bins, *, min_count=25, quantity="met_res
         if n < min_count:
             continue
         res = float(np.sqrt(0.5 * (np.var(dx[in_bin]) + np.var(dy[in_bin]))))
-        centers.append(0.5 * (lo + hi))
+        centers.append(float(x_values[in_bin].mean()))  # bin mean, not midpoint
         values.append(res)
         errors.append(res / np.sqrt(2.0 * n))  # ~ error on a standard deviation
         counts.append(n)
