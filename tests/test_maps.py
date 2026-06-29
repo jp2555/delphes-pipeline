@@ -218,17 +218,65 @@ def test_convert_cli_applies_maps_from_flag(good_fixture_path, tmp_path):
 
 
 def test_escale_rescales_bjet_and_tau_pt(good_fixture_path):
-    """The energy-scale maps rescale b-jet / τ-jet pT (τ takes precedence); light jets untouched."""
+    """Energy-scale maps rescale gen-matched τ-jets (precedence) and b-jets; light untouched.
+
+    τ-jets are selected by gen-matching — the SAME population the map is derived/validated
+    on — not the stochastic tautag bit.
+    """
+    from delphes_pipeline.core.matching import matched_to_any
+
     ev = DelphesEvents(good_fixture_path)
     maps = TuningMaps({"bjet_escale": _mk(1.3), "tau_escale": _mk(0.9)})
     view = RetaggedEvents(ev, maps, np.random.default_rng(0))
     assert view.retagged_fields == frozenset({"escale"})
     fl = ak.to_numpy(ak.flatten(ev.jets.flavor))
-    tt = ak.to_numpy(ak.flatten(ev.jets.tautag))
+    gen_taus = ev.gen[np.abs(ev.gen.pid) == 15]
+    is_tau = ak.to_numpy(ak.flatten(matched_to_any(ev.jets, gen_taus, 0.4)))
     ratio = ak.to_numpy(ak.flatten(view.jets.pt)) / ak.to_numpy(ak.flatten(ev.jets.pt))
-    assert np.allclose(ratio[(fl == 5) & (tt == 0)], 1.3)     # b-jets scaled up
-    assert np.allclose(ratio[tt == 1], 0.9)                   # τ-jets scaled (τ precedence)
-    assert np.allclose(ratio[(fl != 5) & (tt == 0)], 1.0)     # light jets unchanged
+    assert np.allclose(ratio[is_tau], 0.9)                    # gen-matched τ-jets (precedence)
+    assert np.allclose(ratio[(fl == 5) & ~is_tau], 1.3)       # b-jets (not τ)
+    assert np.allclose(ratio[(fl != 5) & ~is_tau], 1.0)       # light jets unchanged
+
+
+def test_escale_derive_and_apply_full_loop(tmp_path):
+    """Non-circular: derive escale (1/response) from a biased Delphes sample, apply, close to unity."""
+    sig = tmp_path / "sig.root"
+    make_fixture(str(sig), n_events=6000, seed=3, bjet_response=0.85)
+    nano = tmp_path / "nano.root"
+    make_nano_fixture(str(nano), n_events=4000, seed=2)
+    cfg = {"anchor": {"enabled": True, "nanoaod_path": str(nano), "wp": _wp()},
+           "input": {"delphes_root": str(sig), "treename": "Delphes"}}
+    maps = derive_maps(cfg, bins=obs.DEFAULT_PT_BINS)
+    esc = maps["bjet_escale"]
+    assert abs(np.average(esc["values"], weights=esc["counts"]) - 1.0 / 0.85) < 0.05   # ~1.176
+
+    view = RetaggedEvents(DelphesEvents(str(sig)), TuningMaps(maps), np.random.default_rng(0))
+    resp = obs.bjet_energy_response(view, bins=obs.DEFAULT_PT_BINS)
+    assert abs(np.average(resp.values, weights=resp.counts) - 1.0) < 0.03
+
+
+def test_escale_handles_sloped_response(tmp_path):
+    """A pT-sloped b-jet response still closes — the gen-pT map is iterated to the gen pT."""
+    sloped = lambda pt: 0.75 + 0.2 * np.tanh(np.asarray(pt) / 100.0)
+    sig = tmp_path / "sig.root"
+    make_fixture(str(sig), n_events=9000, seed=4, bjet_response=sloped)
+    nano = tmp_path / "nano.root"
+    make_nano_fixture(str(nano), n_events=4000, seed=2)
+    cfg = {"anchor": {"enabled": True, "nanoaod_path": str(nano), "wp": _wp()},
+           "input": {"delphes_root": str(sig), "treename": "Delphes"}}
+    maps = TuningMaps(derive_maps(cfg, bins=obs.DEFAULT_PT_BINS))
+    view = RetaggedEvents(DelphesEvents(str(sig)), maps, np.random.default_rng(0))
+    resp = obs.bjet_energy_response(view, bins=obs.DEFAULT_PT_BINS)
+    # every pT bin corrected to within 4% of unity (the reco-vs-gen-pT iteration)
+    assert np.all(np.abs(np.asarray(resp.values) - 1.0) < 0.04)
+
+
+def test_empty_sf_map_is_a_noop(good_fixture_path, tmp_path):
+    """A present-but-empty SF map must default to 1.0, not zero the event weight."""
+    empty = {"x": "pt", "centers": [], "values": [], "counts": []}
+    maps = TuningMaps({"electron_sf": empty, "muon_sf": empty})
+    arr = convert(good_fixture_path, str(tmp_path / "sf.parquet"), tuning_maps=maps)
+    assert np.allclose(ak.to_numpy(arr["lepton_sf"]), 1.0)
 
 
 def test_escale_closes_the_loop(tmp_path):

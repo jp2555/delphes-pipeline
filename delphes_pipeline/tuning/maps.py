@@ -103,13 +103,16 @@ class TuningMaps:
         with open(path) as fh:
             return cls(json.load(fh)["maps"])
 
-    def efficiency(self, quantity: str, pt) -> np.ndarray:
+    def efficiency(self, quantity: str, pt, *, default: float = 0.0) -> np.ndarray:
+        """Interpolate the curve at ``pt``. ``default`` is returned for an empty grid —
+        0 for efficiencies, but 1.0 for *multiplicative* corrections (escale / SF) so a
+        missing/empty map is a no-op rather than zeroing the jet pT or the event weight."""
         m = self.maps[quantity]
         c = np.asarray(m["centers"], dtype=float)
         v = np.asarray(m["values"], dtype=float)
         pt = np.asarray(pt, dtype=float)
         if c.size == 0:
-            return np.zeros_like(pt)
+            return np.full(pt.shape, default)
         return np.interp(pt, c, v, left=v[0], right=v[-1])  # flat extrapolation
 
 
@@ -153,18 +156,28 @@ def retag_tautag(events, maps: TuningMaps, rng: np.random.Generator) -> ak.Array
     return ak.unflatten(tag, counts)
 
 
-def escale_factor(jets: ak.Array, maps: TuningMaps) -> ak.Array:
-    """Per-jet energy-scale factor: ``bjet_escale`` for b-jets (flavor==5), ``tau_escale``
-    for τ-jets (tautag==1, τ taking precedence), 1 otherwise. Reads the (re-tagged) jets."""
+def _escale_lookup(maps: TuningMaps, quantity: str, reco_pt: np.ndarray) -> np.ndarray:
+    """The energy-scale map is binned in GenJet pT but we hold reco pT; one Newton step
+    (gen_pT ≈ reco_pT · escale) re-evaluates at the estimated gen pT so a pT-sloped
+    response still closes to unity (exact for a flat response)."""
+    e0 = maps.efficiency(quantity, reco_pt, default=1.0)
+    return maps.efficiency(quantity, reco_pt * e0, default=1.0)
+
+
+def escale_factor(events, jets: ak.Array, maps: TuningMaps) -> ak.Array:
+    """Per-jet energy-scale factor on the SAME populations the map is derived/validated on:
+    ``tau_escale`` for jets gen-matched (ΔR<0.4) to a hadronic τ (τ precedence), else
+    ``bjet_escale`` for b-jets (flavor==5), 1 otherwise. Applying by the gen-matched τ set
+    (not the stochastic tautag bit) keeps derive/apply/re-validate on one population."""
     counts = ak.num(jets)
     pt = ak.to_numpy(ak.flatten(jets.pt))
     flavour = ak.to_numpy(ak.flatten(jets.flavor))
-    tautag = ak.to_numpy(ak.flatten(jets.tautag))
+    gen_taus = events.gen[np.abs(events.gen.pid) == _GEN_TAU_PID]
+    is_tau = ak.to_numpy(ak.flatten(matched_to_any(jets, gen_taus, 0.4)))
     esc = np.ones(pt.shape, dtype=float)
     is_b = flavour == 5
-    esc[is_b] = maps.efficiency("bjet_escale", pt[is_b])
-    is_t = tautag == 1
-    esc[is_t] = maps.efficiency("tau_escale", pt[is_t])
+    esc[is_b] = _escale_lookup(maps, "bjet_escale", pt[is_b])
+    esc[is_tau] = _escale_lookup(maps, "tau_escale", pt[is_tau])   # τ precedence
     return ak.unflatten(esc, counts)
 
 
@@ -185,7 +198,7 @@ def retag_jets(events, maps: TuningMaps, rng: np.random.Generator):
         jets = ak.with_field(jets, retag_tautag(events, maps, rng), "tautag")
         fields.add("tautag")
     if all(q in maps.maps for q in ESCALE_MAP_QUANTITIES):
-        esc = escale_factor(jets, maps)
+        esc = escale_factor(events, jets, maps)
         jets = ak.with_field(jets, jets.pt * esc, "pt")
         jets = ak.with_field(jets, jets.mass * esc, "mass")
         fields.add("escale")

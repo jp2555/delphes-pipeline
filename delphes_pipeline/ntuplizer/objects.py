@@ -111,10 +111,11 @@ def _lepton_sf(ev: DelphesEvents, tuning_maps) -> np.ndarray:
     if tuning_maps is None:
         return sf
     for coll, q in (("electrons", "electron_sf"), ("muons", "muon_sf")):
-        if q in tuning_maps.maps:
-            lep = getattr(ev, coll)
-            vals = tuning_maps.efficiency(q, ak.to_numpy(ak.flatten(lep.pt)))
-            sf = sf * ak.to_numpy(ak.prod(ak.unflatten(vals, ak.num(lep)), axis=1))
+        lep = getattr(ev, coll)
+        if q not in tuning_maps.maps or not ak.fields(lep):   # no map / branch absent -> no SF
+            continue
+        vals = tuning_maps.efficiency(q, ak.to_numpy(ak.flatten(lep.pt)), default=1.0)
+        sf = sf * ak.to_numpy(ak.prod(ak.unflatten(vals, ak.num(lep)), axis=1))
     return sf
 
 

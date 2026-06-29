@@ -169,8 +169,11 @@ def make_fixture(
         w = -1.0 if rng.random() < neg_frac else 1.0
         ev_l.append([{"Weight": w}])
         # GenJet at reco/bjet_response so reco/GenJet == bjet_response (the b-jet
-        # energy response; default 1.0 = perfectly scaled).
-        genjet_l.append([{"PT": j["PT"] / bjet_response, "Eta": j["Eta"], "Phi": j["Phi"],
+        # energy response; default 1.0 = perfectly scaled). ``bjet_response`` may be a
+        # float or a callable of reco pT (a pT-sloped response).
+        def _resp(pt):
+            return float(bjet_response(pt)) if callable(bjet_response) else float(bjet_response)
+        genjet_l.append([{"PT": j["PT"] / _resp(j["PT"]), "Eta": j["Eta"], "Phi": j["Phi"],
                           "Mass": j["Mass"], "Flavor": j["Flavor"]} for j in jets[:2]])
 
         jet_l.append(jets)
