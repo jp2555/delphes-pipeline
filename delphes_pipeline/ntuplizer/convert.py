@@ -87,10 +87,13 @@ def main(argv=None) -> int:
     if tuning_maps is None and args.config:
         from ..validation.run_validation import load_config
         tuning_maps = load_config(args.config).get("tuning_maps")
-    if tuning_maps:
-        print(f"[ntuplizer] applying downstream re-tag from {tuning_maps}", flush=True)
-    convert(args.delphes, args.out, treename=args.treename,
-            entry_stop=args.entry_stop, tuning_maps=tuning_maps)
+    print(f"[ntuplizer] reading {args.delphes}"
+          + (f" (first {args.entry_stop})" if args.entry_stop else "")
+          + (f" with re-tag from {tuning_maps}" if tuning_maps else " (stock tags, no tuning_maps)")
+          + " ...", flush=True)
+    out = convert(args.delphes, args.out, treename=args.treename,
+                  entry_stop=args.entry_stop, tuning_maps=tuning_maps)
+    print(f"[ntuplizer] wrote {args.out}: {len(out)} events", flush=True)
     return 0
 
 
