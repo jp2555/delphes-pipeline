@@ -97,18 +97,17 @@ def run(ctx: ValidationContext) -> list[CheckResult]:
         return [info("level4.mhh.no_gen", "level4",
                      detail="no gen HH (need gen b-quarks + τ's); is this the signal sample?")]
 
-    gm = gen[have_gen]
-    results.append(info("level4.mhh.gen_check", "level4", float(np.median(gm)),
-                        detail=(f"gen m_HH median {np.median(gm):.0f} GeV, IQR "
-                                f"[{np.percentile(gm, 25):.0f},{np.percentile(gm, 75):.0f}] — should span the "
-                                f"spectrum; a flat ~250 GeV would signal a duplicate-Higgs gen selection")))
-
     bins = np.asarray(ctx.opt("level4", "mhh_bins", _MHH_BINS), dtype=float)
     lo, hi = _THRESHOLD
     rel_tol = float(ctx.tol("level4", "mhh_scale_tol", 0.10))
     res_max = float(ctx.tol("level4", "mhh_resolution_max", 0.20))
 
     results: list[CheckResult] = []
+    gm = gen[have_gen]
+    results.append(info("level4.mhh.gen_check", "level4", float(np.median(gm)),
+                        detail=(f"gen m_HH median {np.median(gm):.0f} GeV, IQR "
+                                f"[{np.percentile(gm, 25):.0f},{np.percentile(gm, 75):.0f}] — should span the "
+                                f"spectrum; a flat ~250 GeV would signal a duplicate-Higgs gen selection")))
 
     # A×ε turn-on: fraction of gen events reconstructed, per gen-m_HH bin
     passed = have_gen & np.isfinite(reco)
