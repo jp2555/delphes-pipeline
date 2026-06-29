@@ -34,8 +34,8 @@ anchor:
     btag_correctionlib:        # CVMFS BTV JSON -> the Medium cut (confirm <era> with `ls`)
       json: /cvmfs/cms.cern.ch/rsync/cms-nanoAOD/jsonpog-integration/POG/BTV/2024_Summer24/btagging.json.gz
       tagger: UParT            # auto-finds the '<tagger>_wp_values' correction
-      wp: M
-      # correction: robustParticleTransformerAK4_wp_values   # set if auto-find fails;
+      wp: M                    # 2024_Summer24 -> UParTAK4_wp_values, Medium = 0.1272
+      # correction: UParTAK4_wp_values   # set explicitly if auto-find ever fails;
       #   list names with: python -m delphes_pipeline.tuning.correctionlib_wp <json>
     deeptau_vsjet_medium: 16    # DeepTau v2p5 VSjet Medium bit (NanoAOD bitmask; reader uses >=)
   branches:                    # NanoAODv15 defaults; override only if your era differs
