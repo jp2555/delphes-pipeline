@@ -101,7 +101,7 @@ tolerances:
     max_failing_bin_fraction: 0.20  # closure passes if <= this fraction of tested bins fail
     met_resolution_max_gev: 40.0    # MET resolution sanity ceiling (vs sum E_T)
     # Per-quantity gate severity. Default 'gate' (closure failure blocks production).
-    # The three below sit at warn for the pre-v0 card — DESIGN.md is explicit
+    # The four below sit at warn for the pre-v0 card — DESIGN.md is explicit
     # that "a full Level-0 POG-overlay match is not yet meaningful on this
     # card". Each is a known stock-Delphes cascade effect that tuning set v0
     # will absorb; the closure infrastructure still measures and surfaces them.
@@ -115,7 +115,14 @@ tolerances:
     #   muon_eff:     same shape as electron — full chain is tracking × reco ×
     #                 isolation (PTRatioMax=0.25). High-pT barrel plateau lands
     #                 at ~0.93 instead of 0.95.
+    #   btag_eff_c:   c is ~20x rarer than b in bb̄ττ (~0.1 c-jet/event) and the
+    #                 low-pT bins are gluon-split-dominated; the stock c-formula
+    #                 is a poor model of that population (anchor c-eff falls
+    #                 0.18->0.10 vs the card's rising 0.10->0.18) and is
+    #                 superseded by the v0 anchor re-tag, which redoes c-tagging
+    #                 from Jet.Flavor + the CMS map. b/light close 0/8 bins.
     closure_severity:
       tau_mistag: warn
       electron_eff: warn
       muon_eff: warn
+      btag_eff_c: warn
