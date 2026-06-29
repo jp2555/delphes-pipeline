@@ -37,7 +37,7 @@ def to_record(ev: DelphesEvents, tuning_maps=None, seed: int = 0) -> ak.Array:
         "Muon": objects.build_muons(source),
         "GenPart": objects.build_genpart(source),
     }
-    fields.update(objects.scalars(source))
+    fields.update(objects.scalars(source, tuning_maps))
     return ak.zip(fields, depth_limit=1)
 
 

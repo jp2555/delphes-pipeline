@@ -65,6 +65,7 @@ SCALARS: dict[str, type] = {
     "GenMET_phi": np.float32,
     "HT": np.float32,
     "genWeight": np.float32,
+    "lepton_sf": np.float32,   # tuning-v0 lepton-efficiency weight (1.0 without maps)
 }
 
 # Audit trail: flat name -> "DelphesCollection.Leaf [derivation]".

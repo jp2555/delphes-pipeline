@@ -58,6 +58,7 @@ def make_fixture(
     met_resolution_gev: float = 20.0,
     met_bias_gev: float = 0.0,
     mbb_width_gev: float = 10.0,
+    bjet_response: float = 1.0,
     btag_eff: Eff = DEF_BTAG_EFF,
     ctag_eff: Eff = DEF_CTAG_EFF,
     ltag_mistag: Eff = DEF_LTAG_MISTAG,
@@ -167,7 +168,9 @@ def make_fixture(
         sht_l.append([{"HT": float(sum(j["PT"] for j in jets))}])
         w = -1.0 if rng.random() < neg_frac else 1.0
         ev_l.append([{"Weight": w}])
-        genjet_l.append([{"PT": j["PT"], "Eta": j["Eta"], "Phi": j["Phi"],
+        # GenJet at reco/bjet_response so reco/GenJet == bjet_response (the b-jet
+        # energy response; default 1.0 = perfectly scaled).
+        genjet_l.append([{"PT": j["PT"] / bjet_response, "Eta": j["Eta"], "Phi": j["Phi"],
                           "Mass": j["Mass"], "Flavor": j["Flavor"]} for j in jets[:2]])
 
         jet_l.append(jets)

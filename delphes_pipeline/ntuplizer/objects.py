@@ -100,12 +100,31 @@ def build_genpart(ev: DelphesEvents) -> ak.Array:
     )
 
 
-def scalars(ev: DelphesEvents) -> dict[str, np.ndarray]:
+def _lepton_sf(ev: DelphesEvents, tuning_maps) -> np.ndarray:
+    """Per-event lepton-efficiency weight: Π over reco e/μ of the tuning-v0 SF (1.0 if no maps).
+
+    Applied as a weight (an under-reconstructed lepton can't be re-tagged kinematically),
+    the analogue of CMS lepton scale factors; the analysis multiplies this into the event
+    weight (it is the product over *all* reco leptons — refine to the selected leptons if
+    the channel vetoes extra leptons)."""
+    sf = np.ones(ev.n, dtype=np.float64)
+    if tuning_maps is None:
+        return sf
+    for coll, q in (("electrons", "electron_sf"), ("muons", "muon_sf")):
+        if q in tuning_maps.maps:
+            lep = getattr(ev, coll)
+            vals = tuning_maps.efficiency(q, ak.to_numpy(ak.flatten(lep.pt)))
+            sf = sf * ak.to_numpy(ak.prod(ak.unflatten(vals, ak.num(lep)), axis=1))
+    return sf
+
+
+def scalars(ev: DelphesEvents, tuning_maps=None) -> dict[str, np.ndarray]:
     """Per-event scalar fields of ``schema.SCALARS`` as numpy arrays.
 
     Robust to a missing scalar branch: an absent MissingET/GenMissingET/ScalarHT
     collection falls back to zeros rather than raising. ``genWeight`` is the first
-    ``Event.Weight`` per event (1.0 where absent, handled by the reader).
+    ``Event.Weight`` per event (1.0 where absent, handled by the reader). ``lepton_sf``
+    is the tuning-v0 lepton-efficiency weight (1.0 unless lepton SF maps are configured).
     """
     f32 = np.float32
 
@@ -121,4 +140,5 @@ def scalars(ev: DelphesEvents) -> dict[str, np.ndarray]:
         "GenMET_phi": scal("GenMissingET.Phi", lambda: ev.genmet.phi, 0.0),
         "HT": scal("ScalarHT.HT", lambda: ev.scalar_ht.ht, 0.0),
         "genWeight": ev.weights.astype(f32),
+        "lepton_sf": _lepton_sf(ev, tuning_maps).astype(f32),
     }

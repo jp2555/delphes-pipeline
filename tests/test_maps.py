@@ -6,6 +6,7 @@ import awkward as ak
 import numpy as np
 import pytest
 from conftest import build_ctx
+from make_fixture import make_fixture
 from make_nano_fixture import BTAG_WP, DEEPTAU_MEDIUM, make_nano_fixture
 
 from delphes_pipeline.core import observables as obs
@@ -214,6 +215,65 @@ def test_convert_cli_applies_maps_from_flag(good_fixture_path, tmp_path):
     bt = ak.to_numpy(ak.flatten(arr["Jet"].btag))
     heavy = (fl == 5) | (fl == 4)
     assert bt[heavy].min() == 1 and bt[~heavy].max() == 0
+
+
+def test_escale_rescales_bjet_and_tau_pt(good_fixture_path):
+    """The energy-scale maps rescale b-jet / τ-jet pT (τ takes precedence); light jets untouched."""
+    ev = DelphesEvents(good_fixture_path)
+    maps = TuningMaps({"bjet_escale": _mk(1.3), "tau_escale": _mk(0.9)})
+    view = RetaggedEvents(ev, maps, np.random.default_rng(0))
+    assert view.retagged_fields == frozenset({"escale"})
+    fl = ak.to_numpy(ak.flatten(ev.jets.flavor))
+    tt = ak.to_numpy(ak.flatten(ev.jets.tautag))
+    ratio = ak.to_numpy(ak.flatten(view.jets.pt)) / ak.to_numpy(ak.flatten(ev.jets.pt))
+    assert np.allclose(ratio[(fl == 5) & (tt == 0)], 1.3)     # b-jets scaled up
+    assert np.allclose(ratio[tt == 1], 0.9)                   # τ-jets scaled (τ precedence)
+    assert np.allclose(ratio[(fl != 5) & (tt == 0)], 1.0)     # light jets unchanged
+
+
+def test_escale_closes_the_loop(tmp_path):
+    """A biased b-jet energy response (0.85) is corrected to unity by the escale map."""
+    sig = tmp_path / "sig.root"
+    make_fixture(str(sig), n_events=6000, seed=3, bjet_response=0.85)
+    ctx = build_ctx(str(sig))
+    base = {r.observable: r for r in treport.run_tuning(ctx)}
+    assert base["bjet_energy_response"].status == "needs_tuning"   # reco/gen = 0.85 != 1
+
+    mpath = tmp_path / "escale.json"
+    save_maps({"bjet_escale": _mk(1.0 / 0.85), "tau_escale": _mk(1.0)}, mpath, {"tuning_set": "v0"})
+    ctx.config["tuning_maps"] = str(mpath)
+    tuned = {r.observable: r for r in treport.run_tuning(ctx)}
+    assert tuned["bjet_energy_response"].status == "on_target"
+    assert tuned["bjet_energy_response"].extra.get("retagged") is True
+    # m_bb (stock-tagged) stays out of the escale routing
+    assert not tuned["mbb_peak"].extra.get("retagged")
+
+
+def test_derive_maps_includes_escale_and_sf(good_fixture_path, tmp_path):
+    """derive_maps adds energy-scale (Delphes 1/response) + lepton SF (anchor/delphes) maps."""
+    nano = tmp_path / "nano.root"
+    make_nano_fixture(str(nano), n_events=6000, seed=2)
+    cfg = {"anchor": {"enabled": True, "nanoaod_path": str(nano), "wp": _wp()},
+           "input": {"delphes_root": good_fixture_path, "treename": "Delphes"}}
+    maps = derive_maps(cfg, bins=obs.DEFAULT_PT_BINS)
+    assert {"bjet_escale", "tau_escale", "electron_sf", "muon_sf"} <= set(maps)
+    # the good fixture has reco==GenJet -> response 1 -> escale ~1
+    esc = maps["bjet_escale"]
+    assert abs(np.average(esc["values"], weights=esc["counts"]) - 1.0) < 0.1
+    # lepton SF = anchor_eff / delphes_eff, clipped to a sane range
+    assert all(0.5 <= v <= 2.0 for v in maps["electron_sf"]["values"])
+
+
+def test_convert_applies_lepton_sf_weight(good_fixture_path, tmp_path):
+    """The ntuple carries per-event lepton_sf = Π over reco e/μ of the SF (1.0 without maps)."""
+    stock = convert(good_fixture_path, str(tmp_path / "stock.parquet"))
+    assert np.allclose(ak.to_numpy(stock["lepton_sf"]), 1.0)
+
+    maps = TuningMaps({"electron_sf": _mk(0.9), "muon_sf": _mk(0.9)})
+    arr = convert(good_fixture_path, str(tmp_path / "sf.parquet"), tuning_maps=maps)
+    ev = DelphesEvents(good_fixture_path)
+    nlep = ak.to_numpy(ak.num(ev.electrons) + ak.num(ev.muons))
+    assert np.allclose(ak.to_numpy(arr["lepton_sf"]), 0.9 ** nlep, atol=1e-5)
 
 
 def test_retagged_view_forwards_and_guards(good_fixture_path):
