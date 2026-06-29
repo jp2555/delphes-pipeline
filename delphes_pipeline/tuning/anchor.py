@@ -30,15 +30,24 @@ def anchor_profiles(config: dict, *, bins, max_events: Optional[int] = None) -> 
     ac = config.get("anchor", {})
     if not ac.get("enabled"):
         return {}
+    # cap by the smaller of anchor.max_events and the run-wide --max-events
+    cap = ac.get("max_events")
+    if max_events is not None:
+        cap = max_events if cap is None else min(cap, max_events)
+    print(f"[tuning] opening NanoAOD anchor (entry_stop={cap}) ...", flush=True)
     nano = NanoAODEvents(
         ac["nanoaod_path"], branches=ac.get("branches"), wp=_resolve_wp(ac.get("wp", {})),
-        entry_stop=ac.get("max_events", max_events),
+        entry_stop=cap,
     )
+    print(f"[tuning] anchor: {nano.n} events from {len(nano._used)} file(s); measuring ...", flush=True)
     out: dict[str, Profile] = {}
+    print("[tuning] anchor: b-tag ...", flush=True)
     for q in ("btag_eff_b", "btag_eff_c", "btag_mistag_light"):
         out[q] = obs.btag_efficiency(nano, q, bins=bins)
+    print("[tuning] anchor: leptons ...", flush=True)
     for q in ("electron_eff", "muon_eff"):
         out[q] = obs.lepton_efficiency(nano, q, bins=bins)
+    print("[tuning] anchor: tau + MET ...", flush=True)
     out["tau_eff"] = _nano_tau_eff(nano, bins)
     out["met_resolution"] = _nano_met_resolution(nano)
     # label the source for the report/plot

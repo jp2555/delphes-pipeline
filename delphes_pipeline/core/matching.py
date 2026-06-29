@@ -42,14 +42,19 @@ def nearest_target_field(
     efficiency, where each gen τ must be measured on exactly its own reco jet so
     that jets accidentally near the τ do not dilute the rate.
     """
+    # Extract the fields to plain Python lists ONCE (a single vectorised call each);
+    # iterating those is far cheaper than iterating the awkward arrays per event.
+    pe_l, pp_l = ak.to_list(probes.eta), ak.to_list(probes.phi)
+    te_l, tp_l = ak.to_list(targets.eta), ak.to_list(targets.phi)
+    tv_l = ak.to_list(targets[field])
     out_mask: list[np.ndarray] = []
     out_val: list[np.ndarray] = []
-    for p_ev, t_ev in zip(probes, targets):
-        pe = ak.to_numpy(p_ev.eta)
-        pp = ak.to_numpy(p_ev.phi)
-        te = ak.to_numpy(t_ev.eta)
-        tp = ak.to_numpy(t_ev.phi)
-        tv = ak.to_numpy(t_ev[field])
+    for pe_, pp_, te_, tp_, tv_ in zip(pe_l, pp_l, te_l, tp_l, tv_l):
+        pe = np.asarray(pe_, dtype=float)
+        pp = np.asarray(pp_, dtype=float)
+        te = np.asarray(te_, dtype=float)
+        tp = np.asarray(tp_, dtype=float)
+        tv = np.asarray(tv_, dtype=float)
         m = np.zeros(len(pe), dtype=bool)
         v = np.full(len(pe), np.nan)
         if len(pe) and len(te):
@@ -79,12 +84,14 @@ def unique_match(probes: ak.Array, targets: ak.Array, dr_max: float) -> np.ndarr
     to a unique target within ``dr_max``. Pairs are assigned in order of
     increasing ΔR.
     """
+    pe_l, pp_l = ak.to_list(probes.eta), ak.to_list(probes.phi)
+    te_l, tp_l = ak.to_list(targets.eta), ak.to_list(targets.phi)
     out: list[np.ndarray] = []
-    for p_ev, t_ev in zip(probes, targets):
-        pe = ak.to_numpy(p_ev.eta)
-        pp = ak.to_numpy(p_ev.phi)
-        te = ak.to_numpy(t_ev.eta)
-        tp = ak.to_numpy(t_ev.phi)
+    for pe_, pp_, te_, tp_ in zip(pe_l, pp_l, te_l, tp_l):
+        pe = np.asarray(pe_, dtype=float)
+        pp = np.asarray(pp_, dtype=float)
+        te = np.asarray(te_, dtype=float)
+        tp = np.asarray(tp_, dtype=float)
         matched = np.zeros(len(pe), dtype=bool)
         if len(pe) and len(te):
             dphi = _dphi(pp[:, None], tp[None, :])

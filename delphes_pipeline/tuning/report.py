@@ -155,11 +155,16 @@ def run_tuning(ctx: ValidationContext) -> list[TuningResult]:
     from . import anchor as anchor_mod
 
     bins = ctx.opt("level0", "pt_bins", obs.DEFAULT_PT_BINS)
-    anchors = anchor_mod.anchor_profiles(ctx.config, bins=bins)  # {} unless anchor.enabled
+    cap = getattr(ctx.events, "entry_stop", None)  # the --max-events cap (caps the anchor too)
+    print(f"[tuning] Delphes: {ctx.provenance.get('n_events', '?')} events"
+          + (f" (capped at {cap})" if cap else ""), flush=True)
+    anchors = anchor_mod.anchor_profiles(ctx.config, bins=bins, max_events=cap)  # {} unless enabled
     if anchors:
-        print(f"[tuning] NanoAOD anchor enabled: targets for {sorted(anchors)}")
-    results = [tune_observable(ctx, name, bins=bins, anchor_target=anchors.get(name))
-               for name in T.tuning_observables()]
+        print(f"[tuning] anchor targets ready: {sorted(anchors)}", flush=True)
+    results = []
+    for name in T.tuning_observables():
+        print(f"[tuning]   measuring Delphes {name} ...", flush=True)
+        results.append(tune_observable(ctx, name, bins=bins, anchor_target=anchors.get(name)))
 
     ctx.output_dir.mkdir(parents=True, exist_ok=True)
     payload = {"provenance": ctx.provenance, "results": [r.to_dict() for r in results]}
