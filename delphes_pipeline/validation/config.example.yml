@@ -100,7 +100,7 @@ tolerances:
     mtautau_met_sigma_gev: 25.0     # fixed (covariance-free) per-component MET σ for FastMTT
   level4:
     mhh_scale_tol: 0.10             # |median(reco/gen m_HH) − 1| ceiling in 250–400 GeV
-    mhh_resolution_max: 0.20        # σ(reco/gen m_HH) ceiling so the κ_λ lineshape survives
+    mhh_resolution_max: 0.30        # σ(reco/gen m_HH) sanity (inherent bb̄ττ ~25-30%: ττ ν + no b-reg)
   level0:
     closure_rel_tol: 0.05           # per-bin systematic tolerance on |measured/expected - 1|
     closure_nsigma: 2.0             # a bin fails only if it also misses by > this many stat sigma

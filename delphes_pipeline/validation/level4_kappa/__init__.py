@@ -100,7 +100,10 @@ def run(ctx: ValidationContext) -> list[CheckResult]:
     bins = np.asarray(ctx.opt("level4", "mhh_bins", _MHH_BINS), dtype=float)
     lo, hi = _THRESHOLD
     rel_tol = float(ctx.tol("level4", "mhh_scale_tol", 0.10))
-    res_max = float(ctx.tol("level4", "mhh_resolution_max", 0.20))
+    # ~25-30% is the *inherent* bb̄ττ m_HH resolution (ττ neutrinos + no b-energy regression,
+    # per the reference analysis); the ceiling is a not-grossly-washed-out sanity, while the
+    # actual "matches CMS" check is the Delphes-vs-NanoAOD overlay (scripts/mhh_overlay.py).
+    res_max = float(ctx.tol("level4", "mhh_resolution_max", 0.30))
 
     results: list[CheckResult] = []
     gm = gen[have_gen]

@@ -32,7 +32,7 @@ def test_level4_scale_gate_fails_on_biased_bjets(tmp_path):
 
 def test_level4_resolution_gate_fails_on_smeared(tmp_path):
     p = tmp_path / "hh.root"
-    make_hhbbtt_fixture(str(p), n_events=4000, seed=3, bjet_smear=0.7)      # washed-out m_HH
+    make_hhbbtt_fixture(str(p), n_events=4000, seed=3, bjet_smear=1.0)      # washed-out m_HH
     r = _by(str(p))
     assert r["level4.mhh.resolution"].severity.value == "gate"
     assert not r["level4.mhh.resolution"].passed  # resolution gate fails
