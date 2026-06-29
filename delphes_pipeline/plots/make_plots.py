@@ -22,9 +22,9 @@ from delphes_pipeline.validation.run_validation import load_config
 from . import figures
 
 # kappa_lambda label -> directory tag (c2=0, kt=1 GluGluHHto2B2Tau samples).
-# The Delphes set has all six points; missing ones are skipped automatically.
+# kl=2.45 excluded (not needed); missing points are skipped automatically.
 KL_TAGS = {"-1.00": "m1p00", "0.00": "0p00", "1.00": "1p00",
-           "2.45": "2p45", "3.00": "3p00", "5.00": "5p00"}
+           "3.00": "3p00", "5.00": "5p00"}
 
 
 def run(config: dict, *, klambda_base: str | None, max_events: int | None) -> list[str]:

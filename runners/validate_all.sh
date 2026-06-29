@@ -14,7 +14,7 @@
 set -uo pipefail
 
 DELPHES_BASE="${DELPHES_BASE:-/ceph/jpan/cms_nanoaod_2024_hh2b2tau/delphes}"
-KL_POINTS="${KL_POINTS:-m1p00 0p00 1p00 2p45 3p00 5p00}"   # Delphes has all six
+KL_POINTS="${KL_POINTS:-m1p00 0p00 1p00 3p00 5p00}"   # 2.45 excluded (not needed)
 CONFIG="${1:-delphes_pipeline/validation/config.example.yml}"
 PYTHON="${PYTHON:-pixi run python}"      # bare `python` may be 2.7 on some clusters
 
