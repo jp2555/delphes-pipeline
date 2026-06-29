@@ -24,6 +24,7 @@ pyyaml = "*"
 pandas = ">=2.3,<3"
 pyarrow = "*"
 pytest = "*"
+correctionlib = "*"            # resolve b-tag WPs from jsonpog-integration (anchor tuning)
 
 [pypi-dependencies]
 delphes-pipeline = { path = ".", editable = true }

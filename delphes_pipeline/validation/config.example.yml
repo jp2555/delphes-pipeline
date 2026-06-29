@@ -29,7 +29,14 @@ anchor:
   nanoaod_path: /ceph/jpan/cms_nanoaod_2024_hh2b2tau/*kl-1p00*NanoAODv15-PowhegBugFix*
   max_events: 200000           # cap for the anchor measurement (shape only)
   wp:
-    btag_medium: null          # REQUIRED: UParT-AK4 Medium discriminant threshold (BTV 2024)
+    btag_medium: null          # UParT-AK4 Medium discriminant cut; left null -> resolved from
+                               # jsonpog-integration below. Set a float to override.
+    btag_correctionlib:        # CVMFS BTV JSON -> the Medium cut (confirm <era> with `ls`)
+      json: /cvmfs/cms.cern.ch/rsync/cms-nanoAOD/jsonpog-integration/POG/BTV/2024_Summer24/btagging.json.gz
+      tagger: UParT            # auto-finds the '<tagger>_wp_values' correction
+      wp: M
+      # correction: robustParticleTransformerAK4_wp_values   # set if auto-find fails;
+      #   list names with: python -m delphes_pipeline.tuning.correctionlib_wp <json>
     deeptau_vsjet_medium: 16    # DeepTau v2p5 VSjet Medium bit (NanoAOD bitmask; reader uses >=)
   branches:                    # NanoAODv15 defaults; override only if your era differs
     jet: { btag_disc: Jet_btagUParTAK4B }

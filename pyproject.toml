@@ -22,6 +22,7 @@ dependencies = [
 [project.optional-dependencies]
 plots = ["mplhep"]
 test = ["pytest", "pyarrow"]
+anchor = ["correctionlib"]   # resolve b-tag WPs from jsonpog-integration
 
 [project.scripts]
 delphes-validate = "delphes_pipeline.validation.run_validation:main"

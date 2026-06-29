@@ -31,7 +31,7 @@ def anchor_profiles(config: dict, *, bins, max_events: Optional[int] = None) -> 
     if not ac.get("enabled"):
         return {}
     nano = NanoAODEvents(
-        ac["nanoaod_path"], branches=ac.get("branches"), wp=ac.get("wp"),
+        ac["nanoaod_path"], branches=ac.get("branches"), wp=_resolve_wp(ac.get("wp", {})),
         entry_stop=ac.get("max_events", max_events),
     )
     out: dict[str, Profile] = {}
@@ -45,6 +45,16 @@ def anchor_profiles(config: dict, *, bins, max_events: Optional[int] = None) -> 
     for p in out.values():
         p.ylabel = (p.ylabel or "") + " (NanoAOD anchor)"
     return out
+
+
+def _resolve_wp(wp: dict) -> dict:
+    """Fill ``btag_medium`` from jsonpog-integration (CVMFS) when not set explicitly."""
+    wp = dict(wp)
+    if wp.get("btag_medium") is None and wp.get("btag_correctionlib"):
+        from . import correctionlib_wp
+        wp["btag_medium"] = correctionlib_wp.resolve_btag_wp(wp["btag_correctionlib"])
+        print(f"[tuning] resolved btag_medium = {wp['btag_medium']:.4f} from jsonpog-integration")
+    return wp
 
 
 def _nano_tau_eff(nano: NanoAODEvents, bins, *, dr=0.4, eta_max=2.5, pt_min=20.0) -> Profile:

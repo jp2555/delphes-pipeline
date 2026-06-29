@@ -203,3 +203,9 @@ so the efficiency/MET observables become actionable (residual + knob) without an
 hand-digitisation. Branch names and WPs are config (`anchor.branches`,
 `anchor.wp`), so a different NanoAOD era is a config edit. This is the recommended
 way to tune against CMS 2024 MC.
+
+**b-tag WP from CVMFS.** With `correctionlib`, `anchor.wp.btag_medium` is resolved
+from the official BTV `jsonpog-integration` JSON (the `<tagger>_wp_values`
+correction) rather than hand-entered — `tuning/correctionlib_wp.py`, auto-finding
+the UParT `*_wp_values` name (override per the config). `python -m
+delphes_pipeline.tuning.correctionlib_wp <json>` lists the available corrections.

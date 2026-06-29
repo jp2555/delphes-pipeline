@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import awkward as ak
 import numpy as np
+import pytest
 from conftest import build_ctx
 from make_nano_fixture import BTAG_WP, DEEPTAU_MEDIUM, make_nano_fixture
 
@@ -56,3 +57,29 @@ def test_tuning_uses_the_anchor_target(good_fixture_path, tmp_path):
     # the b-tag closure now has a target (the anchor), not 'no_target'
     assert r.status in ("on_target", "needs_tuning")
     assert r.extra.get("target") == "nanoaod_anchor"
+
+
+def test_correctionlib_wp_loader_resolves_medium(tmp_path):
+    pytest.importorskip("correctionlib")
+    import correctionlib.schemav2 as schema
+
+    corr = schema.Correction(
+        name="UParTAK4_wp_values", version=1,
+        inputs=[schema.Variable(name="working_point", type="string")],
+        output=schema.Variable(name="cut", type="real"),
+        data=schema.Category(
+            nodetype="category", input="working_point",
+            content=[schema.CategoryItem(key="L", value=0.10),
+                     schema.CategoryItem(key="M", value=0.40),
+                     schema.CategoryItem(key="T", value=0.80)],
+        ),
+    )
+    cset = schema.CorrectionSet(schema_version=2, corrections=[corr])
+    p = tmp_path / "btagging.json"
+    dump = getattr(cset, "model_dump_json", getattr(cset, "json", None))
+    p.write_text(dump())
+
+    from delphes_pipeline.tuning import correctionlib_wp as W
+    assert W.find_wp_correction(str(p), "UParT") == "UParTAK4_wp_values"
+    assert abs(W.load_wp(str(p), "UParTAK4_wp_values", "M") - 0.40) < 1e-9
+    assert abs(W.resolve_btag_wp({"json": str(p), "tagger": "UParT", "wp": "M"}) - 0.40) < 1e-9
