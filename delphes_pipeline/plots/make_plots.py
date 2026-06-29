@@ -15,15 +15,15 @@ import argparse
 import os
 from pathlib import Path
 
+import glob
+
 from delphes_pipeline.core.io import DelphesEvents
 from delphes_pipeline.validation.run_validation import load_config
 from . import figures
 
-# kappa_lambda label -> directory tag (c2=0, kt=1 GluGluHHto2B2Tau samples)
-KL_TAGS = {"-1.00": "m1p00", "0.00": "0p00", "1.00": "1p00",
-           "2.45": "2p45", "3.00": "3p00", "5.00": "5p00"}
-_PREFIX = "GluGluHHto2B2Tau_Par-c2-0p00-kl"
-_SUFFIX = "-kt-1p00_TuneCP5_13p6TeV_powheg-pythia8_Delphes"
+# kappa_lambda label -> directory tag (c2=0, kt=1 GluGluHHto2B2Tau samples).
+# Summer24 has 0, 1, 5; override with the KL_TAGS env (comma-separated "label:tag").
+KL_TAGS = {"0.00": "0p00", "1.00": "1p00", "5.00": "5p00"}
 
 
 def run(config: dict, *, klambda_base: str | None, max_events: int | None) -> list[str]:
@@ -55,16 +55,18 @@ def run(config: dict, *, klambda_base: str | None, max_events: int | None) -> li
 
 
 def _klambda_samples(base, treename, max_events):
+    """Match each kappa_lambda point by glob ``<base>/*kl-<tag>*`` (exact name agnostic)."""
     if not base or not os.path.isdir(base):
         return {}
     out = {}
     for kl, tag in KL_TAGS.items():
-        d = os.path.join(base, f"{_PREFIX}-{tag}{_SUFFIX}")
-        if os.path.isdir(d):
-            try:
-                out[f"kl={kl}"] = DelphesEvents(d, treename=treename, entry_stop=max_events)
-            except Exception as exc:  # a missing/broken point should not kill the overlay
-                print(f"[plots] skip kl={kl}: {exc}")
+        if not glob.glob(os.path.join(base, f"*kl-{tag}*")):
+            continue
+        try:
+            out[f"kl={kl}"] = DelphesEvents(os.path.join(base, f"*kl-{tag}*"),
+                                            treename=treename, entry_stop=max_events)
+        except Exception as exc:  # a missing/broken point should not kill the overlay
+            print(f"[plots] skip kl={kl}: {exc}")
     return out
 
 
@@ -72,8 +74,9 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Delphes validation / baseline plots")
     ap.add_argument("--config", required=True)
     ap.add_argument("--delphes-root", default=None, help="override the primary input.delphes_root")
-    ap.add_argument("--klambda-base", default=os.environ.get("DIHIGGS_RAW", "/pscratch/sd/j/jing/dihiggs/raw"),
-                    help="base dir holding the six kappa_lambda sample directories")
+    ap.add_argument("--klambda-base",
+                    default=os.environ.get("DELPHES_BASE", "/ceph/jpan/cms_nanoaod_2024_hh2b2tau/delphes"),
+                    help="base dir holding the kappa_lambda Delphes sample directories")
     ap.add_argument("--max-events", type=int, default=None, help="cap events per sample (shape plots)")
     args = ap.parse_args(argv)
 

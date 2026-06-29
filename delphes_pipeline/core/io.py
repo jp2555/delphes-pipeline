@@ -68,7 +68,14 @@ def resolve_paths(path: PathLike) -> list[str]:
     elif os.path.isdir(path):
         files = sorted(glob.glob(os.path.join(path, "**", "*.root"), recursive=True))
     elif any(ch in str(path) for ch in "*?["):
-        files = sorted(glob.glob(str(path), recursive=True))
+        # a glob may match sample directories (e.g. ".../delphes/*kl-1p00*") or
+        # ROOT files directly; expand matched directories to their *.root.
+        files = []
+        for m in sorted(glob.glob(str(path), recursive=True)):
+            if os.path.isdir(m):
+                files += sorted(glob.glob(os.path.join(m, "**", "*.root"), recursive=True))
+            elif m.endswith(".root"):
+                files.append(m)
     else:
         files = [str(path)]
     if not files:

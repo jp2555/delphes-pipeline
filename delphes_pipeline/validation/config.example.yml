@@ -3,18 +3,13 @@
 #   python -m delphes_pipeline.validation.run_validation --config config.yml
 
 input:
-  # A signal sample is one Delphes *directory* of ROOT files; the reader reads
-  # every *.root inside it (recursively). Set delphes_root to the kappa_lambda
-  # point to validate (default: the SM kl=1 point). The six GluGluHHto2B2Tau
-  # points under /pscratch/sd/j/jing/dihiggs/raw (c2=0.00, kt=1.00) are:
-  #   kl=-1.00  GluGluHHto2B2Tau_Par-c2-0p00-kl-m1p00-kt-1p00_TuneCP5_13p6TeV_powheg-pythia8_Delphes
-  #   kl= 0.00  GluGluHHto2B2Tau_Par-c2-0p00-kl-0p00-kt-1p00_TuneCP5_13p6TeV_powheg-pythia8_Delphes
-  #   kl= 1.00  GluGluHHto2B2Tau_Par-c2-0p00-kl-1p00-kt-1p00_TuneCP5_13p6TeV_powheg-pythia8_Delphes  (SM)
-  #   kl= 2.45  GluGluHHto2B2Tau_Par-c2-0p00-kl-2p45-kt-1p00_TuneCP5_13p6TeV_powheg-pythia8_Delphes
-  #   kl= 3.00  GluGluHHto2B2Tau_Par-c2-0p00-kl-3p00-kt-1p00_TuneCP5_13p6TeV_powheg-pythia8_Delphes
-  #   kl= 5.00  GluGluHHto2B2Tau_Par-c2-0p00-kl-5p00-kt-1p00_TuneCP5_13p6TeV_powheg-pythia8_Delphes
-  # To validate the card across all six at once, use runners/validate_all.sh.
-  delphes_root: /pscratch/sd/j/jing/dihiggs/raw/GluGluHHto2B2Tau_Par-c2-0p00-kl-1p00-kt-1p00_TuneCP5_13p6TeV_powheg-pythia8_Delphes
+  # A signal sample is a directory of Delphes ROOT files; delphes_root may be a
+  # file, a directory (read recursively), or a glob. On KIT ETP deepthought the
+  # Summer24 samples live under /ceph/jpan/cms_nanoaod_2024_hh2b2tau/. The glob
+  # below matches the SM (kl=1) Delphes sample regardless of its exact dir name;
+  # a directory glob is expanded to its *.root. kappa_lambda points: 0, 1, 5.
+  # Validate all three at once with runners/validate_all.sh.
+  delphes_root: /ceph/jpan/cms_nanoaod_2024_hh2b2tau/delphes/*kl-1p00*
   treename: Delphes
   max_events: null            # null = all; set an int for a fast smoke run
 
@@ -26,16 +21,17 @@ references:
 # Private NanoAOD tuning anchor (note Sec.3, 6.4). When enabled, the tuning lens
 # measures the SAME object response on this CMS NanoAOD and uses it as the target
 # (b-tag/lepton via the shared observables, tau_eff via GenVisTau+DeepTau, MET
-# overall). Fill nanoaod_path and the two working points; adjust branch names to
-# your NanoAOD era (defaults are 2024 NanoAODv14/15).
+# overall). Object response is ~kappa_lambda-independent, so the SM (kl=1) NanoAOD
+# is the anchor. NanoAODv15 / 2024 -> UParT-AK4 b-tag + DeepTau v2p5.
 anchor:
-  enabled: false
-  nanoaod_path: /pscratch/sd/j/jing/dihiggs/nanoaod/<your_2024_MC_sample>   # file/glob/dir
+  enabled: false               # set true once the two WPs below are filled
+  # SM kl=1 NanoAODv15 (central PowhegBugFix + its ext1; excludes 150X-kit-private).
+  nanoaod_path: /ceph/jpan/cms_nanoaod_2024_hh2b2tau/*kl-1p00*NanoAODv15-PowhegBugFix*
   max_events: 200000           # cap for the anchor measurement (shape only)
   wp:
     btag_medium: null          # REQUIRED: UParT-AK4 Medium discriminant threshold (BTV 2024)
-    deeptau_vsjet_medium: null # REQUIRED: DeepTau v2p5 VSjet Medium WP integer (TAU)
-  branches:                    # override only what differs from the NanoAODv14/15 defaults
+    deeptau_vsjet_medium: 16    # DeepTau v2p5 VSjet Medium bit (NanoAOD bitmask; reader uses >=)
+  branches:                    # NanoAODv15 defaults; override only if your era differs
     jet: { btag_disc: Jet_btagUParTAK4B }
     tau: { vsjet: Tau_idDeepTau2018v2p5VSjet }
 

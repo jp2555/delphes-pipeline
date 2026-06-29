@@ -49,6 +49,22 @@ def test_reader_finds_nested_tree_subdir(tmp_path):
     assert ev.n == 400
 
 
+def test_glob_matching_a_sample_dir_expands_to_root_files(tmp_path):
+    # ".../delphes/*kl-1p00*" must match the kl=1 sample dir and read its files,
+    # without matching kl=0 (the deepthought layout).
+    base = tmp_path / "delphes"
+    one = base / "GluGluHH_kl-1p00_Delphes" / "delphes-tree-abc"
+    one.mkdir(parents=True)
+    make_fixture(str(one / "t_0.root"), n_events=120, seed=1)
+    make_fixture(str(one / "t_1.root"), n_events=80, seed=2)
+    zero = base / "GluGluHH_kl-0p00_Delphes"
+    zero.mkdir(parents=True)
+    make_fixture(str(zero / "t.root"), n_events=50, seed=3)
+
+    ev = DelphesEvents(str(base / "*kl-1p00*"))
+    assert ev.n == 200  # both kl=1 files, not the kl=0 file
+
+
 def test_lazy_open_stops_early(tmp_path):
     sample = tmp_path / "sample"
     sample.mkdir()
