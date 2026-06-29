@@ -49,6 +49,34 @@ def test_anchor_profiles_recover_injection(tmp_path):
     assert abs(prof["met_resolution"].values[0] - 18.0) < 2.5
 
 
+def test_nano_tau_mistag_is_per_jet_not_crossjet(tmp_path):
+    """Two collinear fake jets sharing ONE Medium τ -> per-jet mistag 0.5, not 1.0.
+
+    The τ is within ΔR<0.4 of both jets; a unique nearest match attributes it to one
+    jet only, while a match-to-any would double-count it onto the collinear neighbour.
+    """
+    import uproot
+
+    n = 400
+    two = lambda a, b: [[a, b]] * n
+    one = lambda a: [[a]] * n
+    with uproot.recreate(str(tmp_path / "nano.root")) as f:
+        f["Events"] = {
+            "Jet_pt": ak.Array(two(40.0, 42.0)), "Jet_eta": ak.Array(two(0.0, 0.1)),
+            "Jet_phi": ak.Array(two(0.0, 0.1)), "Jet_mass": ak.Array(two(8.0, 8.0)),
+            "Jet_hadronFlavour": ak.Array(two(0, 0)), "Jet_btagUParTAK4B": ak.Array(two(0.0, 0.0)),
+            "Tau_pt": ak.Array(one(40.0)), "Tau_eta": ak.Array(one(0.0)), "Tau_phi": ak.Array(one(0.0)),
+            "Tau_mass": ak.Array(one(1.0)), "Tau_idDeepTau2018v2p5VSjet": ak.Array(one(31)),
+            "Tau_genPartFlav": ak.Array(one(0)),
+            # a GenVisTau far from both jets: gives the veto a real record but removes nothing
+            "GenVisTau_pt": ak.Array(one(30.0)), "GenVisTau_eta": ak.Array(one(2.0)),
+            "GenVisTau_phi": ak.Array(one(2.0)), "GenVisTau_mass": ak.Array(one(1.0)),
+        }
+    nano = NanoAODEvents(str(tmp_path / "nano.root"), wp=_wp())
+    prof = A._nano_tau_mistag(nano, obs.DEFAULT_PT_BINS)
+    assert abs(float(np.average(prof.values, weights=prof.counts)) - 0.5) < 0.02
+
+
 def test_tuning_uses_the_anchor_target(good_fixture_path, tmp_path):
     nano = tmp_path / "nano.root"
     make_nano_fixture(str(nano), n_events=6000, seed=3)

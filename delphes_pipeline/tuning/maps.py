@@ -104,6 +104,8 @@ def retag_tautag(events, maps: TuningMaps, rng: np.random.Generator) -> ak.Array
     counts = ak.num(jets)
     gen_taus = events.gen[np.abs(events.gen.pid) == _GEN_TAU_PID]
     genuine = ak.to_numpy(ak.flatten(matched_to_any(jets, gen_taus, 0.4)))
+    # ε is evaluated at the jet pT (≈ the visible-τ pT for a genuine τ-jet); a steeply
+    # pT-dependent tau_eff carries a mild jet-vs-gen-τ-pT smearing in the closure.
     pt = ak.to_numpy(ak.flatten(jets.pt))
     eff = np.where(genuine, maps.efficiency("tau_eff", pt), maps.efficiency("tau_mistag", pt))
     tag = (rng.random(pt.shape) < eff).astype(np.int32)

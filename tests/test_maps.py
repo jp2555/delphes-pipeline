@@ -19,6 +19,7 @@ from delphes_pipeline.tuning.maps import (
     TuningMaps,
     derive_maps,
     retag_btag,
+    retag_jets,
     save_maps,
 )
 
@@ -27,11 +28,20 @@ def _wp():
     return {"btag_medium": BTAG_WP, "deeptau_vsjet_medium": DEEPTAU_MEDIUM}
 
 
-def _const_maps(b: float, c: float, light: float) -> TuningMaps:
-    """A flat (pT-independent) efficiency map per flavour."""
+def _mk(v):
     pts = [20.0, 50.0, 100.0, 200.0, 400.0]
-    mk = lambda v: {"x": "pt", "centers": pts, "values": [v] * len(pts), "counts": [100] * len(pts)}
-    return TuningMaps({"btag_eff_b": mk(b), "btag_eff_c": mk(c), "btag_mistag_light": mk(light)})
+    return {"x": "pt", "centers": pts, "values": [v] * len(pts), "counts": [100] * len(pts)}
+
+
+def _const_maps(b: float, c: float, light: float) -> TuningMaps:
+    """A flat (pT-independent) b-tag efficiency map per flavour."""
+    return TuningMaps({"btag_eff_b": _mk(b), "btag_eff_c": _mk(c), "btag_mistag_light": _mk(light)})
+
+
+def _const_maps_full(b, c, light, tau_eff, tau_mistag) -> TuningMaps:
+    """A flat b-tag + τ_h map (both tag fields covered)."""
+    return TuningMaps({"btag_eff_b": _mk(b), "btag_eff_c": _mk(c), "btag_mistag_light": _mk(light),
+                       "tau_eff": _mk(tau_eff), "tau_mistag": _mk(tau_mistag)})
 
 
 def test_retag_recovers_injected_efficiency(good_fixture_path):
@@ -152,6 +162,44 @@ def test_tau_retag_closes_the_loop(good_fixture_path, tmp_path):
     assert tuned["btag_eff_b"].extra.get("retagged") is True
     assert not tuned["tau_energy_response"].extra.get("retagged")
     assert tuned["mbb_peak"].residual == base["mbb_peak"].residual
+    # leptons are not routed through the re-tagged view
+    assert tuned["electron_eff"].residual == base["electron_eff"].residual
+    assert not tuned["electron_eff"].extra.get("retagged")
+
+
+def test_convert_retags_tau_collection(good_fixture_path, tmp_path):
+    """The ntuple Tau collection (build_taus selects tautag==1) follows the τ_h re-tag."""
+    stock = convert(good_fixture_path, str(tmp_path / "stock.parquet"))
+    # tau_eff = tau_mistag = 1 -> every jet is τ-tagged -> Tau collection == all jets
+    maps = _const_maps_full(0.7, 0.2, 0.05, tau_eff=1.0, tau_mistag=1.0)
+    tuned = convert(good_fixture_path, str(tmp_path / "tuned.parquet"), tuning_maps=maps)
+    n_jets = int(ak.sum(ak.num(tuned["Jet"])))
+    n_tau = int(ak.sum(ak.num(tuned["Tau"])))
+    assert n_tau == n_jets                                    # every jet became a Tau
+    assert n_tau != int(ak.sum(ak.num(stock["Tau"])))        # changed from stock
+    assert int(ak.sum(tuned["Jet"].tautag)) == n_tau         # Tau count == #(tautag==1)
+
+
+def test_lens_and_ntuplizer_tags_agree(good_fixture_path, tmp_path):
+    """Invariant: the lens re-tag view and the ntuplizer emit identical tags at seed 0."""
+    maps = _const_maps_full(0.7, 0.3, 0.05, tau_eff=0.6, tau_mistag=0.1)
+    view = RetaggedEvents(DelphesEvents(good_fixture_path), maps, np.random.default_rng(0))
+    arr = convert(good_fixture_path, str(tmp_path / "t.parquet"), tuning_maps=maps, seed=0)
+    assert view.retagged_fields == frozenset({"btag", "tautag"})
+    assert ak.all(view.jets.btag == arr["Jet"].btag)
+    assert ak.all(view.jets.tautag == arr["Jet"].tautag)
+
+
+def test_retag_jets_field_selection(good_fixture_path):
+    """retag_jets re-tags a field only when ALL its maps are present (backward-compat)."""
+    ev = DelphesEvents(good_fixture_path)
+    fields = lambda m: retag_jets(ev, m, np.random.default_rng(0))[1]
+    btag_only = _const_maps(0.7, 0.2, 0.05)
+    assert fields(btag_only) == frozenset({"btag"})
+    # b-tag + tau_eff but NO tau_mistag -> tautag NOT re-tagged (needs both τ maps)
+    assert fields(TuningMaps({**btag_only.maps, "tau_eff": _mk(0.6)})) == frozenset({"btag"})
+    # τ maps only -> tautag only
+    assert fields(TuningMaps({"tau_eff": _mk(0.6), "tau_mistag": _mk(0.1)})) == frozenset({"tautag"})
 
 
 def test_convert_cli_applies_maps_from_flag(good_fixture_path, tmp_path):

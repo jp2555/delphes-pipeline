@@ -16,7 +16,7 @@ import awkward as ak
 import numpy as np
 
 from delphes_pipeline.core import observables as obs
-from delphes_pipeline.core.matching import matched_to_any, nearest_target_field
+from delphes_pipeline.core.matching import matched_to_any, nearest_target_field, unique_match
 from delphes_pipeline.core.nanoaod import NanoAODEvents
 from delphes_pipeline.core.observables import Profile
 
@@ -81,12 +81,14 @@ def _nano_tau_eff(nano: NanoAODEvents, bins, *, dr=0.4, eta_max=2.5, pt_min=20.0
 def _nano_tau_mistag(nano: NanoAODEvents, bins, *, dr=0.4, eta_max=2.5, pt_min=20.0) -> Profile:
     """jet→τ_h mistag on NanoAOD: acceptance jets *not* near a GenVisTau that match a
     DeepTau-Medium ``Tau`` (mirrors ``observables.tau_mistag``, where the Delphes TauTag
-    bit is replaced by a ΔR match to a Medium reco τ)."""
+    bit is replaced by a reco τ match). The match is a *unique* nearest one (each Medium
+    τ tags at most one jet) so a fake τ on one jet is not double-counted onto a collinear
+    neighbour — that cross-jet leakage would bias the per-jet fake rate high."""
     jets = nano.jets
     acc = jets[(np.abs(jets.eta) <= eta_max) & (jets.pt > pt_min)]
     fake = acc[~matched_to_any(acc, nano.genvistau, dr)]
     medium = nano.taus[nano.taus.vsjet >= nano.deeptau_medium()]
-    tagged = ak.to_numpy(ak.flatten(matched_to_any(fake, medium, dr)))
+    tagged = unique_match(fake, medium, dr)
     prof = obs.binned_efficiency(ak.to_numpy(ak.flatten(fake.pt)), tagged, bins, quantity="tau_mistag", x="pt")
     prof.xlabel, prof.ylabel = "jet pT [GeV]", "tau_mistag"
     return prof
