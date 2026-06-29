@@ -38,6 +38,16 @@ def test_level4_resolution_gate_fails_on_smeared(tmp_path):
     assert not r["level4.mhh.resolution"].passed  # resolution gate fails
 
 
+def test_level4_gen_mhh_robust_to_pythia_copies(tmp_path):
+    """gen m_HH uses the hard Higgs, so b/τ shower copies + low-status Higgs copies in the
+    full Pythia record don't corrupt the denominator (a leading-pT b/τ selection would)."""
+    p = tmp_path / "hh.root"
+    make_hhbbtt_fixture(str(p), n_events=5000, seed=1, bjet_smear=0.10, add_copies=True)
+    r = _by(str(p))
+    assert r["level4.mhh.scale"].passed and abs(r["level4.mhh.scale"].measured - 1.0) < 0.10
+    assert r["level4.mhh.resolution"].passed
+
+
 def test_level4_reports_no_gen_on_non_signal(good_fixture_path):
-    # the good fixture has no gen b-quarks -> Level 4 cannot reconstruct gen m_HH
+    # the good fixture has no gen Higgs -> Level 4 cannot reconstruct gen m_HH
     assert "level4.mhh.no_gen" in _by(good_fixture_path)

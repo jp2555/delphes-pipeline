@@ -49,7 +49,7 @@ def _gen(pid, p4):
 
 
 def make_hhbbtt_fixture(path, *, n_events=3000, seed=0, mhh_lo=250.0, mhh_hi=800.0,
-                        bjet_response=1.0, bjet_smear=0.0, met_res=12.0) -> None:
+                        bjet_response=1.0, bjet_smear=0.0, met_res=12.0, add_copies=False) -> None:
     rng = np.random.default_rng(seed)
     jets, ele, muo, gen, met, genmet = [], [], [], [], [], []
     for _ in range(n_events):
@@ -63,7 +63,8 @@ def make_hhbbtt_fixture(path, *, n_events=3000, seed=0, mhh_lo=250.0, mhh_hi=800
         gs.append(_gen(25, h_bb)); gs.append(_gen(25, h_tt))
 
         # H -> b b̄: gen quarks + reco b-jets (reco pT = gen × response × smear)
-        for b in _two_body(rng, h_bb, 4.7, 4.7):
+        b_pair = _two_body(rng, h_bb, 4.7, 4.7)
+        for b in b_pair:
             gs.append(_gen(5, b))
             pt, eta, phi = _ptetaphi(b)
             reco_pt = pt * bjet_response * (1.0 + rng.normal(0, bjet_smear))
@@ -72,7 +73,8 @@ def make_hhbbtt_fixture(path, *, n_events=3000, seed=0, mhh_lo=250.0, mhh_hi=800
         # H -> τ τ: gen τ's + visible legs (x) with neutrinos -> reco τ_h/lepton + MET
         leptonic = rng.random() < 0.5
         nu_x = nu_y = 0.0
-        for i, t in enumerate(_two_body(rng, h_tt, 1.777, 1.777)):
+        tau_pair = _two_body(rng, h_tt, 1.777, 1.777)
+        for i, t in enumerate(tau_pair):
             gs.append(_gen(15 * (1 if i == 0 else -1), t))
             _e, tx, ty, tz = t
             is_lep = leptonic and i == 0
@@ -85,6 +87,19 @@ def make_hhbbtt_fixture(path, *, n_events=3000, seed=0, mhh_lo=250.0, mhh_hi=800
                 (es if rng.random() < 0.5 else ms).append(_lep(pt_v, eta_v, phi_v, -1 if i == 0 else 1))
             else:
                 js.append(_jet(pt_v, eta_v, phi_v, flavor=0, btag=0, tautag=1, mass=float(rng.uniform(0.6, 1.5))))
+        if add_copies:
+            # mimic the full Pythia record: extra |pid| copies of the b's/τ's (which would
+            # fool a leading-pT b/τ selection) + low-status Higgs copies (must be filtered
+            # by status>=20). gen m_HH (Higgs-based) must ignore all of these.
+            for b in b_pair:
+                gs.append(_gen(5, b))                                  # duplicate hard b
+            gs.append(_gen(5, (b_pair[0][0] * 0.4, b_pair[0][1] * 0.4,  # a soft radiated b
+                               b_pair[0][2] * 0.4, b_pair[0][3] * 0.4)))
+            for t in tau_pair:
+                gs.append(_gen(15, t))                                 # duplicate hard τ
+            for h in (h_bb, h_tt):
+                c = _gen(25, h); c["Status"] = 5; gs.append(c)         # low-status Higgs copy
+
         mx, my = nu_x + rng.normal(0, met_res), nu_y + rng.normal(0, met_res)
         met.append([{"MET": math.hypot(mx, my), "Eta": 0.0, "Phi": math.atan2(my, mx)}])
         genmet.append([{"MET": math.hypot(nu_x, nu_y), "Eta": 0.0, "Phi": math.atan2(nu_y, nu_x)}])

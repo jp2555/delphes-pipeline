@@ -20,6 +20,7 @@ from delphes_pipeline.extensions.mtautau import ditau_system
 
 _MHH_BINS = [250, 300, 350, 400, 500, 700, 1000]
 _THRESHOLD = (250.0, 400.0)   # the κ_λ-critical window
+_HIGGS_PID = 25
 
 
 def _coll_p4_sum(coll) -> tuple:
@@ -37,17 +38,21 @@ def _mass(px, py, pz, e):
 
 
 def _gen_mhh(ev) -> np.ndarray:
-    """gen m_HH = mass of (2 leading gen b-quarks + 2 leading gen τ's); NaN if either is absent."""
+    """gen m_HH = invariant mass of the two gen Higgs (|pid|==25); NaN if <2 are present.
+
+    Selects the two leading-pT Higgs after preferring hard/intermediate copies (status>=20)
+    — the b-quarks and τ's proliferate into many shower/status copies in the full Pythia
+    record, so the Higgs are the robust gen handle (same heuristic as plots.quantities.gen_mhh).
+    """
     gen = ev.gen
-    b = gen[np.abs(gen.pid) == 5]
-    t = gen[np.abs(gen.pid) == 15]
-    b2 = b[ak.argsort(b.pt, axis=1, ascending=False)][:, :2]
-    t2 = t[ak.argsort(t.pt, axis=1, ascending=False)][:, :2]
-    bx, by, bz, be = _coll_p4_sum(b2)
-    tx, ty, tz, te = _coll_p4_sum(t2)
-    m = _mass(bx + tx, by + ty, bz + tz, be + te)
-    ok = ak.to_numpy((ak.num(b2) == 2) & (ak.num(t2) == 2))
-    m[~ok] = np.nan
+    h = gen[np.abs(gen.pid) == _HIGGS_PID]
+    if "status" in h.fields:
+        hard = h[h.status >= 20]
+        h = ak.where(ak.num(hard) >= 2, hard, h)
+    h2 = h[ak.argsort(h.pt, axis=1, ascending=False, stable=True)][:, :2]
+    px, py, pz, e = _coll_p4_sum(h2)
+    m = _mass(px, py, pz, e)
+    m[ak.to_numpy(ak.num(h2) < 2)] = np.nan
     return m
 
 
