@@ -24,7 +24,7 @@ references:
 # overall). Object response is ~kappa_lambda-independent, so the SM (kl=1) NanoAOD
 # is the anchor. NanoAODv15 / 2024 -> UParT-AK4 b-tag + DeepTau v2p5.
 anchor:
-  enabled: false               # set true once the two WPs below are filled
+  enabled: true                # measure the tuning targets on the NanoAOD anchor
   # SM kl=1 NanoAODv15 (central PowhegBugFix + its ext1; excludes 150X-kit-private).
   nanoaod_path: /ceph/jpan/cms_nanoaod_2024_hh2b2tau/*kl-1p00*NanoAODv15-PowhegBugFix*
   max_events: 200000           # cap for the anchor measurement (shape only)
