@@ -141,10 +141,23 @@ def run_tuning(ctx: ValidationContext) -> list[TuningResult]:
         json.dump(payload, fh, indent=2, default=str)
     (ctx.output_dir / "tuning_report.md").write_text(_render_md(ctx, results))
 
-    n_tune = sum(r.status == "needs_tuning" for r in results)
-    n_notarget = sum(r.status in ("no_target", "no_data") for r in results)
-    print(f"[tuning] {len(results)} observables: {n_tune} need tuning, {n_notarget} lack a target/data "
-          f"-> {ctx.output_dir / 'tuning_report.md'}")
+    from collections import Counter
+
+    c = Counter(r.status for r in results)
+    print(f"[tuning] read {ctx.provenance.get('n_events', '?')} events from "
+          f"{ctx.provenance.get('input_path', '?')}")
+    print(f"[tuning] {len(results)} observables: "
+          f"{c.get('on_target', 0)} on target · {c.get('needs_tuning', 0)} need tuning · "
+          f"{c.get('no_target', 0)} measured but no target curve · {c.get('no_data', 0)} no data")
+    for r in results:
+        bins = len(r.extra.get("counts", [])) if isinstance(r.extra, dict) else 0
+        n = int(np.sum(r.extra["counts"])) if isinstance(r.extra, dict) and r.extra.get("counts") else 0
+        suffix = f"  ({bins} bins, {n} entries)" if bins else ""
+        print(f"           {r.observable:22s} {_STATUS_MARK.get(r.status, r.status)}{suffix}")
+    if c.get("no_target", 0):
+        print("[tuning] 'no target' = measured fine, but no digitised POG/anchor curve to tune toward. "
+              "Drop validation/references/data/<observable>.json to enable those.")
+    print(f"[tuning] -> {ctx.output_dir / 'tuning_report.md'}")
     return results
 
 
@@ -158,6 +171,9 @@ def _render_md(ctx: ValidationContext, results: list[TuningResult]) -> str:
         "# Delphes object-tuning report", "",
         f"input: `{prov.get('input_path', '?')}` ({prov.get('n_events', '?')} events)  ·  "
         f"card sha256 `{str(prov.get('card_sha256'))[:12]}`  ·  tuning set {prov.get('tuning_set', '?')}",
+        "",
+        "_Status: ✅ on target · 🔧 needs tuning · ○ **measured, but no digitised target curve "
+        "to tune toward** (drop `validation/references/data/<observable>.json`) · — no data._",
         "",
         "| observable | status | residual | card knob | action |",
         "|---|---|---|---|---|",
