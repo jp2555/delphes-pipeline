@@ -45,8 +45,15 @@ anchor:
 output:
   dir: outputs/validation
 
-# Which ladder levels to run. pilot_gate + level0 + ntuplizer are implemented;
-# level1-4 are stubs and stay disabled until background samples / v0 land.
+# Level-1 candle samples (note §6.2). The candles run on these background Delphes
+# samples (not the signal). Set enabled: true under levels.level1 to run them.
+candles:
+  ttbar:   /ceph/jpan/cms_nanoaod_2024_hh2b2tau/delphes/*TTto2L2Nu*   # eμ b-tag closure
+  ztautau: /ceph/jpan/cms_nanoaod_2024_hh2b2tau/delphes/*DYto2Tau*    # Z->ττ estimator chain
+  max_events: 200000
+
+# Which ladder levels to run. pilot_gate + level0 + ntuplizer + level1 implemented;
+# level2-4 are stubs and stay disabled until they are built.
 levels:
   pilot_gate:
     enabled: true
@@ -60,7 +67,7 @@ levels:
   ntuplizer:
     enabled: true             # convert a slice and validate the flat schema + counts
     max_events: 2000
-  level1: { enabled: false }
+  level1: { enabled: false }  # set true once candles.{ttbar,ztautau} point at the samples
   level2: { enabled: false }
   level3: { enabled: false }
   level4: { enabled: false }
@@ -75,6 +82,8 @@ tolerances:
     mbb_core_fraction_min: 0.30     # min fraction of leading pairs in the 100-150 GeV core
     met_resolution_max_gev: 40.0    # width of (MET - GenMET) sanity ceiling
     kb_per_event_max: 150.0         # storage projection ceiling (full TreeWriter)
+  level1:
+    eb_closure_rel_tol: 0.10        # tt̄ in-situ ε_b vs the tuned input
   level0:
     closure_rel_tol: 0.05           # per-bin systematic tolerance on |measured/expected - 1|
     closure_nsigma: 2.0             # a bin fails only if it also misses by > this many stat sigma

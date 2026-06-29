@@ -1,0 +1,118 @@
+"""Synthetic tt̄ and Z→ττ Delphes fixtures for the Level-1 candle tests.
+
+``make_ttbar_fixture`` writes eμ events with exactly two b-jets tagged at an
+injected efficiency (so the in-situ ε_b recovers it). ``make_dy_fixture`` writes a
+visible di-τ resonance (τ_hτ_h / ℓτ_h, no b-jets) at a target visible mass.
+"""
+
+from __future__ import annotations
+
+import math
+
+import awkward as ak
+import numpy as np
+import uproot
+from make_fixture import _boost
+
+
+def _jet(pt, eta, phi, flavor, btag, tautag=0, mass=8.0):
+    return {"PT": float(pt), "Eta": float(eta), "Phi": float(phi), "Mass": float(mass),
+            "Flavor": int(flavor), "BTag": int(btag), "TauTag": int(tautag), "Charge": 0}
+
+
+def _lep(pt, eta, phi, charge):
+    return {"PT": float(pt), "Eta": float(eta), "Phi": float(phi), "Charge": int(charge)}
+
+
+def _met_records(rng, res=22.0):
+    gmx, gmy = rng.normal(0, 30), rng.normal(0, 30)
+    mx, my = gmx + rng.normal(0, res), gmy + rng.normal(0, res)
+    return ([{"MET": math.hypot(mx, my), "Eta": 0.0, "Phi": math.atan2(my, mx)}],
+            [{"MET": math.hypot(gmx, gmy), "Eta": 0.0, "Phi": math.atan2(gmy, gmx)}])
+
+
+def _write(path, *, jets, electrons, muons, gen, met, genmet):
+    n = len(jets)
+    payload = {}
+    # an all-empty (fieldless) collection cannot be typed by uproot -> omit it;
+    # the reader treats a missing branch as a per-event empty collection.
+    for name, coll in (("Jet", jets), ("Electron", electrons), ("Muon", muons), ("Particle", gen)):
+        if any(len(ev) for ev in coll):
+            payload[name] = ak.Array(coll)
+    payload["MissingET"] = ak.Array(met)
+    payload["GenMissingET"] = ak.Array(genmet)
+    payload["Event"] = ak.Array([[{"Weight": 1.0}] for _ in range(n)])
+    payload["ScalarHT"] = ak.Array([[{"HT": float(sum(j["PT"] for j in js))}] for js in jets])
+    with uproot.recreate(path) as f:
+        f["Delphes"] = payload
+
+
+def make_ttbar_fixture(path, *, n_events=3000, seed=0, btag_eff=0.70) -> float:
+    rng = np.random.default_rng(seed)
+    jets, ele, muo, gen, met, genmet = [], [], [], [], [], []
+    for _ in range(n_events):
+        js = []
+        for _b in range(2):  # exactly two b-jets
+            pt = float(rng.exponential(50) + 30)
+            js.append(_jet(pt, rng.uniform(-2.3, 2.3), rng.uniform(-math.pi, math.pi),
+                           flavor=5, btag=int(rng.random() < btag_eff)))
+        for _l in range(int(rng.integers(0, 3))):  # a few light jets, b-veto-irrelevant
+            pt = float(rng.exponential(25) + 20)
+            js.append(_jet(pt, rng.uniform(-2.5, 2.5), rng.uniform(-math.pi, math.pi),
+                           flavor=0, btag=int(rng.random() < 0.01)))
+        ch = int(rng.choice([-1, 1]))
+        ele.append([_lep(rng.exponential(25) + 20, rng.uniform(-2.4, 2.4), rng.uniform(-math.pi, math.pi), ch)])
+        muo.append([_lep(rng.exponential(25) + 20, rng.uniform(-2.4, 2.4), rng.uniform(-math.pi, math.pi), -ch)])
+        gen.append([])
+        m, gm = _met_records(rng, res=28.0)
+        met.append(m); genmet.append(gm); jets.append(js)
+    _write(path, jets=jets, electrons=ele, muons=muo, gen=gen, met=met, genmet=genmet)
+    return btag_eff
+
+
+def make_dy_fixture(path, *, n_events=3000, seed=0, vis_mass=65.0, width=8.0) -> float:
+    rng = np.random.default_rng(seed)
+    jets, ele, muo, gen, met, genmet = [], [], [], [], [], []
+    for _ in range(n_events):
+        js, gs, es, ms = [], [], [], []
+        leptonic = rng.random() < 0.5  # half ℓτ_h, half τ_hτ_h
+        for i, (pt, eta, phi) in enumerate(_ditau(rng, vis_mass, width)):
+            gs.append({"PID": 15 * (1 if i == 0 else -1), "Status": 2, "PT": float(pt), "Eta": float(eta),
+                       "Phi": float(phi), "Mass": 1.777, "Charge": 0, "M1": -1, "M2": -1, "D1": -1, "D2": -1})
+            if leptonic and i == 0:  # one leg as a lepton
+                (es if rng.random() < 0.5 else ms).append(_lep(pt, eta, phi, int(rng.choice([-1, 1]))))
+            else:
+                js.append(_jet(pt, eta, phi, flavor=0, btag=0, tautag=1))
+        jets.append(js); gen.append(gs); ele.append(es); muo.append(ms)
+        m, gm = _met_records(rng, res=20.0)
+        met.append(m); genmet.append(gm)
+    # ensure Electron/Muon branches are typed even if a run produced none
+    if not any(ele):
+        ele[0] = [_lep(30, 0, 0, 1)]
+    if not any(muo):
+        muo[0] = [_lep(30, 0, 0, 1)]
+    _write(path, jets=jets, electrons=ele, muons=muo, gen=gen, met=met, genmet=genmet)
+    return vis_mass
+
+
+def _ditau(rng, mass, width):
+    mh = max(float(rng.normal(mass, width)), 20.0)
+    mtau = 1.777
+    e = mh / 2.0
+    p = math.sqrt(max(e * e - mtau * mtau, 0.0))
+    ct = rng.uniform(-1, 1)
+    st = math.sqrt(max(1 - ct * ct, 0.0))
+    ph = rng.uniform(-math.pi, math.pi)
+    d = (st * math.cos(ph), st * math.sin(ph), ct)
+    rest = [(e, p * d[0], p * d[1], p * d[2]), (e, -p * d[0], -p * d[1], -p * d[2])]
+    pth = float(rng.exponential(35))
+    etah, phih = rng.uniform(-1.5, 1.5), rng.uniform(-math.pi, math.pi)
+    pxh, pyh, pzh = pth * math.cos(phih), pth * math.sin(phih), pth * math.sinh(etah)
+    eh = math.sqrt(pxh**2 + pyh**2 + pzh**2 + mh**2)
+    beta = (pxh / eh, pyh / eh, pzh / eh)
+    out = []
+    for vr in rest:
+        _e, px, py, pz = _boost(vr, beta)
+        pt = math.hypot(px, py)
+        out.append((pt, math.asinh(pz / pt) if pt > 1e-6 else 0.0, math.atan2(py, px)))
+    return out

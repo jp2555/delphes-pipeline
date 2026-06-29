@@ -209,3 +209,19 @@ from the official BTV `jsonpog-integration` JSON (the `<tagger>_wp_values`
 correction) rather than hand-entered — `tuning/correctionlib_wp.py`, auto-finding
 the UParT `*_wp_values` name (override per the config). `python -m
 delphes_pipeline.tuning.correctionlib_wp <json>` lists the available corrections.
+
+## Level-1 candles (note §6.2)
+
+Two candles run on the **background** Delphes samples (`config.candles.{ttbar,ztautau}`),
+aggregated by `validation/level1_candles/run(ctx)`:
+
+- **tt̄ dilepton** (`TTto2L2Nu`) — eμ-OS selection; the GATE is the in-situ
+  tag-counting closure ε_b = 2N₂/(N₁+2N₂) (note Eq. 2) vs the tuned input
+  (card formula / anchor); plus A×ε and the pᵀᵐⁱˢˢ tail.
+- **Z→ττ** (`DYto2Tau`) — ℓτ_h/τ_hτ_h with a b-veto; visible m_ττ peak/width,
+  channel ratio, and the low-mass jet→τ_h fake sideband. The model-independent
+  "peak at m_Z" check is hooked to the m_ττ estimator (decision D1,
+  `extensions/mtautau.py`) and reports *pending* until that is built.
+
+The estimator-dependent checks and the POG/anchor yield targets are the
+documented remainder; the tt̄ ε_b closure is the one GATE today.

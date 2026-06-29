@@ -1,22 +1,26 @@
-# Level 1 — Standard candles (STUB)
+# Level 1 — Standard candles (note §6.2)
 
-Two candles that together exercise every Tier-1 object (note §6.2). This is the
-first level at which the simulation can genuinely fail. **Blocked on background
-sample production** (note Table 3).
+Two candles on the **background** samples that together exercise every Tier-1
+object. `run(ctx)` opens `config.candles.{ttbar,ztautau}` and runs both
+(`ttbar.py`, `ztautau.py`); shared selections live in `selections.py`.
 
-## Z → ττ — the τ + pᵀᵐⁱˢˢ-estimator chain
-- Selection: same object defs + trigger emulation as the analysis (ℓτ_h, τ_hτ_h);
-  two opposite-sign τ; **b-jet veto** (decouples from b-tag tuning).
-- Generator requirement: τ spin correlations correct (`TauDecays:externalMode`).
-- Checks: estimator peak at m_Z (±2–3 GeV, model-independent); peak width vs
-  anchor (10–15%); yield + channel ratios (±10%); low-mass sideband (fake rate).
+## tt̄ dilepton — `TTto2L2Nu` (built)
+- Selection: eμ opposite-sign (removes Z by construction → high tt̄ purity).
+- **`eb_insitu_closure` (GATE)**: ε_b = 2N₂/(N₁+2N₂) over events with exactly two
+  truth b-jets (note Eq. 2), vs the tuned input (card formula; the NanoAOD anchor
+  once wired) — extracts the per-jet b-eff from the topology itself.
+- `acceptance` (A×ε) and the `met_mean` / tail (real-neutrino pᵀᵐⁱˢˢ) — info.
 
-## tt̄ dilepton — b-tagging, leptons, real pᵀᵐⁱˢˢ
-- Selection: eμ channel, one and two b-tags (eμ removes Z by construction).
-- Checks: absolute yield (±10–15%, σ known to ~3%); pᵀᵐⁱˢˢ tail shape; the
-  in-situ tag-counting closure ε_b = 2N₂/(N₁+2N₂) vs the tuned input.
+## Z → ττ — `DYto2Tau` (scaffolded; m_Z peak pending the estimator)
+- Selection: ℓτ_h / τ_hτ_h with a **b-jet veto** (decouples from b-tag tuning).
+- `visible_peak` / `visible_width` — the **visible** m_ττ (sits below m_Z).
+- `peak_at_mZ` — the model-independent headline check; **pending the m_ττ
+  estimator** (decision D1, `extensions/mtautau.py`). Turns on once that is built.
+- `tautau_over_ltau` channel ratio and the `lowmass_sideband` jet→τ_h fake
+  fraction — info.
 
-## Implementation contract
-Expose `run(ctx) -> list[CheckResult]` here, reading the candle samples from
-config (`input.candles.{ztautau,ttbar}`). Reuse `core.plotting` overlays and the
-`Severity` model. See note §6.2 and the diagnostic map (Table 5).
+## Remaining
+The estimator-based m_ττ peak/width (D1), POG/anchor yield targets (the ±10–15%
+comparisons), and the trigger emulation (note §4.1) that the selections should
+fold in. Severities are mostly `info` until those targets are wired; the tt̄ ε_b
+closure is the one `GATE`.
