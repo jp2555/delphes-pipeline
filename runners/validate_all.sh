@@ -13,11 +13,15 @@ PREFIX="GluGluHHto2B2Tau_Par-c2-0p00-kl"
 SUFFIX="-kt-1p00_TuneCP5_13p6TeV_powheg-pythia8_Delphes"
 CONFIG="${1:-delphes_pipeline/validation/config.example.yml}"
 
+# Use the project's pixi env (Perlmutter's bare `python` is 2.7). Override with
+# e.g. PYTHON=python3 if you manage the environment yourself.
+PYTHON="${PYTHON:-pixi run python}"
+
 rc=0
 for KL in m1p00 0p00 1p00 2p45 3p00 5p00; do
   DIR="${BASE}/${PREFIX}-${KL}${SUFFIX}"
   echo "================ kl=${KL} ================"
-  python -m delphes_pipeline.validation.run_validation \
+  $PYTHON -m delphes_pipeline.validation.run_validation \
     --config "$CONFIG" \
     --delphes-root "$DIR" \
     --output-dir "outputs/validation/kl-${KL}"

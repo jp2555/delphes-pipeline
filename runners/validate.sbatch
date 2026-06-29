@@ -15,6 +15,7 @@ set -euo pipefail
 
 CONFIG="${1:-delphes_pipeline/validation/config.example.yml}"
 
-# Adjust to your environment (pixi env or module load).
-# pixi run -e nsbi-env-gpu \
-python -m delphes_pipeline.validation.run_validation --config "$CONFIG"
+# Use the project's pixi env (Perlmutter's bare `python` is 2.7). Override with
+# PYTHON=... if you manage the environment yourself (e.g. a module/venv).
+PYTHON="${PYTHON:-pixi run python}"
+$PYTHON -m delphes_pipeline.validation.run_validation --config "$CONFIG"
