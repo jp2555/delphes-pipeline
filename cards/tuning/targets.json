@@ -1,0 +1,7 @@
+{
+  "_comment": "Scalar/flat tuning targets and the tuning tolerance. Curve targets (efficiencies, PUPPI MET) are dropped into delphes_pipeline/validation/references/data/<observable>.json as digitised points; this file holds the non-curve targets. Replace mbb_peak_gev with the private-anchor visible m_bb peak per channel once available.",
+  "tuning_tolerance": 0.05,
+  "unity_target": 1.0,
+  "mbb_peak_gev": 116.0,
+  "mbb_peak_tolerance_gev": 5.0
+}

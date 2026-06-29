@@ -60,3 +60,25 @@ fires correctly. This is how the scaffold is verified without a real sample.
 ## Layout
 
 See [`DESIGN.md`](DESIGN.md) for the architecture and the directory map.
+
+## Three lenses on one measurement (validation · tuning · plots)
+
+Object response is measured once in `delphes_pipeline/core/observables.py` and
+consumed three ways:
+
+```bash
+# 1. validation gate (pass/fail vs the card formula) — exit code is the gate
+bash runners/validate_all.sh                       # all six kappa_lambda points
+
+# 2. tuning report (residual vs POG/anchor target -> which card knob, note Sec.3-4)
+bash runners/run_tuning.sh                          # -> outputs/.../tuning_report.md
+
+# 3. validation + signal-baseline figures (object spectra, m_bb, gen m_HH vs kappa_lambda)
+bash runners/make_validation_plots.sh              # -> outputs/.../figures/
+```
+
+The card-patch justifications (cited to CMS AN-25-103) are in
+[`docs/card_patch_validation.md`](docs/card_patch_validation.md). To tune an
+object response, drop a digitised POG/anchor curve into
+`delphes_pipeline/validation/references/data/<observable>.json`, re-run the
+tuning report, adjust the card knob it names, and repeat.

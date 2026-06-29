@@ -1,9 +1,10 @@
-# outputs & artifacts
+# outputs & artifacts (generated figures/reports live under outputs/)
 outputs/
 *.root
 !tests/fixtures/*.root
 *.parquet
-plots/
+# committed figures live in docs/figures/; ignore only stray top-level output dirs
+/plots/
 report.json
 summary.md
 

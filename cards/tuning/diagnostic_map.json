@@ -1,0 +1,56 @@
+{
+  "_comment": "Object-level tuning diagnostic map (note Sec. 3-4). Each observable maps to the card knob that moves it and the public/anchor target to tune toward. The tuning lens (delphes_pipeline.tuning) measures the observable, compares it to the target, and prints the residual + this action. target_kind: 'curve' = digitised POG/anchor curve dropped into validation/references/data/<observable>.json; 'unity' = response should equal 1.0; 'peak' = mass-peak position vs the anchor (see targets.json). The Level-1 candle diagnostics (Z->tautau / ttbar, note Table 5) are a later extension.",
+  "btag_eff_b": {
+    "card_module": "BTagging", "card_knob": "EfficiencyFormula {5}", "target_kind": "curve",
+    "target": "CMS BTV UParT-2024 Medium b-efficiency vs (pT,eta) (CMS-DP-2024-066)",
+    "note_section": "3.1", "action": "retune the b EfficiencyFormula {5} to the UParT-2024 Medium curve"
+  },
+  "btag_eff_c": {
+    "card_module": "BTagging", "card_knob": "EfficiencyFormula {4}", "target_kind": "curve",
+    "target": "CMS BTV UParT-2024 Medium c-efficiency (CMS-DP-2024-066)",
+    "note_section": "3.1", "action": "retune the c EfficiencyFormula {4} at the Medium WP"
+  },
+  "btag_mistag_light": {
+    "card_module": "BTagging", "card_knob": "EfficiencyFormula {0}", "target_kind": "curve",
+    "target": "CMS BTV UParT-2024 Medium light mistag (~1%) (CMS-DP-2024-066)",
+    "note_section": "3.1", "action": "retune the light EfficiencyFormula {0} to ~1% at the Medium WP"
+  },
+  "tau_eff": {
+    "card_module": "TauTagging", "card_knob": "EfficiencyFormula {15}", "target_kind": "curve",
+    "target": "DeepTau v2p5 Medium VSjet genuine-tau efficiency incl. 4-mode acceptance (JINST 17 P07023)",
+    "note_section": "3.2", "action": "retune the genuine-tau EfficiencyFormula {15} to DeepTau v2p5 Medium (the single most consequential knob)"
+  },
+  "tau_mistag": {
+    "card_module": "TauTagging", "card_knob": "EfficiencyFormula {0}", "target_kind": "curve",
+    "target": "DeepTau v2p5 Medium jet->tau_h misidentification (JINST 17 P07023)",
+    "note_section": "3.2", "action": "retune the jet->tau mistag EfficiencyFormula {0}; the stock per-parton 0.01 under-counts the per-jet rate in busy bbtautau"
+  },
+  "tau_energy_response": {
+    "card_module": "ntuplizer/tau-scale", "card_knob": "tau-jet energy-scale correction vs (pT, decay multiplicity)", "target_kind": "unity",
+    "note_section": "3.2", "action": "derive and apply the tau-jet response correction so reco/gen visible-tau pT -> 1.0 (shifts m_tautau)"
+  },
+  "bjet_energy_response": {
+    "card_module": "JetEnergyScale / response", "card_knob": "b-jet response (visible, no regression)", "target_kind": "unity",
+    "note_section": "4.3", "action": "tune the b-jet response so reco/gen pT matches the anchor (no b-energy regression per the reference analysis)"
+  },
+  "mbb_peak": {
+    "card_module": "JetEnergyScale / response", "card_knob": "b-jet energy scale", "target_kind": "peak",
+    "target": "visible AK4 di-jet peak at the anchor (elliptical SR centres ~109-134 GeV)",
+    "note_section": "4.3", "action": "tune the b-jet response so the visible m_bb peak sits at the anchor position"
+  },
+  "met_resolution": {
+    "card_module": "MissingET / EFlowMerger", "card_knob": "pTmiss resolution vs sum E_T", "target_kind": "curve",
+    "target": "CMS PUPPI pTmiss resolution vs sum E_T (JINST 14 P07004)",
+    "note_section": "3.3", "action": "tune the pTmiss resolution to the PUPPI curve (drives m_tautau via the estimator; decision D1)"
+  },
+  "electron_eff": {
+    "card_module": "ElectronEfficiency / ElectronIsolation", "card_knob": "EfficiencyFormula + PTRatioMax", "target_kind": "curve",
+    "target": "CMS EGM prompt-electron ID+iso efficiency",
+    "note_section": "3.4", "action": "check vs EGM; the full chain is tracking x reco x isolation, so the effective barrel plateau is below the 0.95 ID number"
+  },
+  "muon_eff": {
+    "card_module": "MuonEfficiency / MuonIsolation", "card_knob": "EfficiencyFormula + PTRatioMax", "target_kind": "curve",
+    "target": "CMS MUO prompt-muon ID+iso efficiency",
+    "note_section": "3.4", "action": "check vs MUO; the full chain is tracking x reco x isolation, so the effective barrel plateau is below the 0.95 ID number"
+  }
+}

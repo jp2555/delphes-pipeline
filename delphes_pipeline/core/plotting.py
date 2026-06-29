@@ -32,6 +32,56 @@ def cms_style() -> None:
             pass
 
 
+def hist_overlay(
+    series: "Sequence[tuple[str, Sequence[float], Optional[Sequence[float]]]]",
+    *,
+    bins,
+    outpath,
+    xlabel: str = "",
+    ylabel: str = "events (norm.)",
+    title: str = "",
+    density: bool = True,
+    logy: bool = False,
+    vlines: "Optional[Sequence[tuple[float, str]]]" = None,
+) -> str:
+    """Overlay 1-D histograms of several labelled samples.
+
+    ``series`` is a list of ``(label, values, weights)`` (weights may be None).
+    ``vlines`` is a list of ``(x, label)`` vertical markers (e.g. analysis cuts).
+    """
+    cms_style()
+    import numpy as _np
+
+    edges = _np.asarray(bins, dtype=float)
+    fig, ax = plt.subplots(figsize=(6.4, 5))
+    for label, values, weights in series:
+        v = _np.asarray(values, dtype=float)
+        v = v[_np.isfinite(v)]
+        if v.size == 0:  # nothing to draw (e.g. no gen Higgs on a fixture)
+            ax.plot([], [], label=f"{label} (empty)")
+            continue
+        w = None if weights is None else _np.asarray(weights, dtype=float)[: v.size]
+        ax.hist(v, bins=edges, weights=w, density=density, histtype="step", linewidth=1.6, label=label)
+    for x, lbl in (vlines or []):
+        ax.axvline(x, ls="--", color="0.4", lw=1.2)
+        ax.text(x, ax.get_ylim()[1] * 0.92, f" {lbl}", rotation=90, va="top", ha="left", fontsize=8, color="0.4")
+    if logy:
+        ax.set_yscale("log")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    if title:
+        ax.set_title(title)
+    ax.legend(fontsize=8)
+    ax.grid(alpha=0.3)
+    _cms_label(ax)
+    outpath = Path(outpath)
+    outpath.parent.mkdir(parents=True, exist_ok=True)
+    fig.tight_layout()
+    fig.savefig(outpath, dpi=120)
+    plt.close(fig)
+    return str(outpath)
+
+
 def _cms_label(ax) -> None:
     if _HAVE_MPLHEP:
         try:

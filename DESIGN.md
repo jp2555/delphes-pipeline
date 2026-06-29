@@ -160,3 +160,31 @@ Perlmutter.
   gate (it is also round-tripped in `tests/`). Output is a *nested* parquet
   (top-level columns are the collections `Jet, Tau, …` plus scalars), read back
   via `core.io.load_ntuple` as `ntuple.Jet.pt` etc.
+
+## Sustainable validation + tuning: one measurement, three lenses
+
+The measurement of object response is centralised in `core/observables.py` and
+consumed by three lenses, so a retuned selection changes one place:
+
+- **validation** (`validation/`, the gate) — `closure.closure_from_profile`
+  compares a measured `Profile` to the **card-formula** target → pass/fail
+  `CheckResult`. The Level-0 leaves are thin wrappers over `observables`.
+- **tuning** (`tuning/`) — compares the same `Profile` to a **POG/anchor target**
+  (digitised curve / unity response / anchor mass peak) → residual + the card
+  knob to turn (`cards/tuning/diagnostic_map.json`, note §3–4) → `tuning_report.{md,json}`
+  + measured-vs-target overlays. Run `runners/run_tuning.sh`; iterate after each
+  card edit. This is the lens for the note's tuning set v0.
+- **plots** (`plots/`) — validation + signal-baseline figures
+  (`runners/make_validation_plots.sh`): jet/τ_h/lepton spectra justifying the
+  patches, m_bb, visible m_ττ, and gen m_HH across the six κ_λ points. See
+  `docs/card_patch_validation.md` for the AN-25-103-cited justifications.
+
+`core/observables.py` adds, beyond the gate's efficiencies, the tuning
+observables the note calls for: **τ-jet and b-jet energy response** (reco/GenJet,
+GenJets being neutrino-filtered = visible reference; §3.2, §4.3) and the
+**m_bb peak** position/width (§4.3). MET resolution vs ΣE_T is shared.
+
+**Extension points** (`extensions/`, documented stubs): trigger emulation
+(`trigger.py`, the AN-25-103 Table-2 2024 menu encoded; §4.1) and the m_ττ
+estimator (`mtautau.py`, decision D1: FastMTT / covariance-free; §3.3). The
+Level-1 candles (Z→ττ, tt̄) remain stubs under `validation/level1_candles`.
