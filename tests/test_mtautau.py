@@ -45,15 +45,42 @@ def test_fastmtt_zero_likelihood_returns_nan():
     assert np.isnan(m[0])
 
 
+def test_fastmtt_zero_met_gives_visible_mass():
+    """Negative control: with no pᵀᵐⁱˢˢ the estimator cannot add neutrinos (x→1),
+    so m_ττ collapses to the visible mass — far below the true di-τ mass."""
+    t1, t2 = _vec(45, 0.3, 0.2), _vec(50, -0.5, 2.8)
+    x1, x2 = 0.6, 0.6
+    vis = np.sqrt((_leg(t1, x1)["e"] + _leg(t2, x2)["e"])[0] ** 2 - sum((t1[1:] * x1 + t2[1:] * x2) ** 2))
+    true_m = np.sqrt((t1[0] + t2[0]) ** 2 - sum((t1[1:] + t2[1:]) ** 2))
+    m = fastmtt_mass(_leg(t1, x1), _leg(t2, x2), np.array([0.0]), np.array([0.0]), met_sigma=10.0, grid=60)
+    assert abs(m[0] - vis) < 0.15 * vis        # collapses to the visible mass
+    assert m[0] < true_m - 20                   # nowhere near the true di-τ mass
+
+
 def test_estimate_mtautau_peaks_at_mz(tmp_path):
     """On Z→ττ with modelled τ decays, FastMTT restores the m_Z peak from below."""
+    from delphes_pipeline.validation.level1_candles.ztautau import _peak_mode
+
     p = tmp_path / "dy.root"
-    make_dy_fixture_nu(str(p), n_events=5000, seed=2)
+    make_dy_fixture_nu(str(p), n_events=6000, seed=2)
     ev = DelphesEvents(str(p))
     veto = selections.bjet_veto_mask(ev)
     vis, _ = selections.leading_visible_pair(ev, veto)
-    m = estimate_mtautau(ev, mask=veto, met_sigma=10.0)
+    m = estimate_mtautau(ev, mask=veto)        # production default met_sigma=25
     m = m[np.isfinite(m)]
-    core = m[(m > 50) & (m < 150)]
     assert np.median(vis[(vis > 40) & (vis < 120)]) < 75.0   # visible sits below m_Z
-    assert abs(np.median(core) - 91.2) < 6.0                 # estimator restores m_Z
+    assert abs(_peak_mode(m) - 91.2) < 8.0                   # estimator restores m_Z (robust peak)
+
+
+def test_estimate_mtautau_robust_to_non_collinear(tmp_path):
+    """The m_Z peak survives resolution smearing + acollinearity + extra MET noise,
+    so the recovery is not an artefact of the fixture being the estimator's own model."""
+    from delphes_pipeline.validation.level1_candles.ztautau import _peak_mode
+
+    p = tmp_path / "dy.root"
+    make_dy_fixture_nu(str(p), n_events=8000, seed=5, vis_smear=0.10, acoll=0.05, met_extra=15.0)
+    ev = DelphesEvents(str(p))
+    veto = selections.bjet_veto_mask(ev)
+    m = estimate_mtautau(ev, mask=veto)
+    m = m[np.isfinite(m)]
+    assert abs(_peak_mode(m) - 91.2) < 12.0    # looser tol: real perturbations degrade resolution

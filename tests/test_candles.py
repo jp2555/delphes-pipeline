@@ -38,17 +38,17 @@ def test_ttbar_candle_gate_passes_when_eb_matches_card(good_fixture_path, tmp_pa
 def test_ztautau_candle_fastmtt_peaks_at_mz(good_fixture_path, tmp_path):
     p = tmp_path / "dy.root"
     make_dy_fixture_nu(str(p), n_events=6000, seed=3)
-    ctx = build_ctx(good_fixture_path)
-    ctx.config.setdefault("tolerances", {}).setdefault("level1", {})["mtautau_met_sigma_gev"] = 10.0
+    ctx = build_ctx(good_fixture_path)            # production default met_sigma=25, tol=10
     by = {r.name: r for r in ztautau.run(ctx, DelphesEvents(str(p)))}
 
     # the visible peak sits below m_Z (neutrinos missing)
     assert by["level1.ztautau.visible_peak"].measured < 75.0
-    # the FastMTT estimator restores the m_Z peak and the GATE passes
+    # the FastMTT estimator restores the m_Z peak (robust mode) and the GATE passes
     r = by["level1.ztautau.peak_at_mZ"]
     assert r.severity.value == "gate"
     assert abs(r.measured - 91.2) < 8.0
     assert r.passed
+    assert "tail" in r.detail and r.extra["n_pairs"] > 100
 
 
 def test_level1_aggregates_both_candles(good_fixture_path, tmp_path):

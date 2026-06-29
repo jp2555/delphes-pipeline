@@ -27,10 +27,19 @@ M_TAU = 1.777
 
 
 def _decay_weight(x, is_had, m_vis):
-    """τ-decay phase-space density vs visible energy fraction ``x`` (per leg)."""
+    """τ-decay phase-space density vs visible energy fraction ``x`` (per leg).
+
+    Hadronic: flat above the kinematic threshold (m_vis/m_τ)². Leptonic: the lepton
+    energy spectrum ``5−9x²+4x³``. The bare leptonic shape has non-zero density at
+    x→0, which (since m_ττ = m_vis/√(x1·x2)) lets the leptonic channel scatter to a
+    high-mass tail — a known covariance-free limitation that the candle *reports*
+    (per-channel peak + tail fraction) and the full FastMTT (proper τ→ℓνν kinematics
+    + per-event pᵀᵐⁱˢˢ covariance) removes. The candle gates the *mode*, which is
+    insensitive to that tail.
+    """
     xmin = (np.asarray(m_vis, dtype=float) / M_TAU) ** 2
-    had = ((x >= xmin) & (x <= 1.0)).astype(float)               # flat above threshold
-    lep = np.clip(5.0 - 9.0 * x * x + 4.0 * x ** 3, 0.0, None)   # lepton energy spectrum
+    had = ((x >= xmin) & (x <= 1.0)).astype(float)
+    lep = np.clip(5.0 - 9.0 * x * x + 4.0 * x ** 3, 0.0, None)
     return np.where(is_had, had, lep)
 
 
@@ -52,6 +61,7 @@ def fastmtt_mass(leg1, leg2, met_x, met_y, *, met_sigma=25.0, grid=40, chunk=400
     met_x = np.asarray(met_x, dtype=float)
     met_y = np.asarray(met_y, dtype=float)
     n = met_x.size
+    bad_met = ~(np.isfinite(met_x) & np.isfinite(met_y))   # missing MET -> NaN, not garbage
     xs = np.linspace(1.0 / grid, 1.0, grid)        # avoid x=0 (divergent neutrino)
     x1 = xs[None, :, None]                          # (1,G,1)
     x2 = xs[None, None, :]                          # (1,1,G)
@@ -72,6 +82,7 @@ def fastmtt_mass(leg1, leg2, met_x, met_y, *, met_sigma=25.0, grid=40, chunk=400
         m = _pair_inv_mass(leg1, leg2, e) / np.sqrt(xs[i1] * xs[i2])
         m[flat[np.arange(flat.shape[0]), best] <= 0.0] = np.nan
         out[e] = m
+    out[bad_met] = np.nan
     return out
 
 
@@ -100,7 +111,7 @@ def estimate_mtautau(ev, *, mask=None, method: str = "fastmtt", met_sigma=25.0, 
     pair = cand[sel]
     pair = pair[ak.argsort(pair.pt, axis=1, ascending=False)][:, :2]
     met = ev.met[sel]
-    met_x = ak.to_numpy(met.met * np.cos(met.phi))
-    met_y = ak.to_numpy(met.met * np.sin(met.phi))
+    met_x = ak.to_numpy(ak.fill_none(met.met * np.cos(met.phi), np.nan))
+    met_y = ak.to_numpy(ak.fill_none(met.met * np.sin(met.phi), np.nan))
     return fastmtt_mass(_leg(pair[:, 0]), _leg(pair[:, 1]), met_x, met_y,
                         met_sigma=met_sigma, grid=grid)

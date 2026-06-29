@@ -58,23 +58,50 @@ def run(ctx: ValidationContext, ev) -> list[CheckResult]:
     return results
 
 
+def _peak_mode(x, *, lo=40.0, hi=160.0, w=5.0, halfwidth=20.0) -> float:
+    """Robust peak: the local median within ``halfwidth`` of the densest histogram bin.
+
+    The FastMTT m_ττ distribution is right-skewed (a high-mass leptonic tail), so a
+    windowed *median* tracks the window edge, not the peak. Locating the mode (densest
+    3-bin-smoothed bin) and taking the median of its neighbourhood is insensitive to
+    both the far tail and the exact bin width — stable at ~88 GeV across seeds/bins.
+    """
+    x = x[(x >= lo) & (x <= hi)]
+    if x.size < 20:
+        return float("nan")
+    edges = np.arange(lo, hi + w, w)
+    h = np.convolve(np.histogram(x, bins=edges)[0], np.ones(3) / 3.0, mode="same")
+    centre = 0.5 * (edges[int(np.argmax(h))] + edges[int(np.argmax(h)) + 1])
+    core = x[np.abs(x - centre) <= halfwidth]
+    return float(np.median(core)) if core.size else centre
+
+
 def _peak_at_mz(ctx: ValidationContext, ev) -> CheckResult:
     """FastMTT m_ττ-estimator peak vs m_Z (note §6.2; estimator = D1, covariance-free).
 
-    Reconstructs m_ττ for the leading τ-candidate pair (b-vetoed) and gates the median
-    of the [50,150] GeV core on m_Z. The visible peak sits below m_Z; the estimator,
-    folding in pᵀᵐⁱˢˢ, should restore it — a model-independent validation of the chain.
+    Reconstructs m_ττ for the leading τ-candidate pair (b-vetoed) and gates the *mode*
+    of the distribution on m_Z. The visible peak sits below m_Z; the estimator, folding
+    in pᵀᵐⁱˢˢ, should restore it — a model-independent validation of the chain. The
+    leptonic channel carries a known residual high bias (covariance-free limitation),
+    so the per-channel peaks and the high-mass tail fraction are reported alongside.
     """
     veto = selections.bjet_veto_mask(ev)
     sigma = float(ctx.tol("level1", "mtautau_met_sigma_gev", 25.0))  # fixed (covariance-free) MET σ
-    m = estimate_mtautau(ev, mask=veto, met_sigma=sigma)
-    m = m[np.isfinite(m)]
-    core = m[(m > 50) & (m < 150)]
     tol = float(ctx.tol("level1", "mtautau_peak_tol_gev", 10.0))
-    if core.size < 20:
-        return info("level1.ztautau.peak_at_mZ", "level1",
-                    detail=f"only {core.size} di-τ pairs in [50,150] GeV; need >=20 for the m_Z peak")
-    peak = float(np.median(core))
+    m = estimate_mtautau(ev, mask=veto, met_sigma=sigma)
+    _, n_tauh = selections.leading_visible_pair(ev, veto)  # aligned with m (same selection)
+    finite = np.isfinite(m)
+    m, n_tauh = m[finite], n_tauh[finite]
+
+    if m.size < 20:
+        return CheckResult(
+            name="level1.ztautau.peak_at_mZ", level="level1", passed=False, severity=Severity.WARN,
+            detail=f"only {m.size} reconstructed di-τ pairs; cannot evaluate the m_Z peak")
+
+    peak = _peak_mode(m)
+    tail_frac = float(np.mean(m > 150.0))
+    pk_tt = _peak_mode(m[n_tauh == 2]) if (n_tauh == 2).sum() >= 20 else float("nan")
+    pk_lt = _peak_mode(m[n_tauh == 1]) if (n_tauh == 1).sum() >= 20 else float("nan")
     plot = ctx.rel(hist_overlay(
         [("FastMTT m_ττ", m, None)], bins=np.linspace(0, 200, 51),
         outpath=ctx.plot_path("candle_ztautau_mtautau.png"), xlabel="FastMTT m_ττ [GeV]",
@@ -83,10 +110,12 @@ def _peak_at_mz(ctx: ValidationContext, ev) -> CheckResult:
     ))
     return CheckResult(
         name="level1.ztautau.peak_at_mZ", level="level1",
-        passed=abs(peak - _M_Z) <= tol, severity=Severity.GATE,
+        passed=bool(abs(peak - _M_Z) <= tol), severity=Severity.GATE,
         measured=peak, target=_M_Z, tolerance=tol, units="GeV",
-        detail=f"FastMTT m_ττ peak {peak:.1f} GeV vs m_Z {_M_Z:.1f} (±{tol:.0f})",
+        detail=(f"FastMTT m_ττ peak {peak:.1f} GeV vs m_Z {_M_Z:.1f} (±{tol:.0f}); "
+                f"τ_hτ_h {pk_tt:.0f} / ℓτ_h {pk_lt:.0f}, tail(m>150) {tail_frac:.0%}"),
         plot_path=plot,
+        extra={"peak_tautau": pk_tt, "peak_ltau": pk_lt, "tail_fraction": tail_frac, "n_pairs": int(m.size)},
     )
 
 

@@ -140,10 +140,15 @@ def _visfrac(rng, is_lep):
     return float(rng.uniform(0.2, 0.6) if is_lep else rng.uniform(0.45, 0.95))
 
 
-def make_dy_fixture_nu(path, *, n_events=3000, seed=0, true_mass=91.2, width=3.0, met_res=10.0) -> float:
+def make_dy_fixture_nu(path, *, n_events=3000, seed=0, true_mass=91.2, width=3.0, met_res=10.0,
+                       vis_smear=0.0, acoll=0.0, met_extra=0.0) -> float:
     """Z→ττ with *modelled* τ decays: each visible leg is ``x_i`` × the τ momentum and
     pᵀᵐⁱˢˢ is the Σ neutrino pT (+ resolution). The visible mass sits below ``true_mass``;
-    the FastMTT estimator should recover ``true_mass`` (= m_Z by default)."""
+    the FastMTT estimator should recover ``true_mass`` (= m_Z by default).
+
+    ``vis_smear`` (relative pT), ``acoll`` (rad, breaks exact collinearity) and
+    ``met_extra`` (uncorrelated MET noise) perturb the visible legs/MET *away* from the
+    estimator's exact generative model — set them for a non-circular robustness test."""
     rng = np.random.default_rng(seed)
     jets, ele, muo, gen, met, genmet = [], [], [], [], [], []
     for _ in range(n_events):
@@ -153,21 +158,24 @@ def make_dy_fixture_nu(path, *, n_events=3000, seed=0, true_mass=91.2, width=3.0
         for i, t in enumerate(_ditau_taus(rng, true_mass, width)):
             _e, tx, ty, tz = t
             pt_t = math.hypot(tx, ty)
-            gs.append({"PID": 15 * (1 if i == 0 else -1), "Status": 2, "PT": float(pt_t),
+            pid = 15 * (1 if i == 0 else -1)  # i==0 is τ⁻
+            gs.append({"PID": pid, "Status": 2, "PT": float(pt_t),
                        "Eta": math.asinh(tz / pt_t) if pt_t > 1e-6 else 0.0, "Phi": math.atan2(ty, tx),
                        "Mass": 1.777, "Charge": 0, "M1": -1, "M2": -1, "D1": -1, "D2": -1})
             is_lep = leptonic and i == 0
             x = _visfrac(rng, is_lep)
             vx, vy, vz = tx * x, ty * x, tz * x
-            pt_v = math.hypot(vx, vy)
-            eta_v = math.asinh(vz / pt_v) if pt_v > 1e-6 else 0.0
-            phi_v = math.atan2(vy, vx)
+            pt_v = math.hypot(vx, vy) * (1.0 + rng.normal(0, vis_smear))
+            eta_v = (math.asinh(vz / math.hypot(vx, vy)) if math.hypot(vx, vy) > 1e-6 else 0.0) + rng.normal(0, acoll)
+            phi_v = math.atan2(vy, vx) + rng.normal(0, acoll)
             nu_x += tx * (1 - x); nu_y += ty * (1 - x)
             if is_lep:
-                (es if rng.random() < 0.5 else ms).append(_lep(pt_v, eta_v, phi_v, int(rng.choice([-1, 1]))))
+                charge = -1 if pid > 0 else 1  # τ⁻ → ℓ⁻
+                (es if rng.random() < 0.5 else ms).append(_lep(pt_v, eta_v, phi_v, charge))
             else:
-                js.append(_jet(pt_v, eta_v, phi_v, flavor=0, btag=0, tautag=1, mass=1.0))
-        mx, my = nu_x + rng.normal(0, met_res), nu_y + rng.normal(0, met_res)
+                js.append(_jet(pt_v, eta_v, phi_v, flavor=0, btag=0, tautag=1, mass=float(rng.uniform(0.6, 1.5))))
+        mx = nu_x + rng.normal(0, math.hypot(met_res, met_extra))
+        my = nu_y + rng.normal(0, math.hypot(met_res, met_extra))
         met.append([{"MET": math.hypot(mx, my), "Eta": 0.0, "Phi": math.atan2(my, mx)}])
         genmet.append([{"MET": math.hypot(nu_x, nu_y), "Eta": 0.0, "Phi": math.atan2(nu_y, nu_x)}])
         jets.append(js); gen.append(gs); ele.append(es); muo.append(ms)
