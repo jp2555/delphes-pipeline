@@ -66,7 +66,7 @@ def test_nano_tau_mistag_is_per_jet_not_crossjet(tmp_path):
             "Jet_phi": ak.Array(two(0.0, 0.1)), "Jet_mass": ak.Array(two(8.0, 8.0)),
             "Jet_hadronFlavour": ak.Array(two(0, 0)), "Jet_btagUParTAK4B": ak.Array(two(0.0, 0.0)),
             "Tau_pt": ak.Array(one(40.0)), "Tau_eta": ak.Array(one(0.0)), "Tau_phi": ak.Array(one(0.0)),
-            "Tau_mass": ak.Array(one(1.0)), "Tau_idDeepTau2018v2p5VSjet": ak.Array(one(31)),
+            "Tau_mass": ak.Array(one(1.0)), "Tau_idDeepTau2018v2p5VSjet": ak.Array(one(6)),
             "Tau_genPartFlav": ak.Array(one(0)),
             # a GenVisTau far from both jets: gives the veto a real record but removes nothing
             "GenVisTau_pt": ak.Array(one(30.0)), "GenVisTau_eta": ak.Array(one(2.0)),

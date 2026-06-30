@@ -37,7 +37,7 @@ anchor:
       wp: M                    # 2024_Summer24 -> UParTAK4_wp_values, Medium = 0.1272
       # correction: UParTAK4_wp_values   # set explicitly if auto-find ever fails;
       #   list names with: python -m delphes_pipeline.tuning.correctionlib_wp <json>
-    deeptau_vsjet_medium: 16    # DeepTau v2p5 VSjet Medium bit (NanoAOD bitmask; reader uses >=)
+    deeptau_vsjet_medium: 5     # DeepTau v2p5 VSjet Medium WP level (NanoAODv15: 0=fail,1=VVVLoose..5=Medium..8=VVTight; reader uses >=)
   branches:                    # NanoAODv15 defaults; override only if your era differs
     jet: { btag_disc: Jet_btagUParTAK4B }
     tau: { vsjet: Tau_idDeepTau2018v2p5VSjet }

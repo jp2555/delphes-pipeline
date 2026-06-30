@@ -27,7 +27,7 @@ DEF_TAU_MISTAG: Eff = lambda pt, eta: 0.03
 DEF_LEP_EFF: Eff = lambda pt, eta: 0.90
 
 BTAG_WP = 0.5            # the anchor reader thresholds the discriminant here
-DEEPTAU_MEDIUM = 16      # bitmask value the anchor reader compares with >=
+DEEPTAU_MEDIUM = 5       # DeepTau v2p5 VSjet Medium WP level (NanoAODv15: 0..8), reader uses >=
 
 
 @dataclass
@@ -71,14 +71,14 @@ def make_nano_fixture(path: str, *, n_events: int = 4000, seed: int = 0,
             _push(ev, "Jet", pt, eta, phi, 8.0); ev["Jet_hadronFlavour"].append(fl); ev["Jet_btagUParTAK4B"].append(disc(e))
             if rng.random() < tau_mistag(pt, eta):  # jet fakes a τ_h: a Medium Tau at the jet
                 _push(ev, "Tau", pt, eta, phi, 1.0)
-                ev["Tau_idDeepTau2018v2p5VSjet"].append(31); ev["Tau_genPartFlav"].append(0)
+                ev["Tau_idDeepTau2018v2p5VSjet"].append(6); ev["Tau_genPartFlav"].append(0)
 
         ntau = int(rng.integers(0, 3))
         for _t in range(ntau):
             pt = float(rng.exponential(35) + 20); eta = float(rng.uniform(-2.3, 2.3)); phi = float(rng.uniform(-math.pi, math.pi))
             _push(ev, "GenVisTau", pt, eta, phi, 1.0)
             _push(ev, "Tau", pt + rng.normal(0, 1), eta, phi, 1.0)
-            ev["Tau_idDeepTau2018v2p5VSjet"].append(31 if rng.random() < tau_eff(pt, eta) else 8)
+            ev["Tau_idDeepTau2018v2p5VSjet"].append(6 if rng.random() < tau_eff(pt, eta) else 3)
             ev["Tau_genPartFlav"].append(5)
 
         gens = []
