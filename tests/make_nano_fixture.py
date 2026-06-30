@@ -3,8 +3,8 @@
 Writes a flat ``Events`` tree with the NanoAOD branch names the anchor reader
 expects, injecting known b-tag/tau/lepton efficiencies so the anchor measurement
 can be checked against ground truth. The b-tag discriminant encodes the injected
-efficiency relative to a 0.5 working point; DeepTau VSjet uses the bitmask
-convention (Medium = 16).
+efficiency relative to a 0.5 working point; DeepTau VSjet uses the NanoAODv15
+WP-level convention (integer 0..8, Medium = 5).
 """
 
 from __future__ import annotations
@@ -85,8 +85,10 @@ def make_nano_fixture(path: str, *, n_events: int = 4000, seed: int = 0,
         for pid, coll in ((11, "Electron"), (13, "Muon")):
             for _l in range(int(rng.integers(0, 3))):
                 pt = float(rng.exponential(25) + 10); eta = float(rng.uniform(-2.4, 2.4)); phi = float(rng.uniform(-math.pi, math.pi)); ch = int(rng.choice([-1, 1]))
-                mom = len(gens); gens.append((15 * ch, 2, pt + 5, 5.0 * (1 if eta >= 0 else -1), phi, 1.777, -1))
-                gens.append((-pid * ch, 1, pt, eta, phi, 0.0, mom))
+                # chain status-1 ℓ -> same-|PID| ℓ copy -> τ, as in the full record
+                tau = len(gens); gens.append((15 * ch, 2, pt + 5, 5.0 * (1 if eta >= 0 else -1), phi, 1.777, -1))
+                cpy = len(gens); gens.append((-pid * ch, 23, pt + 1, eta, phi, 0.0, tau))
+                gens.append((-pid * ch, 1, pt, eta, phi, 0.0, cpy))
                 if rng.random() < lep_eff(pt, eta):
                     _push(ev, coll, pt, eta, phi); ev[f"{coll}_charge"].append(ch)
         for pdg, st, pt, eta, phi, m, mo in gens:

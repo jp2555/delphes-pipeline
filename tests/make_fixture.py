@@ -126,15 +126,18 @@ def make_fixture(
                                  tautag=int(rng.random() < float(tau_eff(pt, eta)))))
 
         # --- electrons / muons (gen + reco at injected efficiency) ---------
-        # In the good (non-broken) fixture each prompt lepton is given a tau
-        # mother so the gen.m1 chain points to |PID|==15, mirroring HH→ττ→ℓνν
-        # and matching the prompt-mother selection in
-        # validation/level0_objects/leptons.py. The mother tau is parked at
-        # |eta|=5.0 (well outside Delphes' TauEtaMax = 2.5 and any jet's
-        # acceptance) so it cannot be unique-matched to a jet by tau.py and
-        # therefore cannot pollute the tau efficiency or jet→τ mistag
-        # measurements. The broken fixture skips mother insertion to keep the
-        # gen-tau count at zero (the Pilot Gate must fail there).
+        # In the good (non-broken) fixture each prompt lepton's gen chain is
+        # status-1 ℓ → same-|PID| ℓ copy → τ, mirroring HH→ττ→ℓνν in the full
+        # Pythia/NanoAOD record (the status-1 lepton's DIRECT mother is a copy
+        # of itself, with the τ a hop further up). The prompt-mother selection in
+        # validation/level0_objects/leptons.py must walk past that self-copy to
+        # find |PID|==15, so this exercises the chain walk (a single m1 hop would
+        # wrongly reject these). The mother τ is parked at |eta|=5.0 (well outside
+        # Delphes' TauEtaMax = 2.5 and any jet's acceptance) so it cannot be
+        # unique-matched to a jet by tau.py and pollute the τ efficiency / jet→τ
+        # mistag; the same-|PID| copy is PID 11/13 so tau.py ignores it too. The
+        # broken fixture skips mother insertion to keep the gen-tau count at zero
+        # (the Pilot Gate must fail there).
         for pid, eff, sink in ((11, electron_eff, ele_l), (13, muon_eff, muo_l)):
             nlep = int(rng.integers(0, 3))
             recos = []
@@ -146,11 +149,15 @@ def make_fixture(
                 if broken:
                     mother_idx = -1
                 else:
-                    mother_idx = len(gens)
+                    tau_idx = len(gens)
                     gens.append(_gen(pid=15 * charge, status=2,
                                      pt=pt + 5.0,
                                      eta=5.0 * (1 if eta >= 0 else -1),
                                      phi=phi, mass=1.777))
+                    mother_idx = len(gens)   # same-|PID| lepton copy between ℓ and τ
+                    gens.append(_gen(pid=-pid * charge, status=23,
+                                     pt=pt + 1.0, eta=eta, phi=phi, mass=0.0,
+                                     m1=tau_idx))
                 gens.append(_gen(pid=-pid * charge, status=1,
                                  pt=pt, eta=eta, phi=phi, mass=0.0,
                                  m1=mother_idx))

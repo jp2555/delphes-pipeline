@@ -151,6 +151,33 @@ def mother_pid(gen: ak.Array) -> ak.Array:
     return ak.where(valid, gen.pid[safe], 0)
 
 
+def prompt_mother_match(gen: ak.Array, prompt_pids=_PROMPT_MOTHER_PIDS, max_depth: int = 12) -> ak.Array:
+    """Per-entry bool: is the first non-self-copy ancestor a prompt source?
+
+    A single ``m1`` hop is wrong on the full Pythia / pruned-NanoAOD record: a
+    status-1 lepton's direct mother is usually a same-|PID| copy of itself (the
+    FSR / last-copy chain), with the real τ/Z/W several links up. We walk ``m1``
+    past those self-copies, then test whether the first genuinely different
+    ancestor is in ``prompt_pids`` (15=τ, 23=Z, 24=W).
+    """
+    n = ak.num(gen)
+    self_apid = np.abs(gen.pid)
+    cur = gen.m1
+    for _ in range(max_depth):
+        valid = (cur >= 0) & (cur < n)
+        safe = ak.where(valid, cur, 0)
+        apid = ak.where(valid, np.abs(gen.pid[safe]), -1)
+        advance = valid & (apid == self_apid)        # same-flavour copy -> keep walking
+        cur = ak.where(advance, gen.m1[safe], cur)
+    valid = (cur >= 0) & (cur < n)
+    safe = ak.where(valid, cur, 0)
+    anc = ak.where(valid, np.abs(gen.pid[safe]), 0)
+    match = anc == prompt_pids[0]
+    for src in prompt_pids[1:]:
+        match = match | (anc == src)
+    return match
+
+
 def _vis_pt_eta_phi_mass(coll):
     return (ak.to_numpy(ak.flatten(coll.pt)), ak.to_numpy(ak.flatten(coll.eta)),
             ak.to_numpy(ak.flatten(coll.phi)), ak.to_numpy(ak.flatten(coll.mass)))
@@ -205,10 +232,7 @@ def lepton_efficiency(events: DelphesEvents, quantity: str, *, bins=DEFAULT_PT_B
     pid = 11 if quantity == "electron_eff" else 13
     reco = events.electrons if pid == 11 else events.muons
     gen = events.gen
-    mom = np.abs(mother_pid(gen))
-    prompt = mom == prompt_pids[0]
-    for src in prompt_pids[1:]:
-        prompt = prompt | (mom == src)
+    prompt = prompt_mother_match(gen, prompt_pids)   # walk past same-|PID| copies
     pt_min = float(np.asarray(bins, dtype=float)[0])
     sel = (np.abs(gen.pid) == pid) & (gen.status == 1) & (np.abs(gen.eta) <= barrel) & (gen.pt > pt_min) & prompt
     g = gen[sel]
