@@ -117,6 +117,8 @@ def features(ev, *, nano, tautau_only=False, mtautau_min=20.0):
     bb = bsrc[ak.argsort(bsrc.pt, axis=1, ascending=False, stable=True)]
     bb = bb[ak.argsort(bb.btag, axis=1, ascending=False, stable=True)][:, :2]
     cand = _tau_cands_nano(ev) if nano else _tau_cands_delphes(ev)
+    if tautau_only:
+        cand = cand[cand.is_tauh == 1]        # τ_hτ_h channel: pick the 2 leading τ_h, not 2 of all
     cand = cand[ak.argsort(cand.pt, axis=1, ascending=False, stable=True)]
 
     sel = ak.to_numpy((ak.num(bb) >= 2) & (ak.num(cand) >= 2))
@@ -129,7 +131,6 @@ def features(ev, *, nano, tautau_only=False, mtautau_min=20.0):
     b2 = _p4(*(ak.to_numpy(bb[:, 1][k]) for k in ("pt", "eta", "phi", "mass")))
     t1 = _p4(*(ak.to_numpy(cand[:, 0][k]) for k in ("pt", "eta", "phi", "mass")))
     t2 = _p4(*(ak.to_numpy(cand[:, 1][k]) for k in ("pt", "eta", "phi", "mass")))
-    n_th = ak.to_numpy(ak.sum(cand.is_tauh, axis=1))
 
     leg1, leg2 = _leg(cand[:, 0]), _leg(cand[:, 1])
     _, x1, x2 = fastmtt_mass(leg1, leg2, met_x, met_y, with_x=True)
@@ -147,8 +148,6 @@ def features(ev, *, nano, tautau_only=False, mtautau_min=20.0):
         "dphi_HH": _dphi(H1, H2), "pH1_T": np.maximum(pH1, pH2), "pH2_T": np.minimum(pH1, pH2),
     }
     keep = np.isfinite(out["mHH"]) & (out["mtautau"] > mtautau_min)
-    if tautau_only:
-        keep = keep & (n_th == 2)
     return {k: v[keep] for k, v in out.items()}
 
 
