@@ -106,8 +106,12 @@ def _tau_cands_nano(ev):
     return ak.concatenate([th, lep(ev.electrons), lep(ev.muons)], axis=1)
 
 
-def features(ev, *, nano, tautau_only=False):
-    """The 10 NSBI features over events with a reconstructed bb + di-τ system."""
+def features(ev, *, nano, tautau_only=False, mtautau_min=20.0):
+    """The 10 NSBI features over events with a reconstructed bb + di-τ system.
+
+    ``mtautau_min`` drops the m_ττ≈0 spike (a FastMTT failure / a collinear or
+    double-counted τ-pair) so it doesn't distort the shape normalization.
+    """
     jets = ev.jets
     bsrc = jets if nano else jets[jets.tautag == 0]                 # τ_h are separate on NanoAOD
     bb = bsrc[ak.argsort(bsrc.pt, axis=1, ascending=False, stable=True)]
@@ -142,7 +146,7 @@ def features(ev, *, nano, tautau_only=False):
         "mbb": _mass(H1), "dR_bb": _dR(b1, b2), "mtautau": _mass(H2), "dR_tautau": _dR(t1, t2),
         "dphi_HH": _dphi(H1, H2), "pH1_T": np.maximum(pH1, pH2), "pH2_T": np.minimum(pH1, pH2),
     }
-    keep = np.isfinite(out["mHH"])
+    keep = np.isfinite(out["mHH"]) & (out["mtautau"] > mtautau_min)
     if tautau_only:
         keep = keep & (n_th == 2)
     return {k: v[keep] for k, v in out.items()}
@@ -158,6 +162,7 @@ def main(argv=None) -> int:
     ap.add_argument("--tuned", dest="tuned", action="store_true", default=True)
     ap.add_argument("--no-tuned", dest="tuned", action="store_false")
     ap.add_argument("--tautau-only", action="store_true")
+    ap.add_argument("--mtautau-min", type=float, default=20.0, help="drop the m_ττ≈0 spike below this (GeV)")
     args = ap.parse_args(argv)
 
     cfg = load_config(args.config)
@@ -183,15 +188,20 @@ def main(argv=None) -> int:
         if tuning is not None:
             from delphes_pipeline.tuning.maps import RetaggedEvents
             dev = RetaggedEvents(dev, tuning, np.random.default_rng(0))
-        df = features(dev, nano=False, tautau_only=args.tautau_only)
+        df = features(dev, nano=False, tautau_only=args.tautau_only, mtautau_min=args.mtautau_min)
         nf = features(NanoAODEvents(nano_by_kl[kl], branches=branches, wp=wp, entry_stop=args.max_events),
-                      nano=True, tautau_only=args.tautau_only)
+                      nano=True, tautau_only=args.tautau_only, mtautau_min=args.mtautau_min)
 
         fig, axes = plt.subplots(2, 5, figsize=(20, 8))
         for ax, feat in zip(axes.flat, _FEATURES):
-            b = np.linspace(*_RANGES[feat], 41)
-            ax.hist(df[feat], bins=b, density=True, histtype="step", lw=2, label="Delphes")
-            ax.hist(nf[feat], bins=b, density=True, histtype="step", lw=2, label="NanoAOD")
+            lo, hi = _RANGES[feat]
+            b = np.linspace(lo, hi, 41)
+            centres = 0.5 * (b[:-1] + b[1:])
+            for data, lab in ((df[feat], "Delphes"), (nf[feat], "NanoAOD")):
+                d = data[(data >= lo) & (data <= hi)]          # normalize over the plotted range
+                if d.size:
+                    h, _ = np.histogram(d, bins=b, density=True)
+                    ax.step(centres, h, where="mid", lw=2, label=f"{lab} ({d.size})")
             ax.set_xlabel(feat); ax.legend(fontsize=8)
         fig.suptitle(f"$\\kappa_\\lambda$ = {kl}" + ("  (tuned)" if tuning is not None else "  (stock)"))
         out = os.path.join(args.out, f"nsbi_{kl}.png")
