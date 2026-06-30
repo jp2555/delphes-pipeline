@@ -44,6 +44,10 @@ _GENJET_FIELDS = {"pt": "PT", "eta": "Eta", "phi": "Phi", "mass": "Mass", "flavo
 _LEP_FIELDS = {"pt": "PT", "eta": "Eta", "phi": "Phi", "charge": "Charge"}
 _PHOTON_FIELDS = {"pt": "PT", "eta": "Eta", "phi": "Phi"}
 _FATJET_FIELDS = {"pt": "PT", "eta": "Eta", "phi": "Phi", "mass": "Mass"}
+# Particle (gen allParticles) is the heaviest branch in a Delphes file, so we
+# read ONLY the leaves the pipeline consumes: pid/status (selection), pt/eta/phi/
+# mass (4-vectors), m1 (mother walk). charge/m2/d1/d2 are never used downstream
+# and reading them roughly triples the per-particle cost for nothing.
 _GEN_FIELDS = {
     "pid": "PID",
     "status": "Status",
@@ -51,11 +55,7 @@ _GEN_FIELDS = {
     "eta": "Eta",
     "phi": "Phi",
     "mass": "Mass",
-    "charge": "Charge",
     "m1": "M1",
-    "m2": "M2",
-    "d1": "D1",
-    "d2": "D2",
 }
 _MET_FIELDS = {"met": "MET", "eta": "Eta", "phi": "Phi"}
 _SCALARHT_FIELDS = {"ht": "HT"}
