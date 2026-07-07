@@ -33,8 +33,17 @@ def run(ctx: ValidationContext, ev) -> list[CheckResult]:
     eb, N1, N2, bb_pt = selections.eb_insitu(ev, emu)
     rel_tol = float(ctx.tol("level1", "eb_closure_rel_tol", 0.10))
     if bb_pt.size and np.isfinite(eb):
-        # tuned input: the card-formula b-efficiency averaged over the truth-b pT
-        input_eff = float(np.mean(ctx.references.expected("btag_eff_b", bb_pt, np.zeros_like(bb_pt))))
+        # tuned input: the card-formula b-efficiency averaged over the truth-b pT.
+        # The candle samples may predate the signal card (e.g. v0-era /ceph tt̄
+        # validated in a v1 config): candles.card overrides which card's
+        # formulas the candle closes against; default = the global card.
+        cand_card = ctx.config.get("candles", {}).get("card")
+        if cand_card:
+            from delphes_pipeline.validation.references import card_formulas
+            target_fn = card_formulas.for_card(cand_card)
+            input_eff = float(np.mean(target_fn("btag_eff_b", bb_pt, np.zeros_like(bb_pt))))
+        else:
+            input_eff = float(np.mean(ctx.references.expected("btag_eff_b", bb_pt, np.zeros_like(bb_pt))))
         rel = abs(eb / input_eff - 1.0) if input_eff else float("inf")
         passed = rel <= rel_tol
         detail = (f"in-situ ε_b = {eb:.3f} (N1={N1}, N2={N2}) vs tuned input {input_eff:.3f} "

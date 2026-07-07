@@ -73,7 +73,12 @@ def closure_from_profile(
     max_fail_frac = float(ctx.tol(level, "max_failing_bin_fraction", 0.20))
     nsigma = float(ctx.tol(level, "closure_nsigma", 2.0))
     if severity is None:
-        sev_map = ctx.tol(level, "closure_severity", {}) or {}
+        # the severity waivers are card-specific (e.g. the btag_eff_c waiver is a
+        # stock-formula concession that card v1 obsoletes), so a v1-dispatched run
+        # reads closure_severity_v1; absent key -> all-gate (loud, not silent).
+        key = ("closure_severity_v1" if ctx.references.formula_set == "expected_v1"
+               else "closure_severity")
+        sev_map = ctx.tol(level, key, {}) or {}
         severity = Severity(sev_map.get(quantity, "gate"))
 
     centers = np.asarray(profile.centers, dtype=float)

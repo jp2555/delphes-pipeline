@@ -63,6 +63,15 @@ class ReferenceStore:
         self._card_formula_fn = card_formula_fn
         self._cache: dict[str, Optional[ReferenceCurve]] = {}
 
+    @property
+    def formula_set(self) -> str:
+        """Name of the injected closure-formula set (e.g. ``expected_v1``).
+
+        Lets consumers (closure severity) condition on which card's formulas
+        are active without core importing validation-layer modules.
+        """
+        return getattr(self._card_formula_fn, "__name__", "")
+
     # ----- closure target (card transcription) ---------------------------- #
     def expected(self, quantity: str, pt, eta) -> np.ndarray:
         """Card-formula closure target evaluated at ``(pt, eta)`` points.

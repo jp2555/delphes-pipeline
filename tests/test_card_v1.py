@@ -52,7 +52,17 @@ def test_v1_tau_mistag_in_anchor_band():
 def test_for_card_dispatch():
     assert cf.for_card("cards/cms_card_v0.tcl") is cf.expected
     assert cf.for_card("/abs/path/cards/cms_card_v1.tcl") is cf.expected_v1
-    assert cf.for_card("unknown_card.tcl") is cf.expected  # default: stock
+    assert cf.for_card("cms_card_V1.tcl") is cf.expected_v1          # case-insensitive
+    assert cf.for_card("delphes_card_CMS_hhbbtt_v0.tcl") is cf.expected  # production name
+    assert cf.for_card("unversioned_card.tcl") is cf.expected        # fixtures: stock
+
+
+@pytest.mark.parametrize("name", ["cms_card_v2.tcl", "cms_card_v10.tcl", "card_nanoaodv15.tcl"])
+def test_for_card_rejects_untranscribed_versions(name):
+    """A versioned card without transcribed formulas must fail loudly, not
+    silently validate against another card's targets."""
+    with pytest.raises(ValueError, match="no transcribed closure formulas"):
+        cf.for_card(name)
 
 
 def test_v1_lepton_blocks_defer_to_v0():
@@ -99,12 +109,28 @@ def _gate_failures(results):
 
 
 def test_v1_sample_closes_against_v1(v1_fixture_path):
+    """ALL tagger closures pass — including btag_eff_c and tau_mistag, which the
+    v1 severity map no longer hides behind the gate filter."""
     ctx = build_ctx(v1_fixture_path, card="cards/cms_card_v1.tcl")
-    assert not _gate_failures(btag.run(ctx))
-    assert not _gate_failures(tau.run(ctx))
+    results = btag.run(ctx) + tau.run(ctx)
+    assert not [r.name for r in results if not r.passed]
 
 
 def test_v1_sample_fails_against_v0(v1_fixture_path):
     """The dispatch is load-bearing: v1-tagged objects miss the v0 target."""
     ctx = build_ctx(v1_fixture_path, card="cards/cms_card_v0.tcl")
     assert _gate_failures(btag.run(ctx)) + _gate_failures(tau.run(ctx))
+
+
+def test_v1_severity_map_is_card_aware(v1_fixture_path):
+    """v1 gates btag_eff_c (stock-formula waiver obsolete); tau_mistag stays
+    warn (per-parton mechanism unchanged by PATCH-7); v0 keeps its waivers."""
+    from delphes_pipeline.core.result import Severity
+
+    v1 = {r.name: r for r in btag.run(build_ctx(v1_fixture_path, card="cards/cms_card_v1.tcl"))}
+    assert v1["level0.btag.btag_eff_c"].severity is Severity.GATE
+    v1_tau = {r.name: r for r in tau.run(build_ctx(v1_fixture_path, card="cards/cms_card_v1.tcl"))}
+    assert v1_tau["level0.tau.tau_mistag"].severity is Severity.WARN
+
+    v0 = {r.name: r for r in btag.run(build_ctx(v1_fixture_path, card="cards/cms_card_v0.tcl"))}
+    assert v0["level0.btag.btag_eff_c"].severity is Severity.WARN

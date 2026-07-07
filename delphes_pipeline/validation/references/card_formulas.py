@@ -21,16 +21,41 @@ is a numpy array of the same length, clipped to [0, 1].
 from __future__ import annotations
 
 import os
+import re
 
 import numpy as np
 
 from delphes_pipeline.core.references import QUANTITIES
 
+# explicit card -> formula-set map (extend in lockstep when a card is added);
+# both the repo file name and the production card-header name are accepted
+_FORMULA_SETS = {
+    "cms_card_v0.tcl": "expected",
+    "delphes_card_cms_hhbbtt_v0.tcl": "expected",
+    "cms_card_v1.tcl": "expected_v1",
+    "delphes_card_cms_hhbbtt_v1.tcl": "expected_v1",
+}
+
 
 def for_card(card_path: str):
-    """The closure-target function for the configured card (by file name)."""
-    name = os.path.basename(str(card_path))
-    return expected_v1 if "v1" in name else expected
+    """The closure-target function for the configured card (by file name).
+
+    Known cards dispatch via the explicit map. An unknown card that *carries a
+    version marker* is an error — its formulas have not been transcribed, and
+    silently validating against another card's targets is exactly the failure
+    this dispatch exists to prevent. Unversioned names (fixtures, ad-hoc test
+    cards) fall back to the stock v0 baseline.
+    """
+    name = os.path.basename(str(card_path)).lower()
+    if name in _FORMULA_SETS:
+        return globals()[_FORMULA_SETS[name]]
+    if re.search(r"v\d+", name):
+        raise ValueError(
+            f"card {name!r} has a version marker but no transcribed closure formulas; "
+            "transcribe its tagger blocks and add it to card_formulas._FORMULA_SETS "
+            "(kept in lockstep with the tcl)"
+        )
+    return expected
 
 
 def expected(quantity: str, pt, eta) -> np.ndarray:
