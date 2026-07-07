@@ -23,6 +23,14 @@ noted (the Run-2 analysis AN-18-121 corroborates the object definitions).
 | **3** | electron ID floor 10 → **7 GeV** | §5.1.2 third-lepton veto: reject events with an extra electron at **pT>10** | The veto must reconstruct leptons *below* its threshold to apply. With the stock 10 GeV floor (≡ the veto threshold), a 7–10 GeV electron is invisible and cannot be vetoed → extra-lepton backgrounds leak in. Floor 7 gives margin. |
 | **4** | muon ID floor 10 → **5 GeV** | §5.1.2 third-lepton veto: reject events with an extra muon at **pT>6** | The stock 10 GeV floor sits *above* the 6 GeV veto, so muons in 6–10 GeV are never reconstructed and the veto is under-applied (tt̄/DY with a soft third muon leak in). Floor 5 makes the 6 GeV veto emulatable with margin. |
 | **5** | TreeWriter `full`/`lite` selectable | — (bookkeeping) | No kinematic effect; storage only (lite drops constituent branches for fake-source bulk). Not validated with a plot. |
+| **6** *(v1 only)* | BTagging formulas → **UParT-AK4 Medium** fits (b: `0.904−3.53/pT`, c: `0.094+2.22/pT`, light: `0.019+0.32·e^(−pT/30)`) | §4.3 b-jets use UParT-AK4; WP Medium = 0.1272 (BTV 2024_Summer24); anchor: 2024 NanoAODv15 kl=1 `derive_maps`; published WP defs 10%/1%/0.1% light mistag (arXiv:2412.05863) | Stock formulas are Run-1 CSV-era (arXiv:1211.4462): b-eff ~0.63–0.71 (vs 0.76–0.89 measured), c mistag *rises* with pT (measured falls 0.18→0.10), light ~1–2% flat (measured 16→2% falling). A card baseline near the 2024 anchor makes the downstream re-tag a small correction, not a rescue. Max \|fit − anchor bin\| ≤ 0.018. |
+| **7** *(v1 only)* | TauTagging → **DeepTau v2p5 VSjet Medium** (τ: `0.776−9.7/pT`, fake 0.004) + `DeltaR` 0.5 → **0.4** | §4.6 τ_h use DeepTau v2p5, Medium VSjet (NanoAODv15 WP 5); anchor: GenVisTau-matched unique-nearest on the same 2024 NanoAODv15; published Medium plateau ≈0.70, fake ≈0.5% (arXiv:2601.19431) | Stock (flat 0.60 / 1% fake) is pre-DeepTau vintage: it *overshoots* the real 20–40 GeV τ_h efficiency (0.39–0.58) and overstates the fake rate ~2–5×, distorting the τ_hτ_h acceptance and the low-m_ττ fake sideband. ΔR 0.4 matches AK4 and the downstream re-tag matching. Caveat: fake rates are environment-dependent (anchor = b-rich signal); background fake maps must be re-derived on QCD/W+jets. |
+
+**Card versioning.** `cms_card_v0.tcl` (PATCH-1…5) is the provenance of the
+already-produced `/ceph` samples and stays frozen. `cms_card_v1.tcl` = v0 +
+PATCH-6/7 — use it for new productions. The Level-0 closure targets follow the
+config's `card:` path automatically (`card_formulas.for_card`), and
+`tests/test_card_v1.py` pins the tcl ↔ python transcription and the anchor fit.
 
 ## Per-patch validation figures
 

@@ -13,6 +13,11 @@ input:
   treename: Delphes
   max_events: null            # null = all; set an int for a fast smoke run
 
+# v0 = card of the already-produced /ceph samples (stock Run-1-era taggers).
+# v1 = PATCH-6/7 Run-3 tagger baselines (UParT-AK4 Medium + DeepTau v2p5 Medium,
+# fit to the 2024 NanoAODv15 anchor) — use for NEW productions. The Level-0
+# closure targets dispatch on this path (card_formulas.for_card), so it must
+# name the card the sample was actually produced with.
 card: cards/cms_card_v0.tcl
 
 references:

@@ -57,10 +57,12 @@ def build_context(config: dict[str, Any], *, max_events: int | None) -> Validati
     plot_dir = output_dir / "plots"
 
     # inject the card-formula closure target into the reference store
+    # (dispatched on the configured card: v0 stock vs v1 Run-3 taggers)
     from delphes_pipeline.validation.references import card_formulas
 
+    card_path = config.get("card", "cards/cms_card_v0.tcl")
     ref_dir = config.get("references", {}).get("dir", "delphes_pipeline/validation/references/data")
-    references = ReferenceStore(ref_dir, card_formula_fn=card_formulas.expected)
+    references = ReferenceStore(ref_dir, card_formula_fn=card_formulas.for_card(card_path))
 
     provenance = prov.collect(
         card_path=config.get("card", "cards/cms_card_v0.tcl"),

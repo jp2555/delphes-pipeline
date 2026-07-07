@@ -80,13 +80,16 @@ def broken_fixture_path(tmp_path_factory) -> str:
     return str(path)
 
 
-def build_ctx(path: str) -> ValidationContext:
+def build_ctx(path: str, *, card: str | None = None) -> ValidationContext:
     """Build a ValidationContext pointed at a local fixture.
 
     Mirrors ``run_validation.build_context`` (card formulas injected into the
     reference store, provenance collected) but reads all events from ``path``.
+    ``card`` overrides the config's card path (selects the closure formulas).
     """
     config = make_config(path)
+    if card is not None:
+        config["card"] = card
     cfg_input = config["input"]
     events = DelphesEvents(cfg_input["delphes_root"], treename=cfg_input.get("treename", "Delphes"))
 
@@ -94,7 +97,9 @@ def build_ctx(path: str) -> ValidationContext:
     plot_dir = output_dir / "plots"
 
     ref_dir = config.get("references", {}).get("dir", "delphes_pipeline/validation/references/data")
-    references = ReferenceStore(ref_dir, card_formula_fn=card_formulas.expected)
+    references = ReferenceStore(
+        ref_dir, card_formula_fn=card_formulas.for_card(config.get("card", "cards/cms_card_v0.tcl"))
+    )
 
     provenance = prov.collect(
         card_path=config.get("card", "cards/cms_card_v0.tcl"),
