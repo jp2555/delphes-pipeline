@@ -1,0 +1,140 @@
+diff --git a/cards/cms_card_v0.tcl b/cards/cms_card_v1.tcl
+index 3121de9..7cc5ff9 100644
+--- a/cards/cms_card_v0.tcl
++++ b/cards/cms_card_v1.tcl
+@@ -1,11 +1,15 @@
+ #######################################################################
+-# delphes_card_CMS_hhbbtt_v0.tcl
++# delphes_card_CMS_hhbbtt_v1.tcl
+ #
+ # Base:   delphes 3.5.1pre09, cards/delphes_card_CMS.tcl (no pileup)
+ # For:    HH -> bb tautau NSBI Delphes pipeline, production baseline
+-#         (working note: D3 option A, parametric pileup; tuning set v0
+-#         will be layered on top as a separate, diff-reviewable change)
+-# Date:   2026-06-12
++#         (working note: D3 option A, parametric pileup)
++# Date:   2026-07-07
++#
++# v1 = v0 + PATCH-6/7 (Run-3 tagger baselines). cms_card_v0.tcl is kept
++# unchanged: it is the provenance of the already-produced kl samples on
++# /ceph. Use v1 for new productions; the validation closure targets
++# (validation/references/card_formulas.py) dispatch on the card name.
+ #
+ # Patches relative to the stock card (grep "PATCH-"):
+ #   PATCH-1  jet radius 0.5 -> 0.4 in GenJetFinder and FastJetFinder
+@@ -23,6 +27,38 @@
+ #            constituent branches -- for the fake-source background
+ #            bulk: QCD HT slices, W+jets). Switch by commenting one
+ #            module and uncommenting the other; see PATCH-5 below.
++#   PATCH-6  BTagging efficiency formulas replaced. The stock formulas
++#            (arXiv:1211.4462) are Run-1 CSV-era: b-eff evaluates to
++#            ~0.63-0.71 and the c mistag *rises* with pT. New formulas
++#            are smooth fits to the UParT-AK4 Medium working point
++#            (2024_Summer24 discriminant cut 0.1272, resolved from BTV
++#            jsonpog-integration) measured per-jet on the private 2024
++#            NanoAODv15 kl=1 anchor (200k events, derive_maps
++#            2026-07-06); plateaus consistent with the published Run-3
++#            performance (arXiv:2412.05863: L/M/T WPs defined at 10%/
++#            1%/0.1% light mistag). Max |fit - anchor bin| <= 0.018.
++#   PATCH-7  TauTagging replaced. Stock (flat 0.60 eff / 0.01 mistag)
++#            is pre-DeepTau vintage. New: DeepTau v2p5 VSjet Medium
++#            (NanoAODv15 WP level 5) measured on the same 2024 anchor
++#            (GenVisTau-matched, unique nearest); eff rises 0.39->0.74
++#            (published Medium plateau ~0.70, arXiv:2601.19431), fake
++#            0.004 flat (anchor band 0.002-0.007; published ~0.005).
++#            DeltaR 0.5 -> 0.4 to match the AK4 radius and the
++#            downstream re-tag matching convention (tuning/maps.py).
++#
++# PATCH-6/7 caveats (documented, accepted):
++#   - The anchor is the bb-tautau *signal*: the light-jet mistag and
++#     the jet->tau_h fake rate are environment-dependent (busy, b-rich
++#     topology; the low-pT light mistag in particular sits far above
++#     the inclusive-ttbar WP definition). Fake-dominated backgrounds
++#     (QCD, W+jets) take per-jet fake weights downstream, not the card
++#     bits -- re-derive those maps on the background samples before
++#     trusting them.
++#   - The card baseline exists so the downstream stochastic re-tag
++#     (anchor maps, tuning/maps.py) is a small correction rather than
++#     a rescue; residual card-vs-anchor differences (flavor-definition:
++#     Delphes parton-cone Flavor vs NanoAOD hadronFlavour ghosts) are
++#     absorbed there.
+ #
+ # Deliberately unchanged:
+ #   - TreeWriter: the stock card already writes the complete tree
+@@ -31,10 +67,12 @@
+ #     ScalarHT); everything downstream (tau redefinition, fake weights,
+ #     b-tag WPs via Jet.Flavor, MET covariance synthesis, reclustering)
+ #     rides on these branches -- do not disable them.
+-#   - Energy resolutions, BTagging, TauTagging: stock. The tagger bits
+-#     are ignored downstream and redone from Jet.Flavor and the gen
+-#     record; resolutions are adjusted downstream in the degrade
++#   - Energy resolutions: stock; adjusted downstream in the degrade
+ #     direction only, against the validation-ladder candles.
++#   - JetFlavorAssociation: stock (DeltaR 0.5, parton-based). Changing
++#     it would silently re-partition the b/c/light populations that the
++#     anchor maps key off; any flavor-definition residual is absorbed
++#     by the downstream re-tag.
+ #   - No pileup (D3 option A): pileup enters through the tuning maps.
+ #
+ # Pilot gate before full statistics (see note, priority list item 7):
+@@ -780,16 +818,23 @@ module BTagging BTagging {
+   # PDG code = the highest PDG code of a quark or gluon inside DeltaR cone around jet axis
+   # gluon's PDG code has the lowest priority
+ 
+-  # based on arXiv:1211.4462
+-  
++  # PATCH-6: UParT-AK4 Medium WP (2024_Summer24, cut 0.1272), smooth fits
++  # to the per-jet 2024 NanoAODv15 kl=1 anchor measurement (derive_maps,
++  # DEFAULT_PT_BINS 20-300 GeV). Cross-checked vs published Run-3
++  # performance (arXiv:2412.05863). Keep in lockstep with
++  # validation/references/card_formulas.py (expected_v1).
++
+   # default efficiency formula (misidentification rate)
+-  add EfficiencyFormula {0} {0.01+0.000038*pt}
++  # anchor: 0.159 -> 0.019 falling (bb-tautau environment; see header caveat)
++  add EfficiencyFormula {0} {0.019 + 0.32*exp(-pt/30.0)}
+ 
+   # efficiency formula for c-jets (misidentification rate)
+-  add EfficiencyFormula {4} {0.25*tanh(0.018*pt)*(1/(1+ 0.0013*pt))}
++  # anchor: 0.183 -> 0.103 falling (stock formula rose with pT)
++  add EfficiencyFormula {4} {0.094 + 2.22/pt}
+ 
+   # efficiency formula for b-jets
+-  add EfficiencyFormula {5} {0.85*tanh(0.0025*pt)*(25.0/(1+0.063*pt))}
++  # anchor: 0.763 -> 0.890 rising; max |fit - anchor bin| = 0.010
++  add EfficiencyFormula {5} {(pt > 4.0) * (0.904 - 3.53/pt)}
+ }
+ 
+ #############
+@@ -801,7 +846,9 @@ module TauTagging TauTagging {
+   set PartonInputArray Delphes/partons
+   set JetInputArray JetEnergyScale/jets
+ 
+-  set DeltaR 0.5
++  # PATCH-7: 0.5 -> 0.4, matching the AK4 radius (PATCH-1) and the
++  # downstream gen-tau <-> jet matching convention (tuning/maps.py, dR 0.4)
++  set DeltaR 0.4
+ 
+   set TauPTMin 1.0
+ 
+@@ -809,10 +856,18 @@ module TauTagging TauTagging {
+ 
+   # add EfficiencyFormula {abs(PDG code)} {efficiency formula as a function of eta and pt}
+ 
++  # PATCH-7: DeepTau v2p5 VSjet Medium (NanoAODv15 WP level 5), fits to
++  # the per-jet 2024 NanoAODv15 kl=1 anchor (GenVisTau-matched, unique
++  # nearest; derive_maps). Published Medium plateau ~0.70 / fake ~0.005
++  # (arXiv:2601.19431). Keep in lockstep with card_formulas.expected_v1.
++
+   # default efficiency formula (misidentification rate)
+-  add EfficiencyFormula {0} {0.01}
++  # anchor band 0.002-0.007 (signal environment; see header caveat)
++  add EfficiencyFormula {0} {0.004}
+   # efficiency formula for tau-jets
+-  add EfficiencyFormula {15} {0.6}
++  # anchor: 0.388 -> 0.737 rising; max |fit - anchor bin| = 0.025;
++  # crosses zero at pt = 12.5 (guarded), plateau 0.776 asymptotic
++  add EfficiencyFormula {15} {(pt > 12.5) * (0.776 - 9.7/pt)}
+ }
+ 
+ #####################################################
