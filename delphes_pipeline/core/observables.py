@@ -204,17 +204,24 @@ def tau_efficiency(events: DelphesEvents, *, bins=DEFAULT_PT_BINS, dr=0.4, eta_m
                    pt_min=20.0, x: str = "gen_pt") -> Profile:
     """τ_h efficiency: TauTag rate of the unique nearest jet to each acceptance gen τ.
 
-    ``x`` selects the binning variable — the same numerator/denominator either way:
+    ``x`` selects the binning variable — the same numerator/denominator either way.
+    **Both lenses want** ``"jet_pt"``; the gen axis is kept only as a diagnostic.
 
-    - ``"gen_pt"`` (default): bin by the **gen τ** pT. This is the *tuning* axis: it
-      matches the NanoAOD anchor (τ efficiency vs the generated τ), so the tuning
-      lens can compare Delphes to CMS bin-by-bin.
-    - ``"jet_pt"``: bin by the **matched reco jet** pT. This is the *closure* axis:
-      Delphes' ``TauTagging`` evaluates its ``EfficiencyFormula`` at the jet
-      kinematics, so a pT-dependent card formula only closes against itself on this
-      axis (binning a jet-pT-applied formula by gen pT smears it through the jet
-      response and the low-pT matching turn-on). The b-tag closures are already
-      jet-pT for exactly this reason.
+    - ``"jet_pt"``: bin by the **matched reco jet** pT. Correct for *both* lenses:
+
+      * *closure* — Delphes' ``TauTagging`` evaluates its ``EfficiencyFormula`` at the
+        jet kinematics, so a pT-dependent card formula only closes against itself on
+        this axis. The b-tag closures are jet-pT for exactly this reason.
+      * *tuning* — the NanoAOD anchor is binned in ``GenVisTau`` pT, i.e. the τ's
+        **visible** decay products. Its Delphes counterpart is the τ-jet (Delphes jets
+        run after ``NeutrinoFilter``), not the full gen τ. The residual jet-vs-visible
+        difference is the τ energy response, measured separately as ``tau_escale``.
+
+    - ``"gen_pt"``: bin by the **full gen τ** pT, neutrinos included. This is neither
+      the axis the card is applied at nor the anchor's ``GenVisTau`` definition — a
+      hadronic τ carries only ~65% of its pT visibly, so comparing this axis to the
+      anchor reads a pure axis mismatch as a several-percent efficiency deficit.
+      Retained for diagnostics only; do not use it against the anchor.
 
     Verified in the Delphes source (``modules/TauTagging.cc``, identical in 3.5.0 /
     3.5.1pre05 / master): ``pt``/``eta`` are set once per jet from ``jet->Momentum``

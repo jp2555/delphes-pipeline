@@ -25,7 +25,10 @@ PROFILE_OBSERVABLES = {
     "btag_eff_b": lambda ev, bins: obs.btag_efficiency(ev, "btag_eff_b", bins=bins),
     "btag_eff_c": lambda ev, bins: obs.btag_efficiency(ev, "btag_eff_c", bins=bins),
     "btag_mistag_light": lambda ev, bins: obs.btag_efficiency(ev, "btag_mistag_light", bins=bins),
-    "tau_eff": lambda ev, bins: obs.tau_efficiency(ev, bins=bins),
+    # jet-pT axis: the anchor is binned in GenVisTau (VISIBLE τ) pT, whose Delphes
+    # counterpart is the τ-jet — not the full gen τ (which carries the ν too, so that
+    # axis reads as a several-% deficit against the anchor). See tau_efficiency.
+    "tau_eff": lambda ev, bins: obs.tau_efficiency(ev, bins=bins, x="jet_pt"),
     "tau_mistag": lambda ev, bins: obs.tau_mistag(ev, bins=bins),
     "electron_eff": lambda ev, bins: obs.lepton_efficiency(ev, "electron_eff", bins=bins),
     "muon_eff": lambda ev, bins: obs.lepton_efficiency(ev, "muon_eff", bins=bins),

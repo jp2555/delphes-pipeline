@@ -69,14 +69,29 @@ def test_level0_tau_leaf_uses_the_jet_pt_axis(tau_response_fixture):
     assert eff.passed, eff.detail
 
 
-def test_gen_pt_axis_is_still_available_for_tuning(tau_response_fixture):
-    """The tuning lens keeps the gen-τ axis (it matches the NanoAOD anchor)."""
+def test_tuning_lens_uses_the_jet_pt_axis(tau_response_fixture):
+    """The tuning lens is on the jet axis too: the NanoAOD anchor is binned in
+    GenVisTau (VISIBLE τ) pT, whose Delphes counterpart is the τ-jet — the full
+    gen τ carries the ν as well, so that axis would read as an efficiency deficit."""
     from delphes_pipeline.tuning import targets
 
     ctx = build_ctx(tau_response_fixture, card="cards/cms_card_v1.tcl")
     prof = targets.PROFILE_OBSERVABLES["tau_eff"](ctx.events, obs.DEFAULT_PT_BINS)
-    assert prof.xlabel.startswith("tau pT")          # gen-τ axis, not the jet axis
+    assert prof.xlabel.startswith("matched jet pT")
     assert prof.centers.size and np.all(np.isfinite(prof.values))
+
+
+def test_gen_axis_would_read_as_a_deficit_vs_the_anchor(tau_response_fixture):
+    """Why the axis matters for tuning: against a flat anchor-like target, the gen-τ
+    axis shows a systematic negative residual that the jet axis does not."""
+    ctx = build_ctx(tau_response_fixture, card="cards/cms_card_v1.tcl")
+    dev = {}
+    for x in ("jet_pt", "gen_pt"):
+        prof = obs.tau_efficiency(ctx.events, bins=_BINS, x=x)
+        target = cf.expected_v1("tau_eff", prof.centers, np.zeros_like(prof.centers))
+        dev[x] = float(np.average(np.abs(prof.values / target - 1.0), weights=prof.counts))
+    assert dev["jet_pt"] < 0.02, dev          # closes
+    assert dev["gen_pt"] > 2 * dev["jet_pt"]  # a pure axis mismatch, read as a deficit
 
 
 def test_axis_choice_is_validated():
