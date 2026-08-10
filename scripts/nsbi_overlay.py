@@ -4,12 +4,19 @@
         --delphes-dir /ceph/jpan/cms_nanoaod_2024_hh2b2tau/delphes \
         --nano-dir    /ceph/jpan/cms_nanoaod_2024_hh2b2tau \
         --out plots/nsbi_overlay --max-events 20000 [--tuned/--no-tuned] [--tautau-only]
+        [--no-clean]
 
 Features: {mHH, cosθ*, pHH_T, mbb, ΔR_bb, mττ, ΔR_ττ, Δφ_HH, pH1_T, pH2_T}. The Delphes side
 applies the tuning_maps (b-tag/τ_h re-tag + energy scale) by default so it is the *tuned*
 sample that feeds the NSBI — that is the right thing to compare with CMS; ``--no-tuned`` shows
 the stock card. Splitting the bb side (mbb, ΔR_bb) from the ττ side (mττ, ΔR_ττ) localizes any
 Delphes-vs-CMS mismatch. NB: verify the cosθ* definition matches your NSBI's.
+
+Both sides run the SAME selection (``--clean``, on by default): pick the di-τ pair, then keep
+jets at pT/|eta| acceptance and ΔR > 0.4 from both selected τ. Delphes τ_h *are* jets while
+CMS keeps them in a separate ``Tau`` collection, so without a common overlap removal the two
+sides build the bb pair from different jet pools — an artefact that lands on ΔR_bb.
+``--no-clean`` restores the old asymmetric behaviour to size that effect.
 """
 
 from __future__ import annotations
@@ -106,24 +113,45 @@ def _tau_cands_nano(ev):
     return ak.concatenate([th, lep(ev.electrons), lep(ev.muons)], axis=1)
 
 
-def features(ev, *, nano, tautau_only=False, mtautau_min=20.0):
+def features(ev, *, nano, tautau_only=False, mtautau_min=20.0, clean=True,
+             jet_pt_min=20.0, jet_eta_max=2.4, clean_dr=0.4):
     """The 10 NSBI features over events with a reconstructed bb + di-τ system.
 
     ``mtautau_min`` drops the m_ττ≈0 spike (a FastMTT failure / a collinear or
     double-counted τ-pair) so it doesn't distort the shape normalization.
+
+    ``clean`` (default) applies the SAME selection to both sides, in the CMS order:
+    pick the di-τ pair first, then keep jets with ``pt > jet_pt_min``,
+    ``|eta| <= jet_eta_max`` and ``ΔR > clean_dr`` from *both* selected τ candidates.
+    Without it the two sides are not comparable — the Delphes side used to drop every
+    τ-tagged jet from the b pool while the NanoAOD side kept all jets (τ_h live in a
+    separate ``Tau`` collection there, but their jets are still in ``Jet``), so a
+    τ-jet could enter the CMS bb pair and not the Delphes one. That asymmetry lands
+    squarely on ΔR_bb. ``clean=False`` restores the old behaviour for comparison.
     """
-    jets = ev.jets
-    bsrc = jets if nano else jets[jets.tautag == 0]                 # τ_h are separate on NanoAOD
-    bb = bsrc[ak.argsort(bsrc.pt, axis=1, ascending=False, stable=True)]
-    bb = bb[ak.argsort(bb.btag, axis=1, ascending=False, stable=True)][:, :2]
     cand = _tau_cands_nano(ev) if nano else _tau_cands_delphes(ev)
     if tautau_only:
         cand = cand[cand.is_tauh == 1]        # τ_hτ_h channel: pick the 2 leading τ_h, not 2 of all
     cand = cand[ak.argsort(cand.pt, axis=1, ascending=False, stable=True)]
 
-    sel = ak.to_numpy((ak.num(bb) >= 2) & (ak.num(cand) >= 2))
-    bb, cand = bb[sel], cand[sel][:, :2]
-    met = ev.met[sel]
+    jets = ev.jets
+    if clean:
+        jets = jets[(jets.pt > jet_pt_min) & (np.abs(jets.eta) <= jet_eta_max)]
+    elif not nano:
+        jets = jets[jets.tautag == 0]         # legacy: asymmetric, Delphes-only τ removal
+
+    # the di-τ pair must exist before jets can be cleaned against it
+    has_pair = ak.to_numpy(ak.num(cand) >= 2)
+    cand, jets, met_all = cand[has_pair][:, :2], jets[has_pair], ev.met[has_pair]
+    if clean:
+        from delphes_pipeline.core.matching import matched_to_any
+        jets = jets[~matched_to_any(jets, cand, clean_dr)]
+
+    bb = jets[ak.argsort(jets.pt, axis=1, ascending=False, stable=True)]
+    bb = bb[ak.argsort(bb.btag, axis=1, ascending=False, stable=True)][:, :2]
+
+    sel = ak.to_numpy(ak.num(bb) >= 2)
+    bb, cand, met = bb[sel], cand[sel], met_all[sel]
     met_x = ak.to_numpy(ak.fill_none(met.met * np.cos(met.phi), np.nan))
     met_y = ak.to_numpy(ak.fill_none(met.met * np.sin(met.phi), np.nan))
 
@@ -162,6 +190,13 @@ def main(argv=None) -> int:
     ap.add_argument("--no-tuned", dest="tuned", action="store_false")
     ap.add_argument("--tautau-only", action="store_true")
     ap.add_argument("--mtautau-min", type=float, default=20.0, help="drop the m_ττ≈0 spike below this (GeV)")
+    ap.add_argument("--clean", dest="clean", action="store_true", default=True,
+                    help="symmetric jet cleaning on both sides (default)")
+    ap.add_argument("--no-clean", dest="clean", action="store_false",
+                    help="legacy asymmetric selection (Delphes drops τ-tagged jets, NanoAOD keeps all)")
+    ap.add_argument("--jet-pt-min", type=float, default=20.0, help="common jet pT acceptance")
+    ap.add_argument("--jet-eta-max", type=float, default=2.4, help="common jet |eta| acceptance")
+    ap.add_argument("--clean-dr", type=float, default=0.4, help="ΔR(jet, selected τ) overlap removal")
     args = ap.parse_args(argv)
 
     cfg = load_config(args.config)
@@ -187,9 +222,11 @@ def main(argv=None) -> int:
         if tuning is not None:
             from delphes_pipeline.tuning.maps import RetaggedEvents
             dev = RetaggedEvents(dev, tuning, np.random.default_rng(0))
-        df = features(dev, nano=False, tautau_only=args.tautau_only, mtautau_min=args.mtautau_min)
+        sel_kw = dict(tautau_only=args.tautau_only, mtautau_min=args.mtautau_min, clean=args.clean,
+                      jet_pt_min=args.jet_pt_min, jet_eta_max=args.jet_eta_max, clean_dr=args.clean_dr)
+        df = features(dev, nano=False, **sel_kw)
         nf = features(NanoAODEvents(nano_by_kl[kl], branches=branches, wp=wp, entry_stop=args.max_events),
-                      nano=True, tautau_only=args.tautau_only, mtautau_min=args.mtautau_min)
+                      nano=True, **sel_kw)
 
         fig, axes = plt.subplots(2, 5, figsize=(20, 8))
         for ax, feat in zip(axes.flat, _FEATURES):
@@ -202,7 +239,8 @@ def main(argv=None) -> int:
                     h, _ = np.histogram(d, bins=b, density=True)
                     ax.step(centres, h, where="mid", lw=2, label=f"{lab} ({d.size})")
             ax.set_xlabel(feat); ax.legend(fontsize=8)
-        fig.suptitle(f"$\\kappa_\\lambda$ = {kl}" + ("  (tuned)" if tuning is not None else "  (stock)"))
+        fig.suptitle(f"$\\kappa_\\lambda$ = {kl}" + ("  (tuned)" if tuning is not None else "  (stock)")
+                     + ("  · symmetric cleaning" if args.clean else "  · legacy selection"))
         out = os.path.join(args.out, f"nsbi_{kl}.png")
         fig.tight_layout(); fig.savefig(out, dpi=110); plt.close(fig)
         print(f"[kl {kl}] -> {out}  (Delphes {df['mHH'].size}, NanoAOD {nf['mHH'].size})")
