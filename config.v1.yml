@@ -1,0 +1,116 @@
+# Ready-to-run config for the Run-3 (card v1) Delphes samples on bms3.etp.kit.edu.
+#
+# Delphes v1 samples : /ceph/jpan/gen-delphes/*_Delphes_v1
+# NanoAOD anchor     : /ceph/jpan/cms_nanoaod_2024_hh2b2tau  (unchanged)
+#
+# Run (kl=1 point):
+#   0. derive maps    : pixi run python -m delphes_pipeline.tuning.derive_maps \
+#                          --config config.v1.yml --output cards/tuning/maps_v1.json
+#      (the combined maps file is NOT in the repo — derive it once; the anchor is
+#       reachable on bms3. v1 is tagger-only, so this reproduces a v0 derivation.)
+#   1. validation gate : pixi run python -m delphes_pipeline.validation.run_validation --config config.v1.yml
+#   2. tuning lens      : bash runners/run_tuning.sh config.v1.yml
+#      all kl points    : DELPHES_BASE=/ceph/jpan/gen-delphes KL_POINTS="0p00 1p00 5p00" \
+#                          bash runners/validate_all.sh config.v1.yml
+#   3. overlay vs CMS   : pixi run python scripts/nsbi_overlay.py --config config.v1.yml \
+#                          --delphes-dir /ceph/jpan/gen-delphes \
+#                          --nano-dir /ceph/jpan/cms_nanoaod_2024_hh2b2tau \
+#                          --out plots/nsbi_v1 --max-events 20000 --tautau-only [--no-tuned]
+
+input:
+  # gen-delphes holds one dir per sample; the glob matches the kl=1 signal dir
+  # (only signal dirs carry "kl-"). A matched dir is expanded to its *.root.
+  delphes_root: /ceph/jpan/gen-delphes/*kl-1p00*Delphes_v1
+  treename: Delphes
+  max_events: 200000          # fast first pass; set null for the full-stats level-4 lineshape
+
+# Run-3 tagger baselines (PATCH-6/7). MUST match the card the samples were
+# produced with: the Level-0 closure + severity dispatch on this path
+# (card_formulas.for_card). The gen-delphes samples are v1.
+card: cards/cms_card_v1.tcl
+
+references:
+  dir: delphes_pipeline/validation/references/data
+
+# NanoAOD tuning anchor — card-independent (real CMS MC), unchanged location.
+anchor:
+  enabled: true
+  nanoaod_path: /ceph/jpan/cms_nanoaod_2024_hh2b2tau/*kl-1p00*NanoAODv15-PowhegBugFix*
+  max_events: 200000
+  wp:
+    btag_medium: null          # resolved from jsonpog-integration below
+    btag_correctionlib:
+      json: /cvmfs/cms.cern.ch/rsync/cms-nanoAOD/jsonpog-integration/POG/BTV/2024_Summer24/btagging.json.gz
+      tagger: UParT            # -> UParTAK4_wp_values, Medium = 0.1272
+      wp: M
+    deeptau_vsjet_medium: 5     # DeepTau v2p5 VSjet Medium WP level (NanoAODv15: 0..8)
+  branches:
+    jet: { btag_disc: Jet_btagUParTAK4B }
+    tau: { vsjet: Tau_idDeepTau2018v2p5VSjet }
+
+# Downstream tuning maps. NOT committed to the repo — derive once (step 0 above)
+# before running the tuning lens / overlay / ntuplizer level. v1 changed only the
+# tagger bits, so the maps (anchor efficiencies + Delphes escale/lepton-SF) match a
+# v0 derivation; the name just tracks this production.
+tuning_maps: cards/tuning/maps_v1.json
+
+output:
+  dir: outputs/validation_v1
+
+# Level-1 candles. gen-delphes has the tt̄ samples (v1) but NO DYto2Tau, so the
+# Z→ττ candle is skipped (info note, not a failure). The ε_b closure targets the
+# global card (v1) — correct, since the tt̄ candle is also v1-produced.
+candles:
+  ttbar:   /ceph/jpan/gen-delphes/*TTto2L2Nu*Delphes_v1   # eμ b-tag closure (the GATE)
+  # ztautau: (no DYto2Tau sample present in gen-delphes)
+  max_events: 200000
+  # card: cards/cms_card_v1.tcl   # only needed if candles differ from the global card
+
+levels:
+  pilot_gate: { enabled: true }
+  level0:
+    enabled: true
+    pt_bins:  [20, 30, 40, 50, 70, 100, 150, 200, 300]
+    eta_bins: [0.0, 0.8, 1.5, 2.4]
+    sumet_bins: [0, 100, 200, 300, 500, 800, 1200]
+    min_bin_count: 25
+  ntuplizer:
+    enabled: true
+    max_events: 2000
+  level1: { enabled: true }   # tt̄ ε_b candle (Z→ττ skipped: no DY sample)
+  level2: { enabled: false }
+  level3: { enabled: false }
+  level4: { enabled: true }   # κ_λ m_HH faithfulness on the signal
+
+tolerances:
+  pilot_gate:
+    neg_weight_fraction_max: 0.30
+    min_gen_taus: 1
+    mbb_width_max_gev: 30.0
+    mbb_core_fraction_min: 0.30
+    met_resolution_max_gev: 40.0
+    kb_per_event_max: 150.0
+  level1:
+    eb_closure_rel_tol: 0.10
+    mtautau_peak_tol_gev: 10.0
+    mtautau_met_sigma_gev: 25.0
+  level4:
+    mhh_scale_tol: 0.10
+    mhh_resolution_max: 0.30
+  level0:
+    closure_rel_tol: 0.05
+    closure_nsigma: 2.0
+    max_failing_bin_fraction: 0.20
+    met_resolution_max_gev: 40.0
+    # v0 waivers (stock formulas); v1 gates btag_eff_c (its stock concession is
+    # obsolete — the v1 c-formula IS the anchor fit). See config.example.yml for
+    # the full rationale. closure.py picks the map by the dispatched formula set.
+    closure_severity:
+      tau_mistag: warn
+      electron_eff: warn
+      muon_eff: warn
+      btag_eff_c: warn
+    closure_severity_v1:
+      tau_mistag: warn
+      electron_eff: warn
+      muon_eff: warn
