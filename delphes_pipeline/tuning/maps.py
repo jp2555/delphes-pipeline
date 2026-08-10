@@ -95,6 +95,17 @@ def derive_maps(config: dict, *, bins=None, max_events=None) -> dict:
             maps["tau_escale"] = _scale_factor(profiles["tau_energy_response"], d_tau_resp)
         else:
             maps["tau_escale"] = _invert_to_unity(d_tau_resp)
+        # MET: the quadrature gap to the anchor resolution (pileup + detector noise the
+        # no-pileup card cannot produce). Measured with the SAME estimator on both sides.
+        if "met_resolution" in profiles:
+            dx, dy, _ = obs.met_residuals(ev)
+            d_res = float(np.sqrt(0.5 * (np.var(dx) + np.var(dy)))) if dx.size else 0.0
+            a_res = float(np.asarray(profiles["met_resolution"].values)[0])
+            sigma = float(np.sqrt(max(a_res ** 2 - d_res ** 2, 0.0)))
+            maps["met_smear"] = {"x": "overall", "centers": [0.0], "values": [sigma],
+                                 "counts": [int(dx.size)],
+                                 "anchor_resolution_gev": a_res,
+                                 "delphes_resolution_gev": d_res}
         for sf_name, eff in (("electron_sf", "electron_eff"), ("muon_sf", "muon_eff")):
             if eff in profiles:
                 maps[sf_name] = _scale_factor(profiles[eff], obs.lepton_efficiency(ev, eff, bins=bins))
@@ -288,6 +299,30 @@ def retag_jets(events, maps: TuningMaps, rng: np.random.Generator):
     return jets, frozenset(fields)
 
 
+def smear_met(events, maps: TuningMaps, rng: np.random.Generator):
+    """Degrade the Delphes pT_miss to the CMS resolution measured on the anchor.
+
+    The card runs WITHOUT pileup (D3 option A) and its header is explicit that
+    "pileup enters through the tuning maps" — this is that map. Delphes MET is
+    correspondingly unphysically clean (~16 GeV per component against ~33 on the CMS
+    anchor), and MET is what FastMTT fits the τ energy fractions against, so the gap
+    propagates straight into m_ττ and everything built from the di-τ system.
+
+    Gaussian noise of the stored σ is added per component; σ is the quadrature
+    difference, so the smeared resolution lands on the anchor's by construction.
+    """
+    vals = (maps.maps.get("met_smear") or {}).get("values") or []
+    sigma = float(vals[0]) if vals else 0.0
+    met = events.met
+    if sigma <= 0:
+        return met
+    x = ak.to_numpy(ak.fill_none(met.met * np.cos(met.phi), 0.0))
+    y = ak.to_numpy(ak.fill_none(met.met * np.sin(met.phi), 0.0))
+    x = x + rng.normal(0.0, sigma, size=x.shape)
+    y = y + rng.normal(0.0, sigma, size=y.shape)
+    return ak.zip({"met": np.hypot(x, y), "eta": np.zeros_like(x), "phi": np.arctan2(y, x)})
+
+
 class RetaggedEvents:
     """An events view with the downstream tuning-v0 corrections applied to ``.jets``.
 
@@ -295,17 +330,30 @@ class RetaggedEvents:
     tag bits re-derived from ``Jet.Flavor`` (b-tag) and the gen record (τ_h), and its
     b-jet/τ-jet pT+mass rescaled by the energy-scale maps. All other collections are
     unchanged, so every observable re-measures the *tuned* response through the same
-    ``core.observables`` path. ``retagged_fields`` reports which corrections were applied
-    ({'btag','tautag','escale'}).
+    ``core.observables`` path. ``.met`` is also overridden when a ``met_smear`` map is
+    present (the card has no pileup; the map puts that resolution back).
+    ``retagged_fields`` reports which corrections were applied
+    ({'btag','tautag','escale','tau_mass','met_smear'}).
     """
 
     def __init__(self, events, maps: TuningMaps, rng: np.random.Generator):
         self._events = events
-        self._jets, self.retagged_fields = retag_jets(events, maps, rng)
+        # fixed order (jets, then MET) so the shared rng yields identical output in the
+        # tuning lens and in the ntuplizer
+        self._jets, fields = retag_jets(events, maps, rng)
+        self._met = None
+        if (maps.maps.get("met_smear") or {}).get("values"):
+            self._met = smear_met(events, maps, rng)
+            fields = fields | {"met_smear"}
+        self.retagged_fields = frozenset(fields)
 
     @property
     def jets(self) -> ak.Array:
         return self._jets
+
+    @property
+    def met(self) -> ak.Array:
+        return self._events.met if self._met is None else self._met
 
     def __getattr__(self, name):
         # Reject dunders and the pre-init state so copy/pickle fail with a normal
