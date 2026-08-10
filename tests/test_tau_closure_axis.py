@@ -26,7 +26,13 @@ from delphes_pipeline.validation.references import card_formulas as cf
 # the v1 τ formula — steep and pT-dependent, i.e. sensitive to the binning axis
 _TAU_V1 = lambda pt, eta: float(cf.expected_v1("tau_eff", np.atleast_1d(pt), np.atleast_1d(eta))[0])
 _TAU_MISTAG_V1 = lambda pt, eta: float(cf.expected_v1("tau_mistag", np.atleast_1d(pt), np.atleast_1d(eta))[0])
-_RESPONSE = 0.90   # τ-jets under-measure the gen τ (real Delphes: ~0.92-0.99)
+# jet pT / FULL gen-τ pT. NB this is *not* the ~0.92-0.99 jet/GenJet energy response
+# (both sides visible, what tau_energy_response measures): the gen τ here carries its
+# ν too, so the physical value is the hadronic visible fraction, ~0.65-0.75. The
+# knife-edge pass/fail below is quoted at 0.90, where the fixture's own jet-matching
+# dilution is small; the response-scan test carries the claim that actually
+# generalises. See test_jet_axis_beats_gen_axis_across_responses.
+_RESPONSE = 0.90
 # The default binning's 200-300 GeV bin holds ~35 τ on a fixture this size (real
 # data: ~7.5k), where a 3σ statistical swing reads as a closure failure on either
 # axis. Stop at 150 GeV so the comparison measures the axis, not the sparse tail.
@@ -92,6 +98,29 @@ def test_gen_axis_would_read_as_a_deficit_vs_the_anchor(tau_response_fixture):
         dev[x] = float(np.average(np.abs(prof.values / target - 1.0), weights=prof.counts))
     assert dev["jet_pt"] < 0.02, dev          # closes
     assert dev["gen_pt"] > 2 * dev["jet_pt"]  # a pure axis mismatch, read as a deficit
+
+
+@pytest.mark.parametrize("response", [0.65, 0.80, 0.95])
+def test_jet_axis_beats_gen_axis_across_responses(tmp_path, response):
+    """The robust claim: whatever the τ-jet/gen-τ ratio, the jet axis tracks the card
+    better than the gen axis.
+
+    The single-response pass/fail test above is a knife edge — at 0.95 the axes nearly
+    coincide and the gen closure squeaks through, while at the physical ~0.65 the
+    fixture's own accidental jet-matching dilution (a gen τ picking up a neighbouring
+    jet, which carries tau_mistag instead of tau_eff) costs the jet axis a few percent
+    at high pT. The *ordering* holds throughout, which is the property the fix claims.
+    """
+    path = tmp_path / "resp.root"
+    make_fixture(str(path), n_events=15000, seed=5, tau_response=response,
+                 tau_eff=_TAU_V1, tau_mistag=_TAU_MISTAG_V1)
+    ctx = build_ctx(str(path), card="cards/cms_card_v1.tcl")
+    dev = {}
+    for x in ("jet_pt", "gen_pt"):
+        prof = obs.tau_efficiency(ctx.events, bins=_BINS, x=x)
+        target = cf.expected_v1("tau_eff", prof.centers, np.zeros_like(prof.centers))
+        dev[x] = float(np.average(np.abs(prof.values / target - 1.0), weights=prof.counts))
+    assert dev["jet_pt"] < dev["gen_pt"], f"response={response}: {dev}"
 
 
 def test_axis_choice_is_validated():
