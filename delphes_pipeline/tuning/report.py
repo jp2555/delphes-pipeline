@@ -25,7 +25,8 @@ from . import targets as T
 # b-tag/τ_h observables read the re-tagged bits; the energy-response observables read the
 # rescaled pT (they select by flavour/gen-matching, NOT the tag bit, so the re-tag does
 # not confound them). m_bb (sorts on btag) and lepton/MET diagnostics stay on stock.
-_RETAG_FIELD = {**{q: "btag" for q in obs.BTAG_FLAVORS},
+_RETAG_FIELD = {"tau_mass": "tau_mass",
+                **{q: "btag" for q in obs.BTAG_FLAVORS},
                 "tau_eff": "tautag", "tau_mistag": "tautag",
                 "bjet_energy_response": "escale", "tau_energy_response": "escale"}
 

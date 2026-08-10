@@ -36,8 +36,11 @@ _MAX_TAU_VIS_MASS = 1.70
 
 
 def _serialise(p) -> dict:
-    return {"x": p.x, "centers": np.asarray(p.centers).tolist(),
-            "values": np.asarray(p.values).tolist(), "counts": np.asarray(p.counts).tolist()}
+    d = {"x": p.x, "centers": np.asarray(p.centers).tolist(),
+         "values": np.asarray(p.values).tolist(), "counts": np.asarray(p.counts).tolist()}
+    if getattr(p, "aux", None):
+        d.update(p.aux)          # e.g. the τ_h mass quantiles, needed to sample the map
+    return d
 
 
 def _invert_to_unity(p) -> dict:
@@ -184,8 +187,31 @@ def escale_factor(events, jets: ak.Array, maps: TuningMaps) -> ak.Array:
     return ak.unflatten(esc, counts)
 
 
-def tau_visible_mass(jets: ak.Array, maps: TuningMaps) -> ak.Array:
-    """Replace the τ-tagged jets' mass with the anchor τ_h visible mass at their pT.
+def _sample_tau_mass(m: dict, pt: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    """Draw a τ_h visible mass per jet from the anchor's per-pT quantiles.
+
+    Sampling — not the median — because in FastMTT the visible mass is a one-sided
+    *floor* on the energy fraction, ``xmin = (m_vis/m_τ)²``, not a smearing kernel.
+    Assigning one value to every τ-jet relaxes that floor for every leg whose true mass
+    lies above it, opening the low-x region where ``m_ττ = m_vis/√(x₁x₂)`` diverges: the
+    m_ττ width inflates and the mean is dragged up, one-sided. Drawing from the measured
+    distribution reproduces the CMS spread instead, so the floor is right on average
+    *and* per object.
+    """
+    levels = np.asarray(m["quantile_levels"], dtype=float)
+    qvals = np.asarray(m["quantile_values"], dtype=float)          # (n_bins, n_levels)
+    centers = np.asarray(m["centers"], dtype=float)
+    idx = np.abs(pt[:, None] - centers[None, :]).argmin(axis=1)    # nearest pT bin
+    # levels are a uniform grid, so the quantile inverse is a gather + linear blend
+    pos = rng.random(pt.shape) * (levels.size - 1)
+    lo = np.floor(pos).astype(int)
+    hi = np.minimum(lo + 1, levels.size - 1)
+    frac = pos - lo
+    return qvals[idx, lo] * (1.0 - frac) + qvals[idx, hi] * frac
+
+
+def tau_visible_mass(jets: ak.Array, maps: TuningMaps, rng: np.random.Generator) -> ak.Array:
+    """Replace the τ-tagged jets' mass with a CMS-like τ_h visible mass.
 
     A Delphes τ_h *is* a jet, so its mass is the AK4 jet mass (multi-GeV: UE and extra
     particles inside R=0.4). A CMS τ_h carries its decay-mode visible mass, ≲ m_τ =
@@ -194,21 +220,25 @@ def tau_visible_mass(jets: ak.Array, maps: TuningMaps) -> ak.Array:
     comes back NaN — which silently removed ~89% of Delphes τ_hτ_h events. Non-τ jets
     keep their own mass.
 
-    The map holds the per-pT *median* CMS mass, so the spread of the decay-mode
-    composition (π/ρ/a₁) is not reproduced — that widens m_ττ slightly rather than
-    shifting it, and the scale is what the estimator needs.
+    The mass is *drawn* from the anchor's per-pT quantiles (see ``_sample_tau_mass``);
+    a maps file carrying only the median falls back to that value, which fixes the yield
+    but distorts the m_ττ shape, so re-derive rather than rely on it.
     """
-    grid = np.asarray(maps.maps.get("tau_mass", {}).get("centers", []), dtype=float)
-    if grid.size == 0:
+    m = maps.maps.get("tau_mass", {})
+    if not np.asarray(m.get("centers", []), dtype=float).size:
         return jets.mass                      # empty map -> no-op, never NaN
     counts = ak.num(jets)
     pt = ak.to_numpy(ak.flatten(jets.pt))
     mass = ak.to_numpy(ak.flatten(jets.mass)).copy()
     is_tau = ak.to_numpy(ak.flatten(jets.tautag)) == 1
     if is_tau.any():
+        if m.get("quantile_values"):
+            drawn = _sample_tau_mass(m, pt[is_tau], rng)
+        else:                                  # legacy median-only map
+            drawn = maps.efficiency("tau_mass", pt[is_tau])
         # hard-capped below m_τ = 1.777: a visible mass at or above it leaves the FastMTT
         # hadronic prior with no valid x, which is the failure this map exists to remove.
-        mass[is_tau] = np.clip(maps.efficiency("tau_mass", pt[is_tau]), 0.0, _MAX_TAU_VIS_MASS)
+        mass[is_tau] = np.clip(drawn, 0.0, _MAX_TAU_VIS_MASS)
     return ak.unflatten(mass, counts)
 
 
@@ -236,8 +266,12 @@ def retag_jets(events, maps: TuningMaps, rng: np.random.Generator):
         jets = ak.with_field(jets, jets.mass * esc, "mass")
         fields.add("escale")
     if "tau_mass" in maps.maps:
-        jets = ak.with_field(jets, tau_visible_mass(jets, maps), "mass")
+        jets = ak.with_field(jets, tau_visible_mass(jets, maps, rng), "mass")
         fields.add("tau_mass")
+    elif "tautag" in fields:
+        print("[maps] WARNING: no 'tau_mass' map -> tau_h jets keep the AK4 jet mass "
+              "(> m_tau), so FastMTT will return NaN for most pairs. Re-derive the maps.",
+              flush=True)
     return jets, frozenset(fields)
 
 

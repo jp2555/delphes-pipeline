@@ -48,6 +48,11 @@ class Profile:
     kind: str = "efficiency"  # efficiency | resolution | response
     xlabel: str = ""
     ylabel: str = ""
+    # optional per-bin distribution shape (plain JSON-able lists), for quantities where
+    # the bin summary alone is not enough to reproduce the observable downstream — e.g.
+    # the τ_h visible mass, which enters FastMTT as a per-object kinematic bound rather
+    # than an average, so its spread has to survive into the tuning map.
+    aux: dict | None = None
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -256,7 +261,9 @@ def tau_visible_mass(events: DelphesEvents, *, bins=DEFAULT_PT_BINS, eta_max=2.5
     carrying a multi-GeV jet mass yields no valid solution at all.
 
     Measured here (Delphes) and on the anchor (CMS ``Tau``) so the difference becomes
-    a tuning map, like ``tau_escale``.
+    a tuning map, like ``tau_escale``. NB the map is *sampled* per τ-jet, not set to this
+    median: xmin is a one-sided floor, so a single value relaxes it for every leg whose
+    true mass is higher and drags m_ττ up. This profile is the lens/reporting view.
     """
     jets = events.jets
     th = jets[(jets.tautag == 1) & (np.abs(jets.eta) <= eta_max) & (jets.pt > pt_min)]

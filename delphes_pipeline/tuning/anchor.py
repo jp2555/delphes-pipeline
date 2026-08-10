@@ -21,6 +21,8 @@ from delphes_pipeline.core.nanoaod import NanoAODEvents
 from delphes_pipeline.core.observables import Profile
 
 # observables for which the NanoAOD anchor provides a target
+_MASS_QUANTILES = 21          # uniform quantile grid stored for the τ_h visible mass
+
 ANCHOR_OBSERVABLES = ("btag_eff_b", "btag_eff_c", "btag_mistag_light",
                       "electron_eff", "muon_eff", "tau_eff", "tau_mistag", "tau_mass",
                       "met_resolution")
@@ -105,9 +107,25 @@ def _nano_tau_mass(nano: NanoAODEvents, bins, *, eta_max=2.5, pt_min=20.0) -> Pr
     """
     taus = nano.taus[nano.taus.vsjet >= nano.deeptau_medium()]
     acc = taus[(np.abs(taus.eta) <= eta_max) & (taus.pt > pt_min)]
-    prof = obs.binned_response(ak.to_numpy(ak.flatten(acc.pt)), ak.to_numpy(ak.flatten(acc.mass)),
-                               bins, quantity="tau_mass", x="pt")
+    pt = ak.to_numpy(ak.flatten(acc.pt))
+    mass = ak.to_numpy(ak.flatten(acc.mass))
+    prof = obs.binned_response(pt, mass, bins, quantity="tau_mass", x="pt")
     prof.xlabel, prof.ylabel = "tau_h pT [GeV]", "visible mass [GeV]"
+    # The median alone is NOT enough downstream. In FastMTT the visible mass sets a
+    # one-sided FLOOR on the energy fraction, xmin = (m_vis/m_τ)²; assigning one value to
+    # every τ-jet relaxes that floor for every leg whose true mass is above it, opening
+    # the low-x region where m_ττ = m_vis/√(x₁x₂) diverges. Collapsing the distribution
+    # therefore inflates the m_ττ width and pulls the mean up — it does not merely smear.
+    # Carry the per-bin quantiles so the map can be sampled from instead.
+    levels = np.linspace(0.0, 1.0, _MASS_QUANTILES)
+    edges = np.asarray(bins, dtype=float)
+    qvals = []
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        in_bin = (pt >= lo) & (pt < hi)
+        if not in_bin.any():
+            continue
+        qvals.append(np.quantile(mass[in_bin], levels).tolist())
+    prof.aux = {"quantile_levels": levels.tolist(), "quantile_values": qvals}
     return prof
 
 

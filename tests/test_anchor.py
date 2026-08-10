@@ -47,6 +47,11 @@ def test_anchor_profiles_recover_injection(tmp_path):
     assert abs(np.average(tm.values, weights=tm.counts) - truth.tau_mistag(0, 0)) < 0.02
     # overall MET resolution ~ injected 18 GeV
     assert abs(prof["met_resolution"].values[0] - 18.0) < 2.5
+    # τ_h visible mass: every bin must be a physical τ mass, else FastMTT's hadronic
+    # prior vanishes downstream. The fixture writes Tau_mass = 1.0.
+    tm = prof["tau_mass"]
+    assert tm.centers.size and np.all(tm.values < 1.777) and np.all(tm.values > 0.0)
+    assert tm.aux and len(tm.aux["quantile_values"]) == tm.centers.size
 
 
 def test_nano_tau_mistag_is_per_jet_not_crossjet(tmp_path):

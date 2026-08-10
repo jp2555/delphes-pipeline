@@ -40,3 +40,12 @@ def test_every_result_has_a_card_knob_and_action(good_fixture_path):
     ctx = build_ctx(good_fixture_path)
     for r in treport.run_tuning(ctx):
         assert r.knob and r.action and r.note_section
+
+
+def test_every_profile_observable_is_reported_by_the_lens():
+    """Registering a measurement in PROFILE_OBSERVABLES is not enough: the lens iterates
+    the diagnostic map, so an observable missing there is silently never reported."""
+    from delphes_pipeline.tuning import targets as T
+
+    missing = set(T.PROFILE_OBSERVABLES) - set(T.tuning_observables())
+    assert not missing, f"registered but never reported: {sorted(missing)}"
