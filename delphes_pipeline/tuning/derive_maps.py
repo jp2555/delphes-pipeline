@@ -41,11 +41,17 @@ def main(argv: list[str] | None = None) -> int:
     M.save_maps(maps, args.output, provenance)
 
     print(f"[maps] wrote {args.output}")
-    for q in (*M.BTAG_MAP_QUANTITIES, *M.TAU_MAP_QUANTITIES,
-              *M.ESCALE_MAP_QUANTITIES, *M.LEPTON_SF_QUANTITIES):
-        if q in maps and maps[q]["values"]:
-            v = maps[q]["values"]
-            print(f"  {q:18s} {[round(x, 3) for x in v]}")
+    # print EVERY derived map. A hardcoded list here silently hid tau_mass and
+    # met_resolution, which made it impossible to tell from the log whether a map had
+    # actually been derived — exactly what the operator checks this output for.
+    for q, m in maps.items():
+        v = m.get("values") or []
+        if not v:
+            print(f"  {q:18s} (empty)")
+            continue
+        quant = m.get("quantile_values")
+        extra = f"   + {len(m.get('quantile_levels', []))}-pt quantiles/bin" if quant else ""
+        print(f"  {q:18s} {[round(x, 3) for x in v]}{extra}")
     return 0
 
 
