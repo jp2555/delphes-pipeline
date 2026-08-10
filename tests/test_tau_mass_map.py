@@ -35,6 +35,12 @@ def _jag(vals):
     return ak.values_astype(ak.Array([list(vals)] * _N), np.float64)
 
 
+def _jagi(vals):
+    """Integer jagged array — gen pid/status/m1 are Int_t in real Delphes and NanoAOD,
+    and the m1 chain walk indexes with them, so the fixture must not make them floats."""
+    return ak.values_astype(ak.Array([list(vals)] * _N), np.int64)
+
+
 def _jets(pt, mass, tautag):
     return ak.zip({"pt": _jag(pt), "eta": _jag([0.3] * len(pt)), "phi": _jag([0.0] * len(pt)),
                    "mass": _jag(mass), "tautag": _jag(tautag),
@@ -81,9 +87,9 @@ def test_fastmtt_recovers_events_the_jet_mass_destroyed():
 def test_retag_jets_applies_tau_mass_last_so_escale_does_not_rescale_it():
     """tau_mass runs after escale: the assigned mass is final, not scaled again."""
     jets = _jets(pt=[45.0], mass=[8.0], tautag=[1])
-    gen = ak.zip({"pid": _jag([15]), "pt": _jag([50.0]), "eta": _jag([0.3]),
-                  "phi": _jag([0.0]), "mass": _jag([1.777]), "status": _jag([2]),
-                  "m1": _jag([-1])})
+    gen = ak.zip({"pid": _jagi([15]), "pt": _jag([50.0]), "eta": _jag([0.3]),
+                  "phi": _jag([0.0]), "mass": _jag([1.777]), "status": _jagi([2]),
+                  "m1": _jagi([-1])})
     ev = SimpleNamespace(jets=jets, gen=gen)
     flat = lambda v: {"x": "pt", "centers": _CENTERS, "values": [v] * 4, "counts": [10] * 4}
     maps = TuningMaps({
@@ -101,9 +107,9 @@ def test_retag_jets_applies_tau_mass_last_so_escale_does_not_rescale_it():
 
 def test_tau_mass_absent_leaves_masses_alone():
     jets = _jets(pt=[45.0], mass=[8.0], tautag=[1])
-    gen = ak.zip({"pid": _jag([15]), "pt": _jag([50.0]), "eta": _jag([0.3]),
-                  "phi": _jag([0.0]), "mass": _jag([1.777]), "status": _jag([2]),
-                  "m1": _jag([-1])})
+    gen = ak.zip({"pid": _jagi([15]), "pt": _jag([50.0]), "eta": _jag([0.3]),
+                  "phi": _jag([0.0]), "mass": _jag([1.777]), "status": _jagi([2]),
+                  "m1": _jagi([-1])})
     ev = SimpleNamespace(jets=jets, gen=gen)
     out, fields = retag_jets(ev, TuningMaps({}), np.random.default_rng(0))
     assert "tau_mass" not in fields

@@ -27,6 +27,12 @@ def _jag(vals):
     return ak.values_astype(ak.Array([list(vals)] * _N), np.float64)
 
 
+def _jagi(vals):
+    """Integer jagged array — gen pid/status/m1 are Int_t in real Delphes and NanoAOD,
+    and the m1 chain walk indexes with them, so the fixture must not make them floats."""
+    return ak.values_astype(ak.Array([list(vals)] * _N), np.int64)
+
+
 def _col(rows, **extra):
     out = {"pt": _jag([r[0] for r in rows]), "eta": _jag([r[1] for r in rows]),
            "phi": _jag([r[2] for r in rows]), "mass": _jag([1.0] * len(rows))}
@@ -44,7 +50,10 @@ def _delphes(*, genjets=(_T1, _T2), tau_jets=(_T1, _T2), tautag=(1, 1)):
     jets = _col(list(tau_jets) + [_B1, _B2],
                 tautag=list(tautag) + [0, 0], btag=[0] * len(tau_jets) + [1, 1],
                 charge=[0] * (len(tau_jets) + 2))
-    gen = _col([(t[0] * 1.4, t[1], t[2]) for t in (_T1, _T2)], pid=[15, -15])
+    # hadronic τ: gen τ with no status-1 e/μ daughter nearby (see obs.gen_taus)
+    gen = ak.zip({"pt": _jag([_T1[0] * 1.4, _T2[0] * 1.4]), "eta": _jag([_T1[1], _T2[1]]),
+                  "phi": _jag([_T1[2], _T2[2]]), "mass": _jag([1.777, 1.777]),
+                  "pid": _jagi([15, -15]), "status": _jagi([2, 2]), "m1": _jagi([-1, -1])})
     empty = ak.zip({k: _jag([]) for k in ("pt", "eta", "phi", "charge")})
     return SimpleNamespace(jets=jets, gen=gen, genjets=_col(list(genjets)),
                            electrons=empty, muons=empty, met=_met())

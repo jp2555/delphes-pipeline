@@ -183,6 +183,28 @@ def prompt_mother_match(gen: ak.Array, prompt_pids=_PROMPT_MOTHER_PIDS, max_dept
     return match
 
 
+def gen_taus(gen: ak.Array, *, hadronic_only: bool = False, dr: float = 0.4) -> ak.Array:
+    """Gen τ leptons, optionally only those decaying hadronically.
+
+    Delphes' gen record carries no decay-mode flag, so a leptonic τ is identified by
+    its own daughter: a status-1 e/μ whose first non-self-copy ancestor is a τ, lying
+    within ``dr`` of the τ (the τ is boosted, so its daughter is collinear).
+
+    This matters because ``tau_eff`` is measured on the anchor as ``GenVisTau`` →
+    DeepTau-Medium ``Tau``, and ``GenVisTau`` is **hadronic-only**. Treating every gen τ
+    as "genuine" hands a leptonic τ's jet the hadronic efficiency (~0.5) instead of the
+    jet→τ_h fake rate (~0.004) — a ~125× over-efficiency that manufactures τ_hτ_h
+    events out of τ_hτ_ℓ and τ_ℓτ_ℓ ones, whose objects are not collimated.
+    """
+    taus = gen[np.abs(gen.pid) == _GEN_TAU_PID]
+    if not hadronic_only:
+        return taus
+    is_lep = ((np.abs(gen.pid) == 11) | (np.abs(gen.pid) == 13)) & (gen.status == 1)
+    # prompt_mother_match walks the m1 chain, so it must run on the FULL gen array
+    from_tau = gen[is_lep & prompt_mother_match(gen, (_GEN_TAU_PID,))]
+    return taus[~matched_to_any(taus, from_tau, dr)]
+
+
 def _vis_pt_eta_phi_mass(coll):
     return (ak.to_numpy(ak.flatten(coll.pt)), ak.to_numpy(ak.flatten(coll.eta)),
             ak.to_numpy(ak.flatten(coll.phi)), ak.to_numpy(ak.flatten(coll.mass)))
@@ -206,7 +228,7 @@ def btag_efficiency(events: DelphesEvents, quantity: str, *, bins=DEFAULT_PT_BIN
 
 
 def tau_efficiency(events: DelphesEvents, *, bins=DEFAULT_PT_BINS, dr=0.4, eta_max=2.5,
-                   pt_min=20.0, x: str = "gen_pt") -> Profile:
+                   pt_min=20.0, x: str = "gen_pt", hadronic_only: bool = False) -> Profile:
     """τ_h efficiency: TauTag rate of the unique nearest jet to each acceptance gen τ.
 
     ``x`` selects the binning variable — the same numerator/denominator either way.
@@ -233,14 +255,18 @@ def tau_efficiency(events: DelphesEvents, *, bins=DEFAULT_PT_BINS, dr=0.4, eta_m
     and never reassigned, then ``formula->Eval(pt, eta, phi, e)`` — the tau parton
     only selects *which* formula (the ``fEfficiencyMap`` key), never its arguments.
     ``BTagging.cc`` follows the same pattern.
+
+    ``hadronic_only`` restricts the denominator to hadronically-decaying gen τ. The
+    *tuning* lens wants this (the anchor's ``GenVisTau`` is hadronic-only); the
+    *closure* does not, because Delphes' own ``TauTagging`` applies the {15} formula to
+    any τ-matched jet — its direct τ→ℓνν veto is commented out in the source.
     """
     if x not in ("gen_pt", "jet_pt"):
         raise ValueError(f"x must be 'gen_pt' or 'jet_pt' (got {x!r})")
     jets = events.jets
-    gen = events.gen
-    gen_taus = gen[np.abs(gen.pid) == _GEN_TAU_PID]
+    taus = gen_taus(events.gen, hadronic_only=hadronic_only, dr=dr)
     acc = jets[(np.abs(jets.eta) <= eta_max) & (jets.pt > pt_min)]
-    taus_acc = gen_taus[(np.abs(gen_taus.eta) <= eta_max) & (gen_taus.pt > pt_min)]
+    taus_acc = taus[(np.abs(taus.eta) <= eta_max) & (taus.pt > pt_min)]
     matched, vals = nearest_target_fields(taus_acc, acc, dr, ("tautag", "pt"))
     jet_tautag = vals["tautag"]
     axis = (ak.to_numpy(ak.flatten(taus_acc.pt)) if x == "gen_pt" else vals["pt"])

@@ -152,8 +152,11 @@ def retag_tautag(events, maps: TuningMaps, rng: np.random.Generator) -> ak.Array
     """
     jets = events.jets
     counts = ak.num(jets)
-    gen_taus = events.gen[np.abs(events.gen.pid) == _GEN_TAU_PID]
-    genuine = ak.to_numpy(ak.flatten(matched_to_any(jets, gen_taus, 0.4)))
+    # HADRONIC gen τ only: tau_eff is measured on the anchor's GenVisTau (hadronic by
+    # construction), so handing a leptonic τ's jet that efficiency instead of the fake
+    # rate fabricates τ_hτ_h events out of τ_hτ_ℓ / τ_ℓτ_ℓ ones.
+    taus = obs.gen_taus(events.gen, hadronic_only=True)
+    genuine = ak.to_numpy(ak.flatten(matched_to_any(jets, taus, 0.4)))
     # ε is evaluated at the jet pT (≈ the visible-τ pT for a genuine τ-jet); a steeply
     # pT-dependent tau_eff carries a mild jet-vs-gen-τ-pT smearing in the closure.
     pt = ak.to_numpy(ak.flatten(jets.pt))
