@@ -29,7 +29,7 @@ PROFILE_OBSERVABLES = {
     # counterpart is the τ-jet — not the full gen τ (which carries the ν too, so that
     # axis reads as a several-% deficit against the anchor). See tau_efficiency.
     "tau_eff": lambda ev, bins: obs.tau_efficiency(ev, bins=bins, x="jet_pt"),
-    "tau_mistag": lambda ev, bins: obs.tau_mistag(ev, bins=bins),
+    "tau_mistag": lambda ev, bins: obs.tau_mistag(ev, bins=bins, hadronic_only=True),
     # τ_h visible mass: a Delphes τ_h is a jet, so it carries the AK4 jet mass instead
     # of the decay-mode mass (≲ m_τ). Beyond m_τ the FastMTT hadronic prior is zero, so
     # this is not cosmetic — it decides whether m_ττ exists at all.

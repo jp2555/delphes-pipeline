@@ -85,3 +85,21 @@ def test_tau_efficiency_denominator_is_optional_hadronic_only():
     had = obs.tau_efficiency(ev, bins=[20, 100], hadronic_only=True)
     assert incl.counts.sum() == 2 * _N        # both τ enter
     assert had.counts.sum() == _N             # only the hadronic one
+
+
+def test_tau_mistag_fake_sample_matches_the_anchor_definition():
+    """The anchor vetoes GenVisTau (hadronic only), so a leptonic-τ jet is a fake
+    candidate on the CMS side. The tuning lens must veto the same set, or the two
+    sides compare different denominators."""
+    jets = ak.zip({
+        "pt": _f([70.0, 60.0, 50.0]),
+        "eta": _f([_HAD[0], _LEP[0], 2.0]), "phi": _f([_HAD[1], _LEP[1], -1.0]),
+        "mass": _f([8.0, 8.0, 8.0]), "tautag": _f([0, 0, 0]),
+        "btag": _f([0, 0, 0]), "flavor": _f([0, 0, 0]),
+    })
+    ev = SimpleNamespace(jets=jets, gen=_gen())
+    incl = obs.tau_mistag(ev, bins=[20, 100], hadronic_only=False)   # closure: veto all τ
+    had = obs.tau_mistag(ev, bins=[20, 100], hadronic_only=True)     # tuning: veto hadronic
+    # closure keeps only the unrelated jet; tuning also keeps the leptonic-τ jet
+    assert incl.counts.sum() == _N
+    assert had.counts.sum() == 2 * _N

@@ -299,12 +299,21 @@ def tau_visible_mass(events: DelphesEvents, *, bins=DEFAULT_PT_BINS, eta_max=2.5
     return prof
 
 
-def tau_mistag(events: DelphesEvents, *, bins=DEFAULT_PT_BINS, dr=0.4, eta_max=2.5, pt_min=20.0) -> Profile:
-    """jet→τ_h mistag: TauTag rate among jets not near any gen τ."""
+def tau_mistag(events: DelphesEvents, *, bins=DEFAULT_PT_BINS, dr=0.4, eta_max=2.5,
+               pt_min=20.0, hadronic_only: bool = False) -> Profile:
+    """jet→τ_h mistag: TauTag rate among jets not near a gen τ.
+
+    ``hadronic_only`` sets WHICH τ are vetoed from the fake sample, and the two lenses
+    need different answers. The anchor vetoes ``GenVisTau``, which exists only for
+    hadronic decays, so a jet from a leptonic τ counts as a fake candidate on the CMS
+    side; the *tuning* comparison is only like-for-like if Delphes does the same
+    (hadronic_only=True). The *closure* keeps vetoing every τ, because that is the
+    population Delphes' own TauTagging acts on.
+    """
     jets = events.jets
-    gen_taus = events.gen[np.abs(events.gen.pid) == _GEN_TAU_PID]
+    taus = gen_taus(events.gen, hadronic_only=hadronic_only, dr=dr)
     acc = jets[(np.abs(jets.eta) <= eta_max) & (jets.pt > pt_min)]
-    fake = acc[~matched_to_any(acc, gen_taus, dr)]
+    fake = acc[~matched_to_any(acc, taus, dr)]
     prof = binned_efficiency(ak.to_numpy(ak.flatten(fake.pt)),
                              ak.to_numpy(ak.flatten(fake.tautag)) == 1, bins, quantity="tau_mistag", x="pt")
     prof.xlabel, prof.ylabel = "jet pT [GeV]", "tau_mistag"
