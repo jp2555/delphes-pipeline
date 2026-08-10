@@ -30,6 +30,9 @@ TAU_MAP_QUANTITIES = ("tau_eff", "tau_mistag")
 ESCALE_MAP_QUANTITIES = ("bjet_escale", "tau_escale")   # jet-pT energy-scale corrections
 LEPTON_SF_QUANTITIES = ("electron_sf", "muon_sf")       # efficiency scale factors (weights)
 _GEN_TAU_PID = 15
+# a τ_h visible mass must stay below m_τ = 1.777 GeV or the FastMTT hadronic decay
+# prior has no valid solution; cap just under it (CMS medians sit near 0.8-1.2).
+_MAX_TAU_VIS_MASS = 1.70
 
 
 def _serialise(p) -> dict:
@@ -181,13 +184,43 @@ def escale_factor(events, jets: ak.Array, maps: TuningMaps) -> ak.Array:
     return ak.unflatten(esc, counts)
 
 
+def tau_visible_mass(jets: ak.Array, maps: TuningMaps) -> ak.Array:
+    """Replace the τ-tagged jets' mass with the anchor τ_h visible mass at their pT.
+
+    A Delphes τ_h *is* a jet, so its mass is the AK4 jet mass (multi-GeV: UE and extra
+    particles inside R=0.4). A CMS τ_h carries its decay-mode visible mass, ≲ m_τ =
+    1.777 GeV. The gap is not cosmetic: the FastMTT hadronic decay prior is zero unless
+    ``(m_vis/m_τ)² ≤ 1``, so a τ-jet keeping its jet mass admits *no* solution and m_ττ
+    comes back NaN — which silently removed ~89% of Delphes τ_hτ_h events. Non-τ jets
+    keep their own mass.
+
+    The map holds the per-pT *median* CMS mass, so the spread of the decay-mode
+    composition (π/ρ/a₁) is not reproduced — that widens m_ττ slightly rather than
+    shifting it, and the scale is what the estimator needs.
+    """
+    grid = np.asarray(maps.maps.get("tau_mass", {}).get("centers", []), dtype=float)
+    if grid.size == 0:
+        return jets.mass                      # empty map -> no-op, never NaN
+    counts = ak.num(jets)
+    pt = ak.to_numpy(ak.flatten(jets.pt))
+    mass = ak.to_numpy(ak.flatten(jets.mass)).copy()
+    is_tau = ak.to_numpy(ak.flatten(jets.tautag)) == 1
+    if is_tau.any():
+        # hard-capped below m_τ = 1.777: a visible mass at or above it leaves the FastMTT
+        # hadronic prior with no valid x, which is the failure this map exists to remove.
+        mass[is_tau] = np.clip(maps.efficiency("tau_mass", pt[is_tau]), 0.0, _MAX_TAU_VIS_MASS)
+    return ak.unflatten(mass, counts)
+
+
 def retag_jets(events, maps: TuningMaps, rng: np.random.Generator):
     """Apply the downstream tuning-v0 corrections to the jets.
 
     b-tag (flavour maps) and τ_h (tau_eff+tau_mistag) tags are re-derived; b-jet/τ-jet
-    pT+mass are rescaled by the energy-scale maps. Fixed order (btag, tautag, escale) so
-    the same seed yields identical output in the tuning lens and the ntuplizer. Returns
-    ``(jets, fields)`` with the set of corrections actually applied.
+    pT+mass are rescaled by the energy-scale maps; τ-tagged jets then take the anchor
+    τ_h visible mass. Fixed order (btag, tautag, escale, tau_mass) so the same seed
+    yields identical output in the tuning lens and the ntuplizer — tau_mass runs last so
+    it is applied at the corrected pT and is not then rescaled by the energy scale.
+    Returns ``(jets, fields)`` with the set of corrections actually applied.
     """
     jets = events.jets
     fields = set()
@@ -202,6 +235,9 @@ def retag_jets(events, maps: TuningMaps, rng: np.random.Generator):
         jets = ak.with_field(jets, jets.pt * esc, "pt")
         jets = ak.with_field(jets, jets.mass * esc, "mass")
         fields.add("escale")
+    if "tau_mass" in maps.maps:
+        jets = ak.with_field(jets, tau_visible_mass(jets, maps), "mass")
+        fields.add("tau_mass")
     return jets, frozenset(fields)
 
 

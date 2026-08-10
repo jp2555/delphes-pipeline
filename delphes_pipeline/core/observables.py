@@ -245,6 +245,27 @@ def tau_efficiency(events: DelphesEvents, *, bins=DEFAULT_PT_BINS, dr=0.4, eta_m
     return prof
 
 
+def tau_visible_mass(events: DelphesEvents, *, bins=DEFAULT_PT_BINS, eta_max=2.5, pt_min=20.0) -> Profile:
+    """Median visible mass of the τ_h candidates vs their pT.
+
+    In Delphes a τ_h *is* a jet, so its ``mass`` is the AK4 jet mass — clustering
+    contamination (UE, extra particles in the R=0.4 cone), not a τ property. A real
+    τ_h visible mass is bounded by m_τ = 1.777 GeV and set by the decay mode
+    (π 0.14, ρ 0.77, a₁ 1.26). The gap breaks the di-τ mass estimator outright: the
+    FastMTT hadronic decay prior is zero unless ``(m_vis/m_τ)² ≤ 1``, so a τ-jet
+    carrying a multi-GeV jet mass yields no valid solution at all.
+
+    Measured here (Delphes) and on the anchor (CMS ``Tau``) so the difference becomes
+    a tuning map, like ``tau_escale``.
+    """
+    jets = events.jets
+    th = jets[(jets.tautag == 1) & (np.abs(jets.eta) <= eta_max) & (jets.pt > pt_min)]
+    prof = binned_response(ak.to_numpy(ak.flatten(th.pt)), ak.to_numpy(ak.flatten(th.mass)),
+                           bins, quantity="tau_mass", x="pt")
+    prof.xlabel, prof.ylabel = "tau_h pT [GeV]", "visible mass [GeV]"
+    return prof
+
+
 def tau_mistag(events: DelphesEvents, *, bins=DEFAULT_PT_BINS, dr=0.4, eta_max=2.5, pt_min=20.0) -> Profile:
     """jet→τ_h mistag: TauTag rate among jets not near any gen τ."""
     jets = events.jets

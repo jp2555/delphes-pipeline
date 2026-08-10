@@ -22,7 +22,8 @@ from delphes_pipeline.core.observables import Profile
 
 # observables for which the NanoAOD anchor provides a target
 ANCHOR_OBSERVABLES = ("btag_eff_b", "btag_eff_c", "btag_mistag_light",
-                      "electron_eff", "muon_eff", "tau_eff", "tau_mistag", "met_resolution")
+                      "electron_eff", "muon_eff", "tau_eff", "tau_mistag", "tau_mass",
+                      "met_resolution")
 
 
 def anchor_profiles(config: dict, *, bins, max_events: Optional[int] = None) -> dict[str, Profile]:
@@ -50,6 +51,7 @@ def anchor_profiles(config: dict, *, bins, max_events: Optional[int] = None) -> 
     print("[tuning] anchor: tau + MET ...", flush=True)
     out["tau_eff"] = _nano_tau_eff(nano, bins)
     out["tau_mistag"] = _nano_tau_mistag(nano, bins)
+    out["tau_mass"] = _nano_tau_mass(nano, bins)
     out["met_resolution"] = _nano_met_resolution(nano)
     # label the source for the report/plot
     for p in out.values():
@@ -91,6 +93,21 @@ def _nano_tau_mistag(nano: NanoAODEvents, bins, *, dr=0.4, eta_max=2.5, pt_min=2
     tagged = unique_match(fake, medium, dr)
     prof = obs.binned_efficiency(ak.to_numpy(ak.flatten(fake.pt)), tagged, bins, quantity="tau_mistag", x="pt")
     prof.xlabel, prof.ylabel = "jet pT [GeV]", "tau_mistag"
+    return prof
+
+
+def _nano_tau_mass(nano: NanoAODEvents, bins, *, eta_max=2.5, pt_min=20.0) -> Profile:
+    """τ_h visible mass on NanoAOD: the Medium-DeepTau ``Tau`` mass vs τ pT.
+
+    The CMS counterpart of ``observables.tau_visible_mass``. A reconstructed τ_h
+    carries its decay-mode visible mass (≲ m_τ); the Delphes τ-jet carries the AK4 jet
+    mass instead, which is multi-GeV and makes the FastMTT hadronic prior vanish.
+    """
+    taus = nano.taus[nano.taus.vsjet >= nano.deeptau_medium()]
+    acc = taus[(np.abs(taus.eta) <= eta_max) & (taus.pt > pt_min)]
+    prof = obs.binned_response(ak.to_numpy(ak.flatten(acc.pt)), ak.to_numpy(ak.flatten(acc.mass)),
+                               bins, quantity="tau_mass", x="pt")
+    prof.xlabel, prof.ylabel = "tau_h pT [GeV]", "visible mass [GeV]"
     return prof
 
 
