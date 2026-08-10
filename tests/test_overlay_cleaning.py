@@ -214,3 +214,25 @@ def test_acceptance_rejects_only_what_it_should():
     n = features(n_ev, nano=True, clean=True, **_KW)
     assert d["dR_tautau"][0] == pytest.approx(_dR(_T1, hard), abs=1e-6)
     assert n["dR_tautau"][0] == pytest.approx(_dR(_T1, hard), abs=1e-6)
+
+
+def test_diagnostic_panels_expose_the_fastmtt_inputs():
+    """τ pT and MET are what FastMTT consumes; if the selection matches but m_ττ does
+    not, these separate a τ-energy cause from a MET cause."""
+    import nsbi_overlay as ov
+
+    d = features(_delphes_ev(), nano=False, clean=True, **_KW)
+    for k in ov._DIAG:
+        assert k in d and k in ov._RANGES, k
+    # the leading τ candidate is T1 (80 GeV), the sub-leading T2 (70 GeV)
+    assert d["tau1_pt"][0] == pytest.approx(_T1[0], abs=1e-6)
+    assert d["tau2_pt"][0] == pytest.approx(_T2[0], abs=1e-6)
+    assert d["met"][0] == pytest.approx(40.0, abs=1e-6)      # the fixture MET magnitude
+
+
+def test_diagnostics_are_not_in_the_nsbi_feature_set():
+    """The 10 NSBI features stay the deliverable; the diagnostics are opt-in."""
+    import nsbi_overlay as ov
+
+    assert len(ov._FEATURES) == 10
+    assert not set(ov._DIAG) & set(ov._FEATURES)

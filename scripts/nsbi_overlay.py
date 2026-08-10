@@ -42,9 +42,14 @@ from delphes_pipeline.validation.run_validation import load_config
 _KL = re.compile(r"kl-(m?\d+p\d+)")
 _FEATURES = ["mHH", "cosThetaStar", "pHH_T", "mbb", "dR_bb", "mtautau", "dR_tautau",
              "dphi_HH", "pH1_T", "pH2_T"]
+# diagnostic (not NSBI) observables: the FastMTT *inputs*. m_ττ = m_vis/√(x₁x₂) with the
+# x fitted against pT_miss, so if the selection matches but m_ττ does not, the difference
+# has to be in the τ four-vectors or in the MET — these panels separate the two.
+_DIAG = ["tau1_pt", "tau2_pt", "met"]
 _RANGES = {"mHH": (200, 900), "cosThetaStar": (0, 1), "pHH_T": (0, 300), "mbb": (0, 250),
            "dR_bb": (0, 5), "mtautau": (0, 250), "dR_tautau": (0, 5), "dphi_HH": (0, 3.2),
-           "pH1_T": (0, 400), "pH2_T": (0, 400)}
+           "pH1_T": (0, 400), "pH2_T": (0, 400),
+           "tau1_pt": (0, 200), "tau2_pt": (0, 150), "met": (0, 200)}
 
 
 def _kl(path):
@@ -204,6 +209,8 @@ def features(ev, *, nano, tautau_only=False, mtautau_min=20.0, clean=True,
         "mHH": _mass(HH), "cosThetaStar": _cos_theta_star(H1, HH), "pHH_T": _pt(HH),
         "mbb": _mass(H1), "dR_bb": _dR(b1, b2), "mtautau": _mass(H2), "dR_tautau": _dR(t1, t2),
         "dphi_HH": _dphi(H1, H2), "pH1_T": np.maximum(pH1, pH2), "pH2_T": np.minimum(pH1, pH2),
+        # FastMTT inputs, for diagnosing an m_ττ shift that survives a symmetric selection
+        "tau1_pt": _pt(t1), "tau2_pt": _pt(t2), "met": np.hypot(met_x, met_y),
     }
     keep = np.isfinite(out["mHH"]) & (out["mtautau"] > mtautau_min)
     out = {k: v[keep] for k, v in out.items()}
@@ -221,8 +228,12 @@ def _split_figure(kl, df, dm, nf, nm, args, tuning):
     fd, fn = 1.0 - dm.mean(), 1.0 - nm.mean()
     print(f"[kl {kl}] fake (non-gen-matched) fraction: Delphes {fd:.3f}  CMS {fn:.3f}"
           f"   [{(~dm).sum()}/{dm.size} vs {(~nm).sum()}/{nm.size}]", flush=True)
-    fig, axes = plt.subplots(2, 5, figsize=(20, 8))
-    for ax, feat in zip(axes.flat, _FEATURES):
+    feats = _FEATURES + (_DIAG if args.diagnostics else [])
+    nrow = (len(feats) + 4) // 5
+    fig, axes = plt.subplots(nrow, 5, figsize=(20, 4 * nrow))
+    for ax in axes.flat[len(feats):]:
+        ax.axis("off")
+    for ax, feat in zip(axes.flat, feats):
         lo, hi = _RANGES[feat]
         b = np.linspace(lo, hi, 41)
         centres = 0.5 * (b[:-1] + b[1:])
@@ -267,6 +278,8 @@ def main(argv=None) -> int:
     ap.add_argument("--clean-dr", type=float, default=0.4, help="ΔR(jet, selected τ) overlap removal")
     ap.add_argument("--tau-pt-min", type=float, default=20.0, help="common τ candidate pT acceptance")
     ap.add_argument("--tau-eta-max", type=float, default=2.3, help="common τ candidate |eta| acceptance")
+    ap.add_argument("--diagnostics", action="store_true",
+                    help="also plot the FastMTT inputs (τ pT, MET) alongside the NSBI features")
     ap.add_argument("--split-gen-matched", action="store_true",
                     help="split each side into gen-matched vs fake τ pairs (diagnostic)")
     args = ap.parse_args(argv)
@@ -306,8 +319,12 @@ def main(argv=None) -> int:
         df = features(dev, nano=False, **sel_kw)
         nf = features(nev, nano=True, **sel_kw)
 
-        fig, axes = plt.subplots(2, 5, figsize=(20, 8))
-        for ax, feat in zip(axes.flat, _FEATURES):
+        feats = _FEATURES + (_DIAG if args.diagnostics else [])
+        nrow = (len(feats) + 4) // 5
+        fig, axes = plt.subplots(nrow, 5, figsize=(20, 4 * nrow))
+        for ax in axes.flat[len(feats):]:
+            ax.axis("off")
+        for ax, feat in zip(axes.flat, feats):
             lo, hi = _RANGES[feat]
             b = np.linspace(lo, hi, 41)
             centres = 0.5 * (b[:-1] + b[1:])
