@@ -25,7 +25,7 @@ _MASS_QUANTILES = 21          # uniform quantile grid stored for the τ_h visibl
 
 ANCHOR_OBSERVABLES = ("btag_eff_b", "btag_eff_c", "btag_mistag_light",
                       "electron_eff", "muon_eff", "tau_eff", "tau_mistag", "tau_mass",
-                      "met_resolution")
+                      "tau_energy_response", "met_resolution")
 
 
 def anchor_profiles(config: dict, *, bins, max_events: Optional[int] = None) -> dict[str, Profile]:
@@ -54,6 +54,7 @@ def anchor_profiles(config: dict, *, bins, max_events: Optional[int] = None) -> 
     out["tau_eff"] = _nano_tau_eff(nano, bins)
     out["tau_mistag"] = _nano_tau_mistag(nano, bins)
     out["tau_mass"] = _nano_tau_mass(nano, bins)
+    out["tau_energy_response"] = _nano_tau_energy_response(nano, bins)
     out["met_resolution"] = _nano_met_resolution(nano)
     # label the source for the report/plot
     for p in out.values():
@@ -126,6 +127,32 @@ def _nano_tau_mass(nano: NanoAODEvents, bins, *, eta_max=2.5, pt_min=20.0) -> Pr
             continue
         qvals.append(np.quantile(mass[in_bin], levels).tolist())
     prof.aux = {"quantile_levels": levels.tolist(), "quantile_values": qvals}
+    return prof
+
+
+def _nano_tau_energy_response(nano: NanoAODEvents, bins, *, dr=0.4, eta_max=2.5,
+                              pt_min=20.0) -> Profile:
+    """CMS τ_h energy response: Medium ``Tau`` pT / matched ``GenVisTau`` pT vs gen pT.
+
+    The counterpart of ``observables.tau_energy_response``, which profiles the Delphes
+    τ-jet against its (neutrino-filtered) GenJet. Both are therefore reco/gen against a
+    *visible* reference, so their ratio is the Delphes→CMS energy correction.
+
+    This is what makes ``tau_escale`` an anchor comparison instead of a self-comparison:
+    a Delphes τ_h is a jet and carries jet-level pT (UE and everything else inside
+    R=0.4), while a CMS ``Tau`` carries the clean HPS visible-τ pT. Correcting Delphes to
+    its own GenJet — also a jet — preserves that contamination and leaves the Delphes τ
+    systematically harder than CMS, inflating m_vis and hence m_ττ.
+    """
+    gvt = nano.genvistau
+    acc = gvt[(np.abs(gvt.eta) <= eta_max) & (gvt.pt > pt_min)]
+    medium = nano.taus[nano.taus.vsjet >= nano.deeptau_medium()]
+    matched, tau_pt = nearest_target_field(acc, medium, dr, "pt")
+    gen_pt = ak.to_numpy(ak.flatten(acc.pt))
+    ok = matched & (np.nan_to_num(tau_pt, nan=0.0) > 0) & (gen_pt > 0)
+    prof = obs.binned_response(gen_pt[ok], tau_pt[ok] / gen_pt[ok], bins,
+                               quantity="tau_energy_response", x="pt")
+    prof.xlabel, prof.ylabel = "gen visible-tau pT [GeV]", "reco/gen pT"
     return prof
 
 

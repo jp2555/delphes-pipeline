@@ -370,9 +370,9 @@ def tau_energy_response(events: DelphesEvents, *, bins=DEFAULT_PT_BINS, dr_tau=0
                         eta_max=2.5, pt_min=20.0) -> Profile:
     """τ-jet energy response: reco τ-jet pT / visible-τ (GenJet) pT vs pT (§3.2)."""
     jets = events.jets
-    gen_taus = events.gen[np.abs(events.gen.pid) == _GEN_TAU_PID]
+    taus = gen_taus(events.gen, hadronic_only=True, dr=dr_tau)
     acc = jets[(np.abs(jets.eta) <= eta_max) & (jets.pt > pt_min)]
-    tau_jets = acc[matched_to_any(acc, gen_taus, dr_tau)]  # reco jets that are τ_h
+    tau_jets = acc[matched_to_any(acc, taus, dr_tau)]      # reco jets that are τ_h
     return _response_to_genjet(tau_jets, events.genjets, dr_gen,
                                "tau_energy_response", "gen-jet pT [GeV]", "reco/gen pT", bins)
 

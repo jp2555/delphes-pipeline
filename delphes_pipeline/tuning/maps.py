@@ -83,8 +83,18 @@ def derive_maps(config: dict, *, bins=None, max_events=None) -> dict:
         print("[maps] measuring the Delphes energy response + lepton efficiency ...", flush=True)
         ev = DelphesEvents(delphes_root, treename=config.get("input", {}).get("treename", "Delphes"),
                            entry_stop=max_events)
+        # b-jets: corrected to their own GenJet. CMS jet energies are JEC-calibrated to
+        # gen, so self-anchoring is adequate here — and m_bb agrees with CMS in the overlay.
         maps["bjet_escale"] = _invert_to_unity(obs.bjet_energy_response(ev, bins=bins))
-        maps["tau_escale"] = _invert_to_unity(obs.tau_energy_response(ev, bins=bins))
+        # τ-jets: corrected to the CMS τ energy scale, NOT to gen. A Delphes τ_h is a jet
+        # (jet-level pT, UE inside R=0.4) while a CMS Tau carries the clean HPS visible-τ
+        # pT; inverting to unity against a GenJet — also a jet — would preserve that gap
+        # and leave Delphes τ harder than CMS, inflating m_vis and so m_ττ.
+        d_tau_resp = obs.tau_energy_response(ev, bins=bins)
+        if "tau_energy_response" in profiles:
+            maps["tau_escale"] = _scale_factor(profiles["tau_energy_response"], d_tau_resp)
+        else:
+            maps["tau_escale"] = _invert_to_unity(d_tau_resp)
         for sf_name, eff in (("electron_sf", "electron_eff"), ("muon_sf", "muon_eff")):
             if eff in profiles:
                 maps[sf_name] = _scale_factor(profiles[eff], obs.lepton_efficiency(ev, eff, bins=bins))

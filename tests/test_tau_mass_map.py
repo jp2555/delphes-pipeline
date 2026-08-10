@@ -175,3 +175,26 @@ def test_median_collapse_relaxes_the_x_floor_and_inflates_m_tautau():
 
     assert x1_med[0] < x1_true[0], "the median relaxes the floor"
     assert m_med[0] > 1.5 * m_true[0], (m_true[0], m_med[0])   # here ~2.1x
+
+
+# --------------------------------------------------------------------------- #
+# tau_escale must be anchored to CMS, not to Delphes' own GenJet
+# --------------------------------------------------------------------------- #
+def test_tau_escale_is_the_cms_over_delphes_response_ratio():
+    """Delphes τ-jets carry jet-level pT (UE inside R=0.4); CMS Tau carry the clean HPS
+    visible-τ pT. Inverting the Delphes response to unity would target GEN — also a jet —
+    and leave Delphes harder than CMS. The map must be response_CMS / response_Delphes."""
+    from delphes_pipeline.core.observables import Profile
+    from delphes_pipeline.tuning.maps import _invert_to_unity, _scale_factor
+
+    c = np.array([25.0, 45.0, 85.0, 175.0])
+    mk = lambda v: Profile("tau_energy_response", "pt", c, np.full(4, v),
+                           np.zeros(4), np.full(4, 100, dtype=int), kind="response")
+    delphes, cms = mk(1.00), mk(0.88)          # Delphes on gen; CMS 12% softer
+
+    self_anchored = np.asarray(_invert_to_unity(delphes)["values"])
+    cms_anchored = np.asarray(_scale_factor(cms, delphes)["values"])
+
+    assert np.allclose(self_anchored, 1.0), "self-anchoring leaves Delphes τ untouched"
+    assert np.allclose(cms_anchored, 0.88), "CMS-anchoring softens Delphes τ onto CMS"
+    assert (cms_anchored < self_anchored).all(), "the correction must lower the τ energy"
