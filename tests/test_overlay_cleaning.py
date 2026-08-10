@@ -116,3 +116,52 @@ def test_common_jet_acceptance_applies_to_both_sides():
     d = features(_delphes_ev(), nano=False, **kw)
     n = features(_nano_ev(), nano=True, **kw)
     assert d["dR_bb"].size == 0 and n["dR_bb"].size == 0
+
+
+# --------------------------------------------------------------------------- #
+# gen-matched vs fake split (diagnostic for the ΔR_ττ shoulder)
+# --------------------------------------------------------------------------- #
+def _jagi(vals):
+    return ak.values_astype(ak.Array([list(vals)] * _N), np.int64)
+
+
+def _delphes_ev_gen(tau_eta_phi):
+    """Delphes view whose gen τ sit at ``tau_eta_phi`` (may or may not be on the τ-jets)."""
+    ev = _delphes_ev()
+    ev.gen = ak.zip({
+        "pid": _jagi([15, -15]), "status": _jagi([2, 2]), "m1": _jagi([-1, -1]),
+        "pt": _jag([80.0, 70.0]), "mass": _jag([1.777, 1.777]),
+        "eta": _jag([tau_eta_phi[0][0], tau_eta_phi[1][0]]),
+        "phi": _jag([tau_eta_phi[0][1], tau_eta_phi[1][1]]),
+    })
+    return ev
+
+
+def _nano_ev_gen(vis_eta_phi):
+    ev = _nano_ev()
+    ev.genvistau = _col([(50.0, e, p) for e, p in vis_eta_phi])
+    return ev
+
+
+_KWM = dict(_KW, clean=True, with_match=True)
+
+
+def test_split_marks_pairs_on_real_gen_taus_as_matched():
+    d, dm = features(_delphes_ev_gen([(_T1[1], _T1[2]), (_T2[1], _T2[2])]), nano=False, **_KWM)
+    assert dm.size and dm.all(), "τ candidates sitting on gen τ must be gen-matched"
+    n, nm = features(_nano_ev_gen([(_T1[1], _T1[2]), (_T2[1], _T2[2])]), nano=True, **_KWM)
+    assert nm.size and nm.all()
+
+
+def test_split_marks_pairs_without_gen_taus_as_fake():
+    """Gen τ parked far away -> the selected pair is a fake, on both sides."""
+    far = [(4.0, 0.0), (-4.0, 3.0)]
+    d, dm = features(_delphes_ev_gen(far), nano=False, **_KWM)
+    assert dm.size and not dm.any()
+    n, nm = features(_nano_ev_gen(far), nano=True, **_KWM)
+    assert nm.size and not nm.any()
+
+
+def test_split_mask_is_aligned_with_the_features():
+    d, dm = features(_delphes_ev_gen([(_T1[1], _T1[2]), (_T2[1], _T2[2])]), nano=False, **_KWM)
+    assert dm.shape[0] == d["mHH"].shape[0], "the match mask must align with the kept events"

@@ -113,8 +113,21 @@ def _tau_cands_nano(ev):
     return ak.concatenate([th, lep(ev.electrons), lep(ev.muons)], axis=1)
 
 
+def _visible_gen_taus(ev, nano):
+    """The visible hadronic gen τ of the event, for gen-matching the selected pair.
+
+    NanoAOD exposes them directly as ``GenVisTau``; on Delphes we take the hadronic gen
+    τ (its visible products are collinear with it, so the direction is the same to well
+    inside ΔR=0.4 — adequate for a match, though not for a pT comparison).
+    """
+    if nano:
+        return ev.genvistau
+    from delphes_pipeline.core import observables as obs
+    return obs.gen_taus(ev.gen, hadronic_only=True)
+
+
 def features(ev, *, nano, tautau_only=False, mtautau_min=20.0, clean=True,
-             jet_pt_min=20.0, jet_eta_max=2.4, clean_dr=0.4):
+             jet_pt_min=20.0, jet_eta_max=2.4, clean_dr=0.4, with_match=False):
     """The 10 NSBI features over events with a reconstructed bb + di-τ system.
 
     ``mtautau_min`` drops the m_ττ≈0 spike (a FastMTT failure / a collinear or
@@ -142,6 +155,7 @@ def features(ev, *, nano, tautau_only=False, mtautau_min=20.0, clean=True,
 
     # the di-τ pair must exist before jets can be cleaned against it
     has_pair = ak.to_numpy(ak.num(cand) >= 2)
+    vis_all = _visible_gen_taus(ev, nano)[has_pair] if with_match else None
     cand, jets, met_all = cand[has_pair][:, :2], jets[has_pair], ev.met[has_pair]
     if clean:
         from delphes_pipeline.core.matching import matched_to_any
@@ -152,6 +166,12 @@ def features(ev, *, nano, tautau_only=False, mtautau_min=20.0, clean=True,
 
     sel = ak.to_numpy(ak.num(bb) >= 2)
     bb, cand, met = bb[sel], cand[sel], met_all[sel]
+    matched = None
+    if with_match:
+        from delphes_pipeline.core.matching import matched_to_any
+        # "matched" = BOTH selected τ candidates sit on a real hadronic gen τ
+        n_ok = ak.sum(matched_to_any(cand, vis_all[sel], 0.4), axis=1)
+        matched = ak.to_numpy(n_ok >= 2)
     met_x = ak.to_numpy(ak.fill_none(met.met * np.cos(met.phi), np.nan))
     met_y = ak.to_numpy(ak.fill_none(met.met * np.sin(met.phi), np.nan))
 
@@ -176,7 +196,45 @@ def features(ev, *, nano, tautau_only=False, mtautau_min=20.0, clean=True,
         "dphi_HH": _dphi(H1, H2), "pH1_T": np.maximum(pH1, pH2), "pH2_T": np.minimum(pH1, pH2),
     }
     keep = np.isfinite(out["mHH"]) & (out["mtautau"] > mtautau_min)
-    return {k: v[keep] for k, v in out.items()}
+    out = {k: v[keep] for k, v in out.items()}
+    return (out, matched[keep]) if with_match else out
+
+
+def _split_figure(kl, df, dm, nf, nm, args, tuning):
+    """Per side: gen-matched vs fake τ pairs, each normalised to the side's TOTAL.
+
+    Normalising both components to the same total (rather than each to unity) means the
+    area under the fake curve IS the fake fraction, so shape and contamination are
+    readable at once — the question being whether the Delphes ΔR_ττ excess lives in the
+    fake component.
+    """
+    fd, fn = 1.0 - dm.mean(), 1.0 - nm.mean()
+    print(f"[kl {kl}] fake (non-gen-matched) fraction: Delphes {fd:.3f}  CMS {fn:.3f}"
+          f"   [{(~dm).sum()}/{dm.size} vs {(~nm).sum()}/{nm.size}]", flush=True)
+    fig, axes = plt.subplots(2, 5, figsize=(20, 8))
+    for ax, feat in zip(axes.flat, _FEATURES):
+        lo, hi = _RANGES[feat]
+        b = np.linspace(lo, hi, 41)
+        centres = 0.5 * (b[:-1] + b[1:])
+        for data, mask, colour, lab in ((df[feat], dm, "tab:blue", "Delphes"),
+                                        (nf[feat], nm, "tab:orange", "CMS")):
+            inr = (data >= lo) & (data <= hi)
+            n_tot = max(int(inr.sum()), 1)
+            for keep, style, tag in ((mask, "-", "gen-matched"), (~mask, "--", "fake")):
+                d = data[inr & keep]
+                if not d.size:
+                    continue
+                h, _ = np.histogram(d, bins=b)
+                # density of this component relative to the side's full sample
+                h = h / (n_tot * (b[1] - b[0]))
+                ax.step(centres, h, where="mid", lw=1.8, ls=style, color=colour,
+                        label=f"{lab} {tag} ({d.size})")
+        ax.set_xlabel(feat); ax.legend(fontsize=6)
+    fig.suptitle(f"$\\kappa_\\lambda$ = {kl}  ·  gen-matched (solid) vs fake (dashed)"
+                 + ("  · tuned" if tuning is not None else "  · stock"))
+    out = os.path.join(args.out, f"split_{kl}.png")
+    fig.tight_layout(); fig.savefig(out, dpi=110); plt.close(fig)
+    print(f"[kl {kl}] -> {out}", flush=True)
 
 
 def main(argv=None) -> int:
@@ -197,6 +255,8 @@ def main(argv=None) -> int:
     ap.add_argument("--jet-pt-min", type=float, default=20.0, help="common jet pT acceptance")
     ap.add_argument("--jet-eta-max", type=float, default=2.4, help="common jet |eta| acceptance")
     ap.add_argument("--clean-dr", type=float, default=0.4, help="ΔR(jet, selected τ) overlap removal")
+    ap.add_argument("--split-gen-matched", action="store_true",
+                    help="split each side into gen-matched vs fake τ pairs (diagnostic)")
     args = ap.parse_args(argv)
 
     cfg = load_config(args.config)
@@ -224,9 +284,14 @@ def main(argv=None) -> int:
             dev = RetaggedEvents(dev, tuning, np.random.default_rng(0))
         sel_kw = dict(tautau_only=args.tautau_only, mtautau_min=args.mtautau_min, clean=args.clean,
                       jet_pt_min=args.jet_pt_min, jet_eta_max=args.jet_eta_max, clean_dr=args.clean_dr)
+        nev = NanoAODEvents(nano_by_kl[kl], branches=branches, wp=wp, entry_stop=args.max_events)
+        if args.split_gen_matched:
+            df, dm = features(dev, nano=False, with_match=True, **sel_kw)
+            nf, nm = features(nev, nano=True, with_match=True, **sel_kw)
+            _split_figure(kl, df, dm, nf, nm, args, tuning)
+            continue
         df = features(dev, nano=False, **sel_kw)
-        nf = features(NanoAODEvents(nano_by_kl[kl], branches=branches, wp=wp, entry_stop=args.max_events),
-                      nano=True, **sel_kw)
+        nf = features(nev, nano=True, **sel_kw)
 
         fig, axes = plt.subplots(2, 5, figsize=(20, 8))
         for ax, feat in zip(axes.flat, _FEATURES):
