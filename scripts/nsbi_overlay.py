@@ -12,8 +12,9 @@ sample that feeds the NSBI — that is the right thing to compare with CMS; ``--
 the stock card. Splitting the bb side (mbb, ΔR_bb) from the ττ side (mττ, ΔR_ττ) localizes any
 Delphes-vs-CMS mismatch. NB: verify the cosθ* definition matches your NSBI's.
 
-Both sides run the SAME selection (``--clean``, on by default): pick the di-τ pair, then keep
-jets at pT/|eta| acceptance and ΔR > 0.4 from both selected τ. Delphes τ_h *are* jets while
+Both sides run the SAME selection (``--clean``, on by default): a common τ-candidate
+acceptance (pT > 20, |eta| < 2.3), then pick the di-τ pair, then keep jets at pT/|eta|
+acceptance and ΔR > 0.4 from both selected τ. Delphes τ_h *are* jets while
 CMS keeps them in a separate ``Tau`` collection, so without a common overlap removal the two
 sides build the bb pair from different jet pools — an artefact that lands on ΔR_bb.
 ``--no-clean`` restores the old asymmetric behaviour to size that effect.
@@ -127,7 +128,8 @@ def _visible_gen_taus(ev, nano):
 
 
 def features(ev, *, nano, tautau_only=False, mtautau_min=20.0, clean=True,
-             jet_pt_min=20.0, jet_eta_max=2.4, clean_dr=0.4, with_match=False):
+             jet_pt_min=20.0, jet_eta_max=2.4, clean_dr=0.4, with_match=False,
+             tau_pt_min=20.0, tau_eta_max=2.3):
     """The 10 NSBI features over events with a reconstructed bb + di-τ system.
 
     ``mtautau_min`` drops the m_ττ≈0 spike (a FastMTT failure / a collinear or
@@ -143,6 +145,14 @@ def features(ev, *, nano, tautau_only=False, mtautau_min=20.0, clean=True,
     squarely on ΔR_bb. ``clean=False`` restores the old behaviour for comparison.
     """
     cand = _tau_cands_nano(ev) if nano else _tau_cands_delphes(ev)
+    if clean:
+        # Common τ-candidate acceptance. Without it the two sides start from different
+        # collections with different floors: a Delphes τ_h *is* a jet, so it exists down
+        # to the card's JetPTMin (15 GeV) and out to TauEtaMax (2.5), while CMS NanoAOD
+        # ``Tau`` begins near 18-20 GeV. Delphes then keeps soft/forward τ that CMS never
+        # had — a low-pT-Higgs population, i.e. large ΔR_ττ and (wider opening angle) a
+        # larger visible mass. pT>20, |η|<2.3 is also the analysis cut (AN-25-103 §4.6).
+        cand = cand[(cand.pt > tau_pt_min) & (np.abs(cand.eta) <= tau_eta_max)]
     if tautau_only:
         cand = cand[cand.is_tauh == 1]        # τ_hτ_h channel: pick the 2 leading τ_h, not 2 of all
     cand = cand[ak.argsort(cand.pt, axis=1, ascending=False, stable=True)]
@@ -255,6 +265,8 @@ def main(argv=None) -> int:
     ap.add_argument("--jet-pt-min", type=float, default=20.0, help="common jet pT acceptance")
     ap.add_argument("--jet-eta-max", type=float, default=2.4, help="common jet |eta| acceptance")
     ap.add_argument("--clean-dr", type=float, default=0.4, help="ΔR(jet, selected τ) overlap removal")
+    ap.add_argument("--tau-pt-min", type=float, default=20.0, help="common τ candidate pT acceptance")
+    ap.add_argument("--tau-eta-max", type=float, default=2.3, help="common τ candidate |eta| acceptance")
     ap.add_argument("--split-gen-matched", action="store_true",
                     help="split each side into gen-matched vs fake τ pairs (diagnostic)")
     args = ap.parse_args(argv)
@@ -283,7 +295,8 @@ def main(argv=None) -> int:
             from delphes_pipeline.tuning.maps import RetaggedEvents
             dev = RetaggedEvents(dev, tuning, np.random.default_rng(0))
         sel_kw = dict(tautau_only=args.tautau_only, mtautau_min=args.mtautau_min, clean=args.clean,
-                      jet_pt_min=args.jet_pt_min, jet_eta_max=args.jet_eta_max, clean_dr=args.clean_dr)
+                      jet_pt_min=args.jet_pt_min, jet_eta_max=args.jet_eta_max, clean_dr=args.clean_dr,
+                      tau_pt_min=args.tau_pt_min, tau_eta_max=args.tau_eta_max)
         nev = NanoAODEvents(nano_by_kl[kl], branches=branches, wp=wp, entry_stop=args.max_events)
         if args.split_gen_matched:
             df, dm = features(dev, nano=False, with_match=True, **sel_kw)

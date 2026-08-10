@@ -165,3 +165,52 @@ def test_split_marks_pairs_without_gen_taus_as_fake():
 def test_split_mask_is_aligned_with_the_features():
     d, dm = features(_delphes_ev_gen([(_T1[1], _T1[2]), (_T2[1], _T2[2])]), nano=False, **_KWM)
     assert dm.shape[0] == d["mHH"].shape[0], "the match mask must align with the kept events"
+
+
+# --------------------------------------------------------------------------- #
+# common τ-candidate acceptance (the last unsymmetrised object)
+# --------------------------------------------------------------------------- #
+_SOFT = (17.0, 0.4, 0.6)      # below the 20 GeV floor
+_FWD = (60.0, 2.45, 1.4)      # beyond |eta| 2.3, inside Delphes' TauEtaMax 2.5
+
+
+def _pair_with(extra_tau):
+    """Delphes and CMS views of the SAME event, with one extra τ candidate."""
+    taus = [_T1, _T2, extra_tau]
+    d = _delphes_ev()
+    d.jets = _col([_B1, _B2] + taus, btag=[1, 0, 0, 0, 0],
+                  tautag=[0, 0, 1, 1, 1], charge=[0, 0, 1, -1, 1])
+    n = _nano_ev()
+    n.jets = _col([_B1, _B2] + taus, btag=[1, 0, 0, 0, 0])
+    n.taus = _col(taus, vsjet=[6, 6, 6])
+    return d, n
+
+
+def test_soft_tau_is_rejected_identically_on_both_sides():
+    """A 17 GeV τ exists in the Delphes jet collection (JetPTMin 15) but is below the
+    CMS Tau floor; the common cut must remove it on both sides, not just one."""
+    d_ev, n_ev = _pair_with(_SOFT)
+    d = features(d_ev, nano=False, clean=True, **_KW)
+    n = features(n_ev, nano=True, clean=True, **_KW)
+    # the pair is (T1, T2) either way -> identical ΔR_ττ, the soft τ never enters
+    assert d["dR_tautau"][0] == pytest.approx(_dR(_T1, _T2), abs=1e-6)
+    assert n["dR_tautau"][0] == pytest.approx(_dR(_T1, _T2), abs=1e-6)
+
+
+def test_forward_tau_is_rejected_identically_on_both_sides():
+    d_ev, n_ev = _pair_with(_FWD)
+    d = features(d_ev, nano=False, clean=True, **_KW)
+    n = features(n_ev, nano=True, clean=True, **_KW)
+    assert d["dR_tautau"][0] == pytest.approx(_dR(_T1, _T2), abs=1e-6)
+    assert n["dR_tautau"][0] == pytest.approx(_dR(_T1, _T2), abs=1e-6)
+
+
+def test_acceptance_rejects_only_what_it_should():
+    """The cut must not swallow good candidates: an IN-acceptance τ that outranks T2 in
+    pT is still picked, so the two tests above show rejection, not blanket removal."""
+    hard = (75.0, 0.4, 0.6)             # inside pT/|eta|, harder than T2 -> enters the pair
+    d_ev, n_ev = _pair_with(hard)
+    d = features(d_ev, nano=False, clean=True, **_KW)
+    n = features(n_ev, nano=True, clean=True, **_KW)
+    assert d["dR_tautau"][0] == pytest.approx(_dR(_T1, hard), abs=1e-6)
+    assert n["dR_tautau"][0] == pytest.approx(_dR(_T1, hard), abs=1e-6)
