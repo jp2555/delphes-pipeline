@@ -241,11 +241,38 @@ the corrected $p_{T}$ and the assigned mass is not subsequently rescaled), caps 
 assigned mass strictly below $\mtau$, and leaves all non-$\tau$ jets untouched, so
 $m_{bb}$ and the $b$-side observables are unaffected.
 
-\paragraph{Known limitation.} The map stores the per-$p_{T}$ \emph{median} mass and
-assigns it deterministically. The true visible-mass distribution is essentially
-trimodal in the decay mode, so the spread is not reproduced. The expectation is that
-this affects the $\mtautau$ resolution rather than its scale; this is one of the points
-on which cross-check is sought.
+\paragraph{Why the mass must be sampled, not averaged.}
+An initial implementation assigned the per-$p_{T}$ \emph{median} anchor mass
+deterministically, on the expectation that losing the decay-mode spread would affect the
+$\mtautau$ resolution but not its scale. That expectation is wrong, and the reason is
+worth recording because it is easy to get backwards. The visible mass does not enter
+FastMTT as a smearing: via Eq.~\eqref{eq:prior} it is a \emph{one-sided lower bound} on
+$x$. Its contribution to the numerator $\mvis$ of $\mtautau=\mvis/\sqrt{x_1x_2}$ is
+negligible ($m^{2}\sim1.6\,\si{\GeV\squared}$ against
+$\mvis^{2}\sim3600\,\si{\GeV\squared}$). Assigning a single value therefore
+\emph{relaxes} a real constraint for every leg whose true mass lies above it, opening the
+low-$x$ region in which $\mtautau$ diverges.
+
+The effect is large and one-sided. For a 3-prong $a_1$ leg
+($\mvis=1.26\,\si{\GeV}$, true floor $x_{\min}=0.503$) given the median
+$0.77\,\si{\GeV}$ ($x_{\min}=0.188$), with $p_T^{\rm miss}$ favouring $x\simeq0.25$, the
+fit moves from $x=0.525$ to $x=0.250$ and $\mtautau$ from $224$ to
+$470\,\si{\GeV}$ --- a factor $2.1$. Over a realistic decay-mode mixture the median
+assignment inflates the $\mtautau$ width by ${\sim}60\%$ and pulls the mean up by
+${\sim}9\%$, with the upward tail growing accordingly, while leaving the \emph{mode}
+unchanged. Two consequences deserve emphasis: the $Z\rightarrow\tau\tau$ candle gates the
+mode and would not have caught it, and because the distortion is applied to the Delphes
+side only it does \emph{not} cancel in the CMS comparison --- unlike the covariance-free
+MET approximation, which both sides share.
+
+The implementation therefore stores the anchor's per-$p_{T}$ mass \emph{quantiles} and
+draws a mass per $\tau$-jet from them, using the random stream already threaded through
+the re-tagging so the tuning lens and the ntuplizer remain bit-identical. Resampling from
+the correct marginal restores the $\mtautau$ mean to within ${\sim}0.5\%$ and the width to
+within ${\sim}2\%$ of the true per-decay-mode result. \emph{A residual limitation
+remains}: the mass is drawn independently of the $\tau$ energy and of the partner leg,
+whereas the true visible mass correlates with the decay mode and hence with the
+prong multiplicity and the energy sharing.
 
 \section{Points for cross-check}
 
@@ -253,9 +280,10 @@ on which cross-check is sought.
 \item \textbf{Is the diagnosis accepted?} The claim is that a single definitional
 mismatch --- jet mass versus $\tau$ visible mass --- accounts for the entire
 $\tautau$ yield deficit, and that no detector-level or tuning effect need be invoked.
-\item \textbf{Is the median-mass assignment adequate}, or should the decay-mode
-composition be sampled so the visible-mass spread is reproduced? Does collapsing to a
-median bias the $\mtautau$ scale as well as the resolution?
+\item \textbf{Is quantile sampling of the visible mass sufficient?} The spread is now
+reproduced, but the drawn mass is independent of the $\tau$ energy and of the partner
+leg. Would sampling a decay mode per $\tau$ (and deriving the mass from it) be preferable,
+so that the mass, the prong multiplicity and the energy sharing stay correlated?
 \item \textbf{Should the $\tauh$ four-momentum be corrected further?} Only the mass is
 addressed here; the $\tau$-jet direction and energy already receive an energy-scale
 correction, but the jet axis may differ from the HPS $\tauh$ axis.
