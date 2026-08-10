@@ -42,21 +42,35 @@ def nearest_target_field(
     efficiency, where each gen τ must be measured on exactly its own reco jet so
     that jets accidentally near the τ do not dilute the rate.
     """
+    matched, values = nearest_target_fields(probes, targets, dr_max, (field,))
+    return matched, values[field]
+
+
+def nearest_target_fields(
+    probes: ak.Array, targets: ak.Array, dr_max: float, fields: tuple[str, ...]
+) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    """``nearest_target_field`` for several target fields in ONE matching pass.
+
+    The greedy assignment is deterministic, so calling the single-field variant
+    once per field would repeat identical (expensive) work and return consistent
+    values; this reads them all off the same match instead. Returns the matched
+    mask and ``{field: values}``, each flat and event-major over the probes.
+    """
     # Extract the fields to plain Python lists ONCE (a single vectorised call each);
     # iterating those is far cheaper than iterating the awkward arrays per event.
     pe_l, pp_l = ak.to_list(probes.eta), ak.to_list(probes.phi)
     te_l, tp_l = ak.to_list(targets.eta), ak.to_list(targets.phi)
-    tv_l = ak.to_list(targets[field])
+    tv_ls = [ak.to_list(targets[f]) for f in fields]
     out_mask: list[np.ndarray] = []
-    out_val: list[np.ndarray] = []
-    for pe_, pp_, te_, tp_, tv_ in zip(pe_l, pp_l, te_l, tp_l, tv_l):
+    out_vals: list[list[np.ndarray]] = [[] for _ in fields]
+    for ev_i, (pe_, pp_, te_, tp_) in enumerate(zip(pe_l, pp_l, te_l, tp_l)):
         pe = np.asarray(pe_, dtype=float)
         pp = np.asarray(pp_, dtype=float)
         te = np.asarray(te_, dtype=float)
         tp = np.asarray(tp_, dtype=float)
-        tv = np.asarray(tv_, dtype=float)
+        tvs = [np.asarray(tv_l[ev_i], dtype=float) for tv_l in tv_ls]
         m = np.zeros(len(pe), dtype=bool)
-        v = np.full(len(pe), np.nan)
+        vs = [np.full(len(pe), np.nan) for _ in fields]
         if len(pe) and len(te):
             dphi = _dphi(pp[:, None], tp[None, :])
             dr = np.sqrt((pe[:, None] - te[None, :]) ** 2 + dphi**2)
@@ -67,13 +81,15 @@ def nearest_target_field(
                     break
                 if not m[i] and not used[j]:
                     m[i] = used[j] = True
-                    v[i] = tv[j]
+                    for v, tv in zip(vs, tvs):
+                        v[i] = tv[j]
         out_mask.append(m)
-        out_val.append(v)
-    return (
-        np.concatenate(out_mask) if out_mask else np.zeros(0, dtype=bool),
-        np.concatenate(out_val) if out_val else np.zeros(0),
-    )
+        for acc, v in zip(out_vals, vs):
+            acc.append(v)
+    mask = np.concatenate(out_mask) if out_mask else np.zeros(0, dtype=bool)
+    values = {f: (np.concatenate(acc) if acc else np.zeros(0))
+              for f, acc in zip(fields, out_vals)}
+    return mask, values
 
 
 def unique_match(probes: ak.Array, targets: ak.Array, dr_max: float) -> np.ndarray:

@@ -59,6 +59,7 @@ def make_fixture(
     met_bias_gev: float = 0.0,
     mbb_width_gev: float = 10.0,
     bjet_response: float = 1.0,
+    tau_response: float = 1.0,   # reco jet pT / gen τ pT for the τ-jets
     btag_eff: Eff = DEF_BTAG_EFF,
     ctag_eff: Eff = DEF_CTAG_EFF,
     ltag_mistag: Eff = DEF_LTAG_MISTAG,
@@ -112,6 +113,11 @@ def make_fixture(
         # --- true hadronic taus + their reco tau-jets ----------------------
         # A hadronic tau always yields a reco jet near it; whether that jet is
         # tau-tagged is the efficiency, and it carries a real light b-mistag draw.
+        # The tag is drawn at the JET pT, matching Delphes TauTagging (which
+        # evaluates its EfficiencyFormula at the jet kinematics, not the gen τ's) —
+        # so with a pT-dependent formula the jet-pT closure recovers it and a gen-pT
+        # binning does not. ``tau_response`` (jet pT / gen τ pT) sets how far apart
+        # the two axes are; 1.0 keeps them nearly degenerate.
         if not broken:
             ntau = int(rng.integers(0, 3))
             for _t in range(ntau):
@@ -120,10 +126,10 @@ def make_fixture(
                 phi = float(rng.uniform(-math.pi, math.pi))
                 gens.append(_gen(pid=15 * rng.choice([-1, 1]), status=2,
                                  pt=pt, eta=eta, phi=phi, mass=1.777))
-                jpt = pt + float(rng.normal(0, 1.0))
+                jpt = pt * float(tau_response) + float(rng.normal(0, 1.0))
                 jets.append(_jet(jpt, eta, phi, flavor=0,
                                  btag=int(rng.random() < float(ltag_mistag(jpt, eta))),
-                                 tautag=int(rng.random() < float(tau_eff(pt, eta)))))
+                                 tautag=int(rng.random() < float(tau_eff(jpt, eta)))))
 
         # --- electrons / muons (gen + reco at injected efficiency) ---------
         # In the good (non-broken) fixture each prompt lepton's gen chain is

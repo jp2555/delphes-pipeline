@@ -23,7 +23,7 @@ import awkward as ak
 import numpy as np
 
 from .io import DelphesEvents
-from .matching import matched_to_any, nearest_target_field, unique_match
+from .matching import matched_to_any, nearest_target_field, nearest_target_fields, unique_match
 
 DEFAULT_PT_BINS = [20, 30, 40, 50, 70, 100, 150, 200, 300]
 DEFAULT_SUMET_BINS = [0, 100, 200, 300, 500, 800, 1200]
@@ -200,17 +200,41 @@ def btag_efficiency(events: DelphesEvents, quantity: str, *, bins=DEFAULT_PT_BIN
     return prof
 
 
-def tau_efficiency(events: DelphesEvents, *, bins=DEFAULT_PT_BINS, dr=0.4, eta_max=2.5, pt_min=20.0) -> Profile:
-    """τ_h efficiency: TauTag rate of the unique nearest jet to each acceptance gen τ."""
+def tau_efficiency(events: DelphesEvents, *, bins=DEFAULT_PT_BINS, dr=0.4, eta_max=2.5,
+                   pt_min=20.0, x: str = "gen_pt") -> Profile:
+    """τ_h efficiency: TauTag rate of the unique nearest jet to each acceptance gen τ.
+
+    ``x`` selects the binning variable — the same numerator/denominator either way:
+
+    - ``"gen_pt"`` (default): bin by the **gen τ** pT. This is the *tuning* axis: it
+      matches the NanoAOD anchor (τ efficiency vs the generated τ), so the tuning
+      lens can compare Delphes to CMS bin-by-bin.
+    - ``"jet_pt"``: bin by the **matched reco jet** pT. This is the *closure* axis:
+      Delphes' ``TauTagging`` evaluates its ``EfficiencyFormula`` at the jet
+      kinematics, so a pT-dependent card formula only closes against itself on this
+      axis (binning a jet-pT-applied formula by gen pT smears it through the jet
+      response and the low-pT matching turn-on). The b-tag closures are already
+      jet-pT for exactly this reason.
+
+    Verified in the Delphes source (``modules/TauTagging.cc``, identical in 3.5.0 /
+    3.5.1pre05 / master): ``pt``/``eta`` are set once per jet from ``jet->Momentum``
+    and never reassigned, then ``formula->Eval(pt, eta, phi, e)`` — the tau parton
+    only selects *which* formula (the ``fEfficiencyMap`` key), never its arguments.
+    ``BTagging.cc`` follows the same pattern.
+    """
+    if x not in ("gen_pt", "jet_pt"):
+        raise ValueError(f"x must be 'gen_pt' or 'jet_pt' (got {x!r})")
     jets = events.jets
     gen = events.gen
     gen_taus = gen[np.abs(gen.pid) == _GEN_TAU_PID]
     acc = jets[(np.abs(jets.eta) <= eta_max) & (jets.pt > pt_min)]
     taus_acc = gen_taus[(np.abs(gen_taus.eta) <= eta_max) & (gen_taus.pt > pt_min)]
-    matched, jet_tautag = nearest_target_field(taus_acc, acc, dr, "tautag")
-    tau_pt = ak.to_numpy(ak.flatten(taus_acc.pt))
-    prof = binned_efficiency(tau_pt[matched], jet_tautag[matched] == 1, bins, quantity="tau_eff", x="pt")
-    prof.xlabel, prof.ylabel = "tau pT [GeV]", "tau_eff"
+    matched, vals = nearest_target_fields(taus_acc, acc, dr, ("tautag", "pt"))
+    jet_tautag = vals["tautag"]
+    axis = (ak.to_numpy(ak.flatten(taus_acc.pt)) if x == "gen_pt" else vals["pt"])
+    prof = binned_efficiency(axis[matched], jet_tautag[matched] == 1, bins, quantity="tau_eff", x="pt")
+    prof.xlabel = "tau pT [GeV]" if x == "gen_pt" else "matched jet pT [GeV]"
+    prof.ylabel = "tau_eff"
     return prof
 
 
