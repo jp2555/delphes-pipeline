@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 import awkward as ak
 import numpy as np
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from tauh_cutflow import _cutflow  # noqa: E402
@@ -115,3 +116,46 @@ def test_id_step_is_the_delphes_retag_bit():
     full = _cutflow(_delphes(tautag=(1, 1)), nano=False)
     half = _cutflow(_delphes(tautag=(1, 0)), nano=False)
     assert full[3] == _N and half[3] == 0
+
+
+# --------------------------------------------------------------------------- #
+# gen ΔR_ττ: separates a RECO difference from a SAMPLE difference
+# --------------------------------------------------------------------------- #
+def _dr(a, b):
+    dphi = abs((a[2] - b[2] + np.pi) % (2 * np.pi) - np.pi)
+    return float(np.hypot(a[1] - b[1], dphi))
+
+
+def test_gen_dr_is_the_separation_of_the_two_visible_gen_taus():
+    cf, d = _cutflow(_delphes(), nano=False, detail=True)
+    assert cf[0] == _N
+    assert np.isfinite(d["gen_dr"]).all()
+    assert d["gen_dr"][0] == pytest.approx(_dr(_T1, _T2), abs=1e-6)
+
+
+def test_gen_dr_is_nan_when_there_is_no_pair():
+    """Fewer than two visible gen τ -> no ΔR to speak of, and it must not be faked."""
+    cf, d = _cutflow(_delphes(genjets=(_T1,)), nano=False, detail=True)
+    assert np.isnan(d["gen_dr"]).all()
+
+
+def test_detail_masks_align_with_the_counts():
+    cf, d = _cutflow(_delphes(), nano=False, detail=True)
+    assert int(d["s1"].sum()) == cf[1]
+    assert int(d["s5"].sum()) == cf[5]
+
+
+def test_efficiency_vs_gen_dr_is_computable_on_both_sides():
+    """The decisive panel: eff = stage5/stage1 in bins of gen ΔR, for each side."""
+    _, dd = _cutflow(_delphes(), nano=False, detail=True)
+    _, dn = _cutflow(_nano(), nano=True, detail=True)
+    for d in (dd, dn):
+        ok = np.isfinite(d["gen_dr"])
+        assert ok.any()
+        eff = d["s5"][ok].sum() / max(d["s1"][ok].sum(), 1)
+        assert 0.0 <= eff <= 1.0
+
+
+def test_default_return_is_unchanged():
+    """detail=False keeps the plain list, so existing callers are untouched."""
+    assert isinstance(_cutflow(_delphes(), nano=False), list)
