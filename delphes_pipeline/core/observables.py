@@ -205,6 +205,41 @@ def gen_taus(gen: ak.Array, *, hadronic_only: bool = False, dr: float = 0.4) -> 
     return taus[~matched_to_any(taus, from_tau, dr)]
 
 
+def gen_visible_taus(gen: ak.Array, *, dr: float = 0.4) -> ak.Array:
+    """Visible hadronic gen τ — the Delphes analogue of NanoAOD's ``GenVisTau``.
+
+    A hadronic τ decay has exactly ONE neutrino, so the visible four-vector is simply
+    ``τ − ν_τ``; the ν_τ is found with the same m1 ancestor walk used elsewhere (no gen
+    daughter links needed). This matters because it is the only reference that makes the
+    Delphes and CMS τ energy responses comparable: a Delphes ``GenJet`` is an R=0.4
+    cluster and still contains the underlying event (only *pileup* is absent from the
+    card), so profiling against it leaves the Delphes τ ~10% harder than a CMS ``Tau``
+    profiled against ``GenVisTau`` — which inflates m_vis and hence m_ττ.
+    """
+    taus = gen_taus(gen, hadronic_only=True, dr=dr)
+    is_nu = (np.abs(gen.pid) == 16) & (gen.status == 1)
+    nu = gen[is_nu & prompt_mother_match(gen, (_GEN_TAU_PID,))]
+    matched, v = nearest_target_fields(taus, nu, dr, ("pt", "eta", "phi"))
+    tpt = ak.to_numpy(ak.flatten(taus.pt))
+    teta = ak.to_numpy(ak.flatten(taus.eta))
+    tphi = ak.to_numpy(ak.flatten(taus.phi))
+    take = lambda k: np.where(matched, np.nan_to_num(v[k], nan=0.0), 0.0)
+    npt, neta, nphi = take("pt"), take("eta"), take("phi")
+    px = tpt * np.cos(tphi) - npt * np.cos(nphi)
+    py = tpt * np.sin(tphi) - npt * np.sin(nphi)
+    pz = tpt * np.sinh(teta) - npt * np.sinh(neta)
+    pt = np.hypot(px, py)
+    eta = np.arcsinh(np.divide(pz, pt, out=np.zeros_like(pt), where=pt > 0))
+    counts = ak.num(taus)
+    vis = ak.zip({"pt": ak.unflatten(pt, counts), "eta": ak.unflatten(eta, counts),
+                  "phi": ak.unflatten(np.arctan2(py, px), counts),
+                  "mass": ak.unflatten(np.zeros_like(pt), counts)})
+    # DROP τ whose ν_τ was not found rather than falling back to the full τ: that
+    # fallback would silently profile against a too-hard reference and bias the escale
+    # the wrong way. Measuring fewer τ is safe; measuring the wrong reference is not.
+    return vis[ak.unflatten(matched, counts)]
+
+
 def _vis_pt_eta_phi_mass(coll):
     return (ak.to_numpy(ak.flatten(coll.pt)), ak.to_numpy(ak.flatten(coll.eta)),
             ak.to_numpy(ak.flatten(coll.phi)), ak.to_numpy(ak.flatten(coll.mass)))
@@ -377,13 +412,24 @@ def _response_to_genjet(probe_jets, genjets, dr, quantity, xlabel, ylabel, bins)
 
 def tau_energy_response(events: DelphesEvents, *, bins=DEFAULT_PT_BINS, dr_tau=0.4, dr_gen=0.4,
                         eta_max=2.5, pt_min=20.0) -> Profile:
-    """τ-jet energy response: reco τ-jet pT / visible-τ (GenJet) pT vs pT (§3.2)."""
+    """τ-jet energy response: reco τ-jet pT / VISIBLE gen-τ pT vs gen pT (§3.2).
+
+    The reference is the neutrino-subtracted gen τ (``gen_visible_taus``), NOT the
+    matched GenJet: a GenJet still carries the underlying event inside R=0.4, so it is
+    not the same object as the CMS ``GenVisTau`` the anchor profiles against. Using it
+    would leave a ~10% Delphes-vs-CMS τ energy gap that the escale ratio cannot see.
+    """
     jets = events.jets
-    taus = gen_taus(events.gen, hadronic_only=True, dr=dr_tau)
+    vis = gen_visible_taus(events.gen, dr=dr_tau)
     acc = jets[(np.abs(jets.eta) <= eta_max) & (jets.pt > pt_min)]
-    tau_jets = acc[matched_to_any(acc, taus, dr_tau)]      # reco jets that are τ_h
-    return _response_to_genjet(tau_jets, events.genjets, dr_gen,
-                               "tau_energy_response", "gen-jet pT [GeV]", "reco/gen pT", bins)
+    matched, ref = nearest_target_fields(acc, vis, dr_tau, ("pt",))
+    reco_pt = ak.to_numpy(ak.flatten(acc.pt))
+    ref_pt = np.nan_to_num(ref["pt"], nan=0.0)
+    ok = matched & (ref_pt > 0)
+    prof = binned_response(ref_pt[ok], reco_pt[ok] / ref_pt[ok], bins,
+                           quantity="tau_energy_response", x="pt")
+    prof.xlabel, prof.ylabel = "gen visible-tau pT [GeV]", "reco/gen pT"
+    return prof
 
 
 def bjet_energy_response(events: DelphesEvents, *, bins=DEFAULT_PT_BINS, dr=0.2) -> Profile:

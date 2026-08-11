@@ -59,7 +59,8 @@ def make_fixture(
     met_bias_gev: float = 0.0,
     mbb_width_gev: float = 10.0,
     bjet_response: float = 1.0,
-    tau_response: float = 1.0,   # reco jet pT / gen τ pT for the τ-jets
+    tau_response: float = 1.0,   # reco jet pT / visible gen τ pT for the τ-jets
+    tau_visible_fraction: float = 0.65,   # visible/full gen τ pT (the rest is the nu_tau)
     btag_eff: Eff = DEF_BTAG_EFF,
     ctag_eff: Eff = DEF_CTAG_EFF,
     ltag_mistag: Eff = DEF_LTAG_MISTAG,
@@ -121,11 +122,21 @@ def make_fixture(
         if not broken:
             ntau = int(rng.integers(0, 3))
             for _t in range(ntau):
-                pt = float(rng.exponential(35.0) + 20.0)
+                pt = float(rng.exponential(35.0) + 20.0)   # the VISIBLE tau pT
                 eta = float(rng.uniform(-2.4, 2.4))
                 phi = float(rng.uniform(-math.pi, math.pi))
-                gens.append(_gen(pid=15 * rng.choice([-1, 1]), status=2,
-                                 pt=pt, eta=eta, phi=phi, mass=1.777))
+                # A hadronic tau always carries exactly one nu_tau, and the visible
+                # reference (the CMS GenVisTau analogue) is tau - nu. Writing only the
+                # tau would leave the gen record unable to express that, so the reco
+                # response would be profiled against the FULL tau -- the very
+                # reference mismatch the tuning is meant to remove.
+                ch = int(rng.choice([-1, 1]))
+                full_pt = pt / float(tau_visible_fraction)
+                tau_idx = len(gens)
+                gens.append(_gen(pid=15 * ch, status=2,
+                                 pt=full_pt, eta=eta, phi=phi, mass=1.777))
+                gens.append(_gen(pid=16 * ch, status=1, pt=full_pt - pt,
+                                 eta=eta, phi=phi, mass=0.0, m1=tau_idx))
                 jpt = pt * float(tau_response) + float(rng.normal(0, 1.0))
                 jets.append(_jet(jpt, eta, phi, flavor=0,
                                  btag=int(rng.random() < float(ltag_mistag(jpt, eta))),

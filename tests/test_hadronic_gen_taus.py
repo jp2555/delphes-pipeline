@@ -103,3 +103,73 @@ def test_tau_mistag_fake_sample_matches_the_anchor_definition():
     # closure keeps only the unrelated jet; tuning also keeps the leptonic-τ jet
     assert incl.counts.sum() == _N
     assert had.counts.sum() == 2 * _N
+
+
+# --------------------------------------------------------------------------- #
+# visible gen τ = τ − ν_τ (the Delphes GenVisTau analogue)
+# --------------------------------------------------------------------------- #
+def _gen_with_nu(tau_pt=100.0, nu_frac=0.35):
+    """A hadronic τ and its ν_τ, collinear, plus an unrelated ν_τ far away."""
+    return ak.zip({
+        #      0: had τ        1: its ν_τ            2: an unrelated ν_τ
+        "pid":    _i([15, 16, 16]),
+        "status": _i([2, 1, 1]),
+        "m1":     _i([-1, 0, -1]),
+        "pt":     _f([tau_pt, tau_pt * nu_frac, 50.0]),
+        "eta":    _f([_HAD[0], _HAD[0], -2.0]),
+        "phi":    _f([_HAD[1], _HAD[1], 3.0]),
+        "mass":   _f([1.777, 0.0, 0.0]),
+    })
+
+
+def test_visible_tau_is_the_tau_minus_its_neutrino():
+    """Collinear ν_τ carrying 35% of the pT -> the visible τ keeps the other 65%."""
+    vis = obs.gen_visible_taus(_gen_with_nu(100.0, 0.35))
+    assert ak.to_list(ak.num(vis))[0] == 1
+    assert ak.to_numpy(vis.pt)[0][0] == pytest.approx(65.0, rel=1e-6)
+    assert ak.to_numpy(vis.eta)[0][0] == pytest.approx(_HAD[0], abs=1e-6)
+
+
+def test_visible_tau_is_softer_than_the_full_tau():
+    """The whole point: profiling against the full τ (or a GenJet) is not the same
+    reference as CMS GenVisTau, and the difference is large."""
+    gen = _gen_with_nu(100.0, 0.35)
+    full = obs.gen_taus(gen, hadronic_only=True)
+    vis = obs.gen_visible_taus(gen)
+    assert ak.to_numpy(vis.pt)[0][0] < ak.to_numpy(full.pt)[0][0]
+
+
+def test_unrelated_neutrino_is_not_subtracted():
+    """Only a ν_τ that descends from the τ AND is collinear with it counts."""
+    gen = _gen_with_nu(100.0, 0.35)
+    vis = obs.gen_visible_taus(gen)
+    # the far-away ν (index 2, no τ ancestor) must not have been used
+    assert ak.to_numpy(vis.pt)[0][0] == pytest.approx(65.0, rel=1e-6)
+
+
+def test_leptonic_taus_have_no_visible_tau_entry():
+    """gen_visible_taus is hadronic-only, matching GenVisTau: the leptonic τ is excluded
+    even when it has a ν_τ of its own."""
+    gen = ak.zip({          # 0: had τ, 1: its ν_τ, 2: lep τ, 3: its ν_τ, 4: the μ
+        "pid":    _i([15, 16, -15, -16, -13]),
+        "status": _i([2, 1, 2, 1, 1]),
+        "m1":     _i([-1, 0, -1, 2, 2]),
+        "pt":     _f([100.0, 35.0, 90.0, 30.0, 40.0]),
+        "eta":    _f([_HAD[0], _HAD[0], _LEP[0], _LEP[0], _LEP[0]]),
+        "phi":    _f([_HAD[1], _HAD[1], _LEP[1], _LEP[1], _LEP[1]]),
+        "mass":   _f([1.777, 0.0, 1.777, 0.0, 0.105]),
+    })
+    vis = obs.gen_visible_taus(gen)
+    assert ak.to_list(ak.num(vis))[0] == 1          # only the hadronic one
+    assert ak.to_numpy(vis.pt)[0][0] == pytest.approx(65.0, rel=1e-6)
+
+
+def test_tau_without_a_found_neutrino_is_dropped_not_faked():
+    """No ν_τ found -> drop the τ. Falling back to the FULL τ would silently profile the
+    energy response against a too-hard reference and bias tau_escale the wrong way."""
+    gen = ak.zip({                       # a hadronic τ with no ν_τ anywhere
+        "pid": _i([15]), "status": _i([2]), "m1": _i([-1]),
+        "pt": _f([100.0]), "eta": _f([_HAD[0]]), "phi": _f([_HAD[1]]), "mass": _f([1.777]),
+    })
+    assert ak.to_list(ak.num(obs.gen_taus(gen, hadronic_only=True)))[0] == 1
+    assert ak.to_list(ak.num(obs.gen_visible_taus(gen)))[0] == 0
