@@ -17,7 +17,7 @@
 \newcommand{\ptmiss}{p_{T}^{\mathrm{miss}}}
 
 \title{\vspace{-1.5cm}Reconciling the Delphes $\tautau$ channel with CMS NanoAOD\\
-\large A cutflow diagnostic, six corrections, and what is still open}
+\large A cutflow diagnostic, seven corrections, and a decision to take}
 \author{Jingjing Pan}
 \date{\today}
 
@@ -33,14 +33,16 @@ deficit to a single stage --- the FastMTT di-$\tau$ mass --- and the cause turne
 not to be a detector or tuning effect but a representational one: \textbf{in Delphes a
 $\tauh$ \emph{is} an AK4 jet, whereas in CMS it is an HPS $\tauh$ object}. Nearly every
 discrepancy we found traces to that one difference, expressed in a different component
-of the four-vector or in a different reference used to tune it. Six corrections are
+of the four-vector or in a different reference used to tune it. Seven corrections are
 described, each anchored to the CMS NanoAOD and applied downstream so that no Delphes
 re-production is required. The $\tautau$ yield deficit is closed --- the cutflow now agrees
 with CMS at \emph{every} stage, ratio $1.01$ --- and the $\mtautau$ peak offset has fallen
 from $\sim$25 to $\sim$7\,\si{\GeV}; seven of the ten NSBI input features agree with CMS
 within statistics. One discrepancy remains open, in $\dR_{\tau\tau}$. A methodological
 lesson is recorded: three of our own errors came from confusing generator \emph{copies}
-with distinct particles. This note is circulated for cross-check.
+with distinct particles. Section~\ref{sec:decision} sets out a decision we would like
+$\tau$ expertise on: whether to keep correcting the jet-based $\tauh$, or to rebuild it
+from the Delphes particle-flow candidates.
 \end{abstract}
 
 \section{Motivation and summary}
@@ -374,6 +376,61 @@ are calibrated to the visible $\tau$ to within a few percent.
 (only the scale is corrected) and produces pileup jets that Delphes cannot make at all.
 Both act on the $b\bar b$ side, which currently agrees well with CMS, and the second
 cannot be fixed downstream in any case.
+
+\section{Decision: keep correcting the jet, or rebuild the $\tauh$?}
+\label{sec:decision}
+
+Every correction above treats the symptom of one fact: a Delphes $\tauh$ is an AK4 jet.
+The alternative is to stop correcting it and instead \emph{rebuild} $\tauh$ from the
+Delphes particle-flow candidates, which the card already writes (the three \texttt{EFlow}
+collections --- tracks, photons, neutral hadrons --- kept, per the card header, precisely
+for ``$\tau$ redefinition''). We would value $\tau$-expert judgement before committing.
+
+\paragraph{What rebuilding would involve.} An HPS-like construction: seed from a jet,
+collect charged hadrons and photons in a narrow signal cone (fixed $\dR\simeq0.1$, or the
+$p_{T}$-dependent $3.0/p_{T}$ bounded at $0.05$--$0.1$), form the standard decay-mode
+hypotheses (1-prong, 1-prong$+\pi^{0}$, 3-prong), take the $\tauh$ four-vector as the sum
+of signal-cone constituents, and use an isolation annulus for a handle on fakes.
+
+\paragraph{What it would gain.} The mass, energy and direction would all be correct
+\emph{by construction} rather than by correction, and corrections~1, 4 and~6 --- the
+visible-mass map, the CMS-anchored energy scale and the visible-$\tau$ reference ---
+would be \emph{retired} rather than joined by an eighth. For a phenomenological paper
+this is a materially stronger statement than a jet-plus-corrections chain, and it removes
+a stated fast-simulation limitation rather than documenting it.
+
+\paragraph{What it would not do.} It cannot reproduce DeepTau, so the identification
+efficiency and the jet$\rightarrow\tauh$ fake rate would remain anchor-measured maps
+(these already work). And it is \emph{not} obviously the cure for the open
+$\dR_{\tau\tau}$ discrepancy: CMS HPS also seeds from AK4 jets, so the two merging scales
+are similar and a narrow signal cone may not change which pairs are resolved.
+
+\paragraph{Cost, honestly.} The implementation is a contained piece of work --- hours to
+days of coding plus validation --- and is \emph{not} the critical path; running the full
+$5\times10^{5}$-event samples through the ladder and training the NSBI is the multi-day
+item. So the two are not really in competition for schedule, only for attention.
+
+\paragraph{The Delphes-specific caveat we most want checked.} Delphes neutral
+particle-flow candidates are \emph{calorimeter towers} ($\sim0.02\times0.02$ in the
+barrel), not clustered PF objects. Since the $\pi^{0}$ content is what sets both the
+visible mass and the decay-mode assignment, an HPS-like reconstruction on Delphes would
+be approximate in exactly the place that matters most.
+
+\paragraph{Questions for $\tau$ expertise.}
+\begin{enumerate}
+\item Is tower-granular neutral reconstruction adequate for a useful decay-mode
+assignment, or does it degrade the $\pi^{0}$ content enough that the rebuilt mass is no
+better than the anchor-sampled one we already have?
+\item Signal cone: fixed $0.1$, or $p_{T}$-dependent? Does the choice matter at the
+$p_{T}$ range that dominates HH$\rightarrow b\bar b\tau\tau$ ($20$--$60\,\si{\GeV}$)?
+\item Seeding: jets (as CMS HPS does) or direct clustering of particle-flow candidates?
+Would either change the efficiency for collimated pairs, $\dR_{\tau\tau}\lesssim1$?
+\item Is the observed pattern --- Delphes over-efficient at gen $\dR_{\tau\tau}>2.5$
+($\sim$3$\sigma$), possibly under-efficient below $1$ ($\sim$2$\sigma$) --- something you
+recognise as a jet-vs-HPS effect at all, or should we look elsewhere?
+\item Is a jet-based $\tauh$ with anchor-measured corrections defensible in a
+phenomenological paper, or is rebuilding the expected standard?
+\end{enumerate}
 
 \section{Points for cross-check}
 
