@@ -224,3 +224,47 @@ def test_visible_taus_use_the_descent_veto_by_default():
 def test_unknown_veto_is_rejected():
     with pytest.raises(ValueError, match="descent.*geometric"):
         obs.gen_taus(_gen_wide_leptonic(), hadronic_only=True, veto="bogus")
+
+
+# --------------------------------------------------------------------------- #
+# generator COPIES must not be counted as separate τ
+# --------------------------------------------------------------------------- #
+def _gen_chain():
+    """One physical hadronic τ written as a Pythia chain 23 -> 2, plus its ν_τ."""
+    return ak.zip({
+        "pid":    _i([15, 15, 16]),
+        "status": _i([23, 2, 1]),
+        "m1":     _i([-1, 0, 1]),
+        "pt":     _f([100.0, 100.0, 35.0]),
+        "eta":    _f([0.5, 0.5, 0.5]),
+        "phi":    _f([0.0, 0.0, 0.0]),
+        "mass":   _f([1.777, 1.777, 0.0]),
+    })
+
+
+def test_copies_collapse_to_one_physical_tau():
+    """The Delphes allParticles record is the full Pythia history, so each τ appears
+    several times. Counting copies makes '>=2 τ' satisfiable by a single τ."""
+    gen = _gen_chain()
+    assert ak.to_list(ak.num(obs.gen_taus(gen, hadronic_only=True, last_copy=False)))[0] == 2
+    assert ak.to_list(ak.num(obs.gen_taus(gen, hadronic_only=True)))[0] == 1
+    assert ak.to_list(ak.num(obs.gen_visible_taus(gen)))[0] == 1
+
+
+def test_last_copy_keeps_the_decayed_tau_not_the_hard_one():
+    """The kept copy must be the one the ν actually came from, so τ − ν is right."""
+    vis = obs.gen_visible_taus(_gen_chain())
+    assert ak.to_numpy(vis.pt)[0][0] == pytest.approx(65.0, rel=1e-6)
+
+
+def test_two_real_taus_each_with_copies_still_give_two():
+    gen = ak.zip({          # τA: 0->1 (+ν 2);  τB: 3->4 (+ν 5)
+        "pid":    _i([15, 15, 16, -15, -15, -16]),
+        "status": _i([23, 2, 1, 23, 2, 1]),
+        "m1":     _i([-1, 0, 1, -1, 3, 4]),
+        "pt":     _f([100.0, 100.0, 35.0, 80.0, 80.0, 28.0]),
+        "eta":    _f([0.5, 0.5, 0.5, -1.2, -1.2, -1.2]),
+        "phi":    _f([0.0, 0.0, 0.0, 2.5, 2.5, 2.5]),
+        "mass":   _f([1.777, 1.777, 0.0, 1.777, 1.777, 0.0]),
+    })
+    assert ak.to_list(ak.num(obs.gen_visible_taus(gen)))[0] == 2

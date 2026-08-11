@@ -203,7 +203,7 @@ def tau_ancestor_index(gen: ak.Array, max_depth: int = 12) -> ak.Array:
 
 
 def gen_taus(gen: ak.Array, *, hadronic_only: bool = False, dr: float = 0.4,
-             veto: str = "geometric") -> ak.Array:
+             veto: str = "geometric", last_copy: bool = True) -> ak.Array:
     """Gen τ leptons, optionally only those decaying hadronically.
 
     Delphes' gen record carries no decay-mode flag, so a leptonic τ is identified by its
@@ -230,7 +230,21 @@ def gen_taus(gen: ak.Array, *, hadronic_only: bool = False, dr: float = 0.4,
     jet→τ_h fake rate (~0.004) — a ~125× over-efficiency that manufactures τ_hτ_h
     events out of τ_hτ_ℓ and τ_ℓτ_ℓ ones, whose objects are not collimated.
     """
-    taus = gen[np.abs(gen.pid) == _GEN_TAU_PID]
+    is_tau = np.abs(gen.pid) == _GEN_TAU_PID
+    if last_copy:
+        # Keep one entry per PHYSICAL τ. The Delphes `allParticles` record is the full
+        # Pythia history, so each τ appears several times (23 -> 22 -> 2 ...); counting
+        # those copies makes ">=2 τ" satisfiable by one τ alone. A τ is the last copy iff
+        # no other τ lists it as its mother. (NanoAOD GenPart is pruned and already
+        # ~1 entry per τ, so this is a no-op there.)
+        idx = ak.local_index(gen)[is_tau]
+        m1 = gen.m1[is_tau]
+        pairs = ak.cartesian({"i": idx, "m": m1}, nested=True)
+        is_parent = ak.fill_none(ak.any(pairs["i"] == pairs["m"], axis=-1), False)
+        taus = gen[is_tau][~is_parent]
+    else:
+        is_parent = None
+        taus = gen[is_tau]
     if not hadronic_only:
         return taus
     is_lep = ((np.abs(gen.pid) == 11) | (np.abs(gen.pid) == 13)) & (gen.status == 1)
@@ -245,6 +259,8 @@ def gen_taus(gen: ak.Array, *, hadronic_only: bool = False, dr: float = 0.4,
     anc = tau_ancestor_index(gen)
     lep_anc = anc[is_lep & (anc >= 0)]
     tau_idx = ak.local_index(gen)[np.abs(gen.pid) == _GEN_TAU_PID]
+    if last_copy:
+        tau_idx = tau_idx[~is_parent]
     pairs = ak.cartesian({"i": tau_idx, "a": lep_anc}, nested=True)
     is_leptonic = ak.fill_none(ak.any(pairs["i"] == pairs["a"], axis=-1), False)
     return taus[~is_leptonic]
