@@ -46,10 +46,43 @@ _FEATURES = ["mHH", "cosThetaStar", "pHH_T", "mbb", "dR_bb", "mtautau", "dR_taut
 # x fitted against pT_miss, so if the selection matches but m_ττ does not, the difference
 # has to be in the τ four-vectors or in the MET — these panels separate the two.
 _DIAG = ["tau1_pt", "tau2_pt", "met"]
+
+# The CMS Run-3 HH->bbtautau DNN input set (AN table 29), in the rotated frame it uses:
+# every momentum is rotated by -phi(visible di-tau), so the tau pair lies at phi=0.
+# Only the entries Delphes can actually supply are listed here; CMS_DNN_UNAVAILABLE
+# records the rest, which is itself a useful audit.
+_CMS_OBJ = ["lep1", "lep2", "b1", "b2", "fatjet", "Htt", "Hbb", "Hbbtt"]
+_CMS = (["met_px", "met_py"]
+        + [f"{o}_{c}" for o in _CMS_OBJ for c in ("E", "px", "py", "pz")]
+        + ["fatjet_exist"])
+
+CMS_DNN_UNAVAILABLE = [
+    ("cov(MET) xx, xy, yy", "Delphes has no MET covariance; only an overall resolution. "
+                            "A synthesised covariance would be an assumption, not a measurement."),
+    ("ParticleNet / UParT score", "Delphes gives a binary tag bit, not a continuous "
+                                  "discriminant; our re-tag reproduces the WP efficiency only."),
+    ("HHbTag score", "a CMS-specific DNN over event-level inputs; no Delphes counterpart."),
+    ("decay mode (lepton_1,2)", "Delphes has no tau substructure at all -- a tau_h is an "
+                                "AK4 jet, so 1-prong / 1-prong+pi0 / 3-prong is undefined."),
+    ("charge (lepton_1,2)", "Delphes jets carry an approximate jet charge, not a reconstructed "
+                            "tau charge."),
+    ("pair type", "we run the tau_h tau_h channel only; e-tau and mu-tau are not yet built."),
+]
 _RANGES = {"mHH": (200, 900), "cosThetaStar": (0, 1), "pHH_T": (0, 300), "mbb": (0, 250),
            "dR_bb": (0, 5), "mtautau": (0, 250), "dR_tautau": (0, 5), "dphi_HH": (0, 3.2),
            "pH1_T": (0, 400), "pH2_T": (0, 400),
            "tau1_pt": (0, 200), "tau2_pt": (0, 150), "met": (0, 200)}
+
+
+def _cms_range(name):
+    """Plot range by component: Cartesian momenta are ~symmetric, energies positive."""
+    if name == "fatjet_exist":
+        return (-0.5, 1.5)
+    if name.endswith("_E"):
+        return (0, 400) if name.startswith(("lep", "b1", "b2")) else (0, 1200)
+    if name.endswith("_pz"):
+        return (-500, 500)
+    return (-250, 250)          # px, py (including met_px/met_py)
 
 
 def _kl(path):
@@ -105,6 +138,29 @@ def _cos_theta_star(h1, hh):
     return np.abs(np.divide(pz, p, out=np.zeros_like(p), where=p > 0))
 
 
+def _leading_fatjet(ev, sel_index):
+    """Leading AK8 jet per selected event as a 4-vector dict; zeros where there is none.
+
+    Both tiers expose one (Delphes ``FatJet`` from the R=0.8 finder, NanoAOD ``FatJet``),
+    so the boosted inputs of the CMS DNN can be compared; an absent collection yields
+    zeros and ``fatjet_exist`` = 0 rather than dropping the event.
+    """
+    n = len(sel_index)
+    zero = {k: np.zeros(n) for k in ("px", "py", "pz", "e")}
+    fj = getattr(ev, "fatjets", None)
+    if fj is None or ak.sum(ak.num(fj)) == 0:
+        return zero
+    fj = fj[sel_index]
+    lead = fj[ak.argsort(fj.pt, axis=1, ascending=False, stable=True)][:, :1]
+    has = ak.to_numpy(ak.num(lead) >= 1)
+    if not has.any():
+        return zero
+    p = _p4(*(ak.to_numpy(ak.flatten(lead[k])) for k in ("pt", "eta", "phi", "mass")))
+    for k in zero:
+        zero[k][has] = p[k]
+    return zero
+
+
 def _tau_cands_delphes(ev):
     from delphes_pipeline.validation.level1_candles.selections import tau_candidates
     return tau_candidates(ev)
@@ -132,9 +188,16 @@ def _visible_gen_taus(ev, nano):
     return obs.gen_taus(ev.gen, hadronic_only=True)
 
 
+def _rot(p, cos_a, sin_a):
+    """Rotate a 4-vector dict about the beam axis by angle a (px,py only)."""
+    return {"px": p["px"] * cos_a + p["py"] * sin_a,
+            "py": -p["px"] * sin_a + p["py"] * cos_a,
+            "pz": p["pz"], "e": p["e"]}
+
+
 def features(ev, *, nano, tautau_only=False, mtautau_min=20.0, clean=True,
              jet_pt_min=20.0, jet_eta_max=2.4, clean_dr=0.4, with_match=False,
-             tau_pt_min=20.0, tau_eta_max=2.3):
+             tau_pt_min=20.0, tau_eta_max=2.3, cms_dnn=False):
     """The 10 NSBI features over events with a reconstructed bb + di-τ system.
 
     ``mtautau_min`` drops the m_ττ≈0 spike (a FastMTT failure / a collinear or
@@ -180,6 +243,7 @@ def features(ev, *, nano, tautau_only=False, mtautau_min=20.0, clean=True,
     bb = bb[ak.argsort(bb.btag, axis=1, ascending=False, stable=True)][:, :2]
 
     sel = ak.to_numpy(ak.num(bb) >= 2)
+    sel_index = np.flatnonzero(has_pair)[sel]      # indices into the ORIGINAL event list
     bb, cand, met = bb[sel], cand[sel], met_all[sel]
     matched = None
     if with_match:
@@ -212,6 +276,22 @@ def features(ev, *, nano, tautau_only=False, mtautau_min=20.0, clean=True,
         # FastMTT inputs, for diagnosing an m_ττ shift that survives a symmetric selection
         "tau1_pt": _pt(t1), "tau2_pt": _pt(t2), "met": np.hypot(met_x, met_y),
     }
+    if cms_dnn:
+        # the CMS DNN frame: rotate everything so the visible di-τ sits at φ=0
+        vis = _add(t1, t2)
+        a = np.arctan2(vis["py"], vis["px"])
+        ca, sa = np.cos(a), np.sin(a)
+        fj = _leading_fatjet(ev, sel_index)
+        objs = {"lep1": t1, "lep2": t2, "b1": b1, "b2": b2, "fatjet": fj,
+                "Htt": H2, "Hbb": H1, "Hbbtt": HH}
+        for name, p in objs.items():
+            r = _rot(p, ca, sa)
+            out[f"{name}_E"] = r["e"]
+            for c in ("px", "py", "pz"):
+                out[f"{name}_{c}"] = r[c]
+        out["met_px"] = met_x * ca + met_y * sa
+        out["met_py"] = -met_x * sa + met_y * ca
+        out["fatjet_exist"] = (fj["e"] > 0).astype(float)
     keep = np.isfinite(out["mHH"]) & (out["mtautau"] > mtautau_min)
     out = {k: v[keep] for k, v in out.items()}
     return (out, matched[keep]) if with_match else out
@@ -278,6 +358,9 @@ def main(argv=None) -> int:
     ap.add_argument("--clean-dr", type=float, default=0.4, help="ΔR(jet, selected τ) overlap removal")
     ap.add_argument("--tau-pt-min", type=float, default=20.0, help="common τ candidate pT acceptance")
     ap.add_argument("--tau-eta-max", type=float, default=2.3, help="common τ candidate |eta| acceptance")
+    ap.add_argument("--cms-dnn", action="store_true",
+                    help="overlay the CMS Run-3 DNN input set (rotated frame) instead of "
+                         "the 10 NSBI features, and print which inputs Delphes cannot supply")
     ap.add_argument("--diagnostics", action="store_true",
                     help="also plot the FastMTT inputs (τ pT, MET) alongside the NSBI features")
     ap.add_argument("--split-gen-matched", action="store_true",
@@ -296,6 +379,13 @@ def main(argv=None) -> int:
         print(f"[overlay] applying tuning maps from {maps_path}")
     os.makedirs(args.out, exist_ok=True)
 
+    if args.cms_dnn:
+        print("\n[cms-dnn] CMS Run-3 DNN inputs that Delphes CANNOT supply:")
+        for name, why in CMS_DNN_UNAVAILABLE:
+            print(f"    - {name:28s} {why}")
+        print(f"\n[cms-dnn] overlaying the {len(_CMS)} inputs it can, in the rotated frame\n",
+              flush=True)
+
     nano_by_kl = {_kl(d): d for d in glob.glob(os.path.join(args.nano_dir, "*kl-*")) if _kl(d) and "NanoAOD" in d}
 
     for d in sorted(glob.glob(os.path.join(args.delphes_dir, "*kl-*"))):
@@ -309,7 +399,8 @@ def main(argv=None) -> int:
             dev = RetaggedEvents(dev, tuning, np.random.default_rng(0))
         sel_kw = dict(tautau_only=args.tautau_only, mtautau_min=args.mtautau_min, clean=args.clean,
                       jet_pt_min=args.jet_pt_min, jet_eta_max=args.jet_eta_max, clean_dr=args.clean_dr,
-                      tau_pt_min=args.tau_pt_min, tau_eta_max=args.tau_eta_max)
+                      tau_pt_min=args.tau_pt_min, tau_eta_max=args.tau_eta_max,
+                      cms_dnn=args.cms_dnn)
         nev = NanoAODEvents(nano_by_kl[kl], branches=branches, wp=wp, entry_stop=args.max_events)
         if args.split_gen_matched:
             df, dm = features(dev, nano=False, with_match=True, **sel_kw)
@@ -319,13 +410,13 @@ def main(argv=None) -> int:
         df = features(dev, nano=False, **sel_kw)
         nf = features(nev, nano=True, **sel_kw)
 
-        feats = _FEATURES + (_DIAG if args.diagnostics else [])
+        feats = _CMS if args.cms_dnn else _FEATURES + (_DIAG if args.diagnostics else [])
         nrow = (len(feats) + 4) // 5
-        fig, axes = plt.subplots(nrow, 5, figsize=(20, 4 * nrow))
+        fig, axes = plt.subplots(nrow, 5, figsize=(20, 3.6 * nrow))
         for ax in axes.flat[len(feats):]:
             ax.axis("off")
         for ax, feat in zip(axes.flat, feats):
-            lo, hi = _RANGES[feat]
+            lo, hi = _cms_range(feat) if args.cms_dnn else _RANGES[feat]
             b = np.linspace(lo, hi, 41)
             centres = 0.5 * (b[:-1] + b[1:])
             for data, lab in ((df[feat], "Delphes"), (nf[feat], "NanoAOD")):
@@ -336,7 +427,7 @@ def main(argv=None) -> int:
             ax.set_xlabel(feat); ax.legend(fontsize=8)
         fig.suptitle(f"$\\kappa_\\lambda$ = {kl}" + ("  (tuned)" if tuning is not None else "  (stock)")
                      + ("  · symmetric cleaning" if args.clean else "  · legacy selection"))
-        out = os.path.join(args.out, f"nsbi_{kl}.png")
+        out = os.path.join(args.out, f"{'cmsdnn' if args.cms_dnn else 'nsbi'}_{kl}.png")
         fig.tight_layout(); fig.savefig(out, dpi=110); plt.close(fig)
         print(f"[kl {kl}] -> {out}  (Delphes {df['mHH'].size}, NanoAOD {nf['mHH'].size})")
     return 0

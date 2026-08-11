@@ -41,6 +41,8 @@ BRANCHES: dict = {
                 "eta": "GenPart_eta", "phi": "GenPart_phi", "mass": "GenPart_mass",
                 "m1": "GenPart_genPartIdxMother"},
     "genjet": {"pt": "GenJet_pt", "eta": "GenJet_eta", "phi": "GenJet_phi", "mass": "GenJet_mass"},
+    # AK8 jet, for the boosted category the CMS DNN feeds on
+    "fatjet": {"pt": "FatJet_pt", "eta": "FatJet_eta", "phi": "FatJet_phi", "mass": "FatJet_mass"},
     "met": {"met": "PuppiMET_pt", "phi": "PuppiMET_phi"},
     "genmet": {"met": "GenMET_pt", "phi": "GenMET_phi"},
     "weight": "genWeight",
@@ -143,6 +145,11 @@ class NanoAODEvents:
     @cached_property
     def genjets(self) -> ak.Array:
         return self._zip(self.b["genjet"])
+
+    @cached_property
+    def fatjets(self) -> ak.Array:
+        """AK8 jets. Absent in some skims -> an empty per-event collection."""
+        return self._zip(self.b["fatjet"])
 
     @cached_property
     def met(self) -> ak.Array:

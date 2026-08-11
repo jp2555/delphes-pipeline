@@ -236,3 +236,50 @@ def test_diagnostics_are_not_in_the_nsbi_feature_set():
 
     assert len(ov._FEATURES) == 10
     assert not set(ov._DIAG) & set(ov._FEATURES)
+
+
+# --------------------------------------------------------------------------- #
+# CMS Run-3 DNN input set (rotated frame)
+# --------------------------------------------------------------------------- #
+def test_cms_dnn_features_are_all_produced():
+    import nsbi_overlay as ov
+
+    d = features(_delphes_ev(), nano=False, clean=True, cms_dnn=True, **_KW)
+    missing = [k for k in ov._CMS if k not in d]
+    assert not missing, missing
+
+
+def test_rotation_puts_the_visible_ditau_at_phi_zero():
+    """The CMS DNN frame rotates every momentum by -φ(visible di-τ). The rotated di-τ
+    must therefore have py = 0 and px > 0."""
+    import nsbi_overlay as ov
+
+    d = features(_delphes_ev(), nano=False, clean=True, cms_dnn=True, **_KW)
+    vis_px = d["lep1_px"][0] + d["lep2_px"][0]
+    vis_py = d["lep1_py"][0] + d["lep2_py"][0]
+    assert abs(vis_py) < 1e-6, vis_py
+    assert vis_px > 0
+
+
+def test_rotation_preserves_magnitudes():
+    """A rotation about the beam changes px,py but not pT, pz or E."""
+    plain = features(_delphes_ev(), nano=False, clean=True, **_KW)
+    rot = features(_delphes_ev(), nano=False, clean=True, cms_dnn=True, **_KW)
+    pt_rot = np.hypot(rot["lep1_px"], rot["lep1_py"])
+    assert pt_rot[0] == pytest.approx(plain["tau1_pt"][0], rel=1e-6)
+
+
+def test_absent_fatjet_gives_zeros_and_a_zero_flag():
+    """Neither fixture has AK8 jets: the event must survive with fatjet_exist = 0
+    rather than being dropped."""
+    d = features(_delphes_ev(), nano=False, clean=True, cms_dnn=True, **_KW)
+    assert d["fatjet_exist"][0] == 0.0
+    assert d["fatjet_E"][0] == 0.0
+
+
+def test_cms_dnn_works_on_the_nano_side_too():
+    import nsbi_overlay as ov
+
+    n = features(_nano_ev(), nano=True, clean=True, cms_dnn=True, **_KW)
+    assert all(k in n for k in ov._CMS)
+    assert n["Hbbtt_E"][0] > 0
