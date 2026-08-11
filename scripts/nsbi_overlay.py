@@ -49,14 +49,15 @@ _DIAG = ["tau1_pt", "tau2_pt", "met"]
 
 # The CMS Run-3 HH->bbtautau DNN input set (AN table 29), in the rotated frame it uses:
 # every momentum is rotated by -phi(visible di-tau), so the tau pair lies at phi=0.
-# Only the entries Delphes can actually supply are listed here; CMS_DNN_UNAVAILABLE
-# records the rest, which is itself a useful audit.
-_CMS_OBJ = ["lep1", "lep2", "b1", "b2", "fatjet", "Htt", "Hbb", "Hbbtt"]
-_CMS = (["met_px", "met_py"]
-        + [f"{o}_{c}" for o in _CMS_OBJ for c in ("E", "px", "py", "pz")]
-        + ["fatjet_exist"])
+# Only the entries we actually overlay are listed here; CMS_DNN_NOT_OVERLAID records the
+# rest with the reason, so the audit still accounts for all 26 inputs.
+_CMS_OBJ = ["lep1", "lep2", "b1", "b2", "Htt", "Hbb", "Hbbtt"]
+_CMS = ["met_px", "met_py"] + [f"{o}_{c}" for o in _CMS_OBJ for c in ("E", "px", "py", "pz")]
 
-CMS_DNN_UNAVAILABLE = [
+CMS_DNN_NOT_OVERLAID = [
+    ("FatJet E/px/py/pz, FatJet exist, FatJet_tautau",
+     "OUT OF SCOPE: we run the resolved category only, so the boosted AK8 inputs carry "
+     "no information here. Not a Delphes limitation -- both tiers do expose an AK8 jet."),
     ("cov(MET) xx, xy, yy", "Delphes has no MET covariance; only an overall resolution. "
                             "A synthesised covariance would be an assumption, not a measurement."),
     ("ParticleNet / UParT score", "Delphes gives a binary tag bit, not a continuous "
@@ -76,8 +77,6 @@ _RANGES = {"mHH": (200, 900), "cosThetaStar": (0, 1), "pHH_T": (0, 300), "mbb": 
 
 def _cms_range(name):
     """Plot range by component: Cartesian momenta are ~symmetric, energies positive."""
-    if name == "fatjet_exist":
-        return (-0.5, 1.5)
     if name.endswith("_E"):
         return (0, 400) if name.startswith(("lep", "b1", "b2")) else (0, 1200)
     if name.endswith("_pz"):
@@ -136,29 +135,6 @@ def _cos_theta_star(h1, hh):
     py = h1["py"] + fac * bp * by - gamma * by * h1["e"]
     p = np.sqrt(px * px + py * py + pz * pz)
     return np.abs(np.divide(pz, p, out=np.zeros_like(p), where=p > 0))
-
-
-def _leading_fatjet(ev, sel_index):
-    """Leading AK8 jet per selected event as a 4-vector dict; zeros where there is none.
-
-    Both tiers expose one (Delphes ``FatJet`` from the R=0.8 finder, NanoAOD ``FatJet``),
-    so the boosted inputs of the CMS DNN can be compared; an absent collection yields
-    zeros and ``fatjet_exist`` = 0 rather than dropping the event.
-    """
-    n = len(sel_index)
-    zero = {k: np.zeros(n) for k in ("px", "py", "pz", "e")}
-    fj = getattr(ev, "fatjets", None)
-    if fj is None or ak.sum(ak.num(fj)) == 0:
-        return zero
-    fj = fj[sel_index]
-    lead = fj[ak.argsort(fj.pt, axis=1, ascending=False, stable=True)][:, :1]
-    has = ak.to_numpy(ak.num(lead) >= 1)
-    if not has.any():
-        return zero
-    p = _p4(*(ak.to_numpy(ak.flatten(lead[k])) for k in ("pt", "eta", "phi", "mass")))
-    for k in zero:
-        zero[k][has] = p[k]
-    return zero
 
 
 def _tau_cands_delphes(ev):
@@ -243,7 +219,6 @@ def features(ev, *, nano, tautau_only=False, mtautau_min=20.0, clean=True,
     bb = bb[ak.argsort(bb.btag, axis=1, ascending=False, stable=True)][:, :2]
 
     sel = ak.to_numpy(ak.num(bb) >= 2)
-    sel_index = np.flatnonzero(has_pair)[sel]      # indices into the ORIGINAL event list
     bb, cand, met = bb[sel], cand[sel], met_all[sel]
     matched = None
     if with_match:
@@ -281,8 +256,7 @@ def features(ev, *, nano, tautau_only=False, mtautau_min=20.0, clean=True,
         vis = _add(t1, t2)
         a = np.arctan2(vis["py"], vis["px"])
         ca, sa = np.cos(a), np.sin(a)
-        fj = _leading_fatjet(ev, sel_index)
-        objs = {"lep1": t1, "lep2": t2, "b1": b1, "b2": b2, "fatjet": fj,
+        objs = {"lep1": t1, "lep2": t2, "b1": b1, "b2": b2,
                 "Htt": H2, "Hbb": H1, "Hbbtt": HH}
         for name, p in objs.items():
             r = _rot(p, ca, sa)
@@ -291,7 +265,6 @@ def features(ev, *, nano, tautau_only=False, mtautau_min=20.0, clean=True,
                 out[f"{name}_{c}"] = r[c]
         out["met_px"] = met_x * ca + met_y * sa
         out["met_py"] = -met_x * sa + met_y * ca
-        out["fatjet_exist"] = (fj["e"] > 0).astype(float)
     keep = np.isfinite(out["mHH"]) & (out["mtautau"] > mtautau_min)
     out = {k: v[keep] for k, v in out.items()}
     return (out, matched[keep]) if with_match else out
@@ -380,8 +353,8 @@ def main(argv=None) -> int:
     os.makedirs(args.out, exist_ok=True)
 
     if args.cms_dnn:
-        print("\n[cms-dnn] CMS Run-3 DNN inputs that Delphes CANNOT supply:")
-        for name, why in CMS_DNN_UNAVAILABLE:
+        print("\n[cms-dnn] CMS Run-3 DNN inputs NOT overlaid:")
+        for name, why in CMS_DNN_NOT_OVERLAID:
             print(f"    - {name:28s} {why}")
         print(f"\n[cms-dnn] overlaying the {len(_CMS)} inputs it can, in the rotated frame\n",
               flush=True)

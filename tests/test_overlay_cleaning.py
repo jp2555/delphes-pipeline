@@ -269,12 +269,13 @@ def test_rotation_preserves_magnitudes():
     assert pt_rot[0] == pytest.approx(plain["tau1_pt"][0], rel=1e-6)
 
 
-def test_absent_fatjet_gives_zeros_and_a_zero_flag():
-    """Neither fixture has AK8 jets: the event must survive with fatjet_exist = 0
-    rather than being dropped."""
+def test_boosted_inputs_are_not_overlaid():
+    """The resolved category is the whole analysis, so no AK8 feature may sneak back in."""
+    import nsbi_overlay as ov
+
     d = features(_delphes_ev(), nano=False, clean=True, cms_dnn=True, **_KW)
-    assert d["fatjet_exist"][0] == 0.0
-    assert d["fatjet_E"][0] == 0.0
+    assert not [k for k in d if "fatjet" in k.lower()]
+    assert not [k for k in ov._CMS if "fatjet" in k.lower()]
 
 
 def test_cms_dnn_works_on_the_nano_side_too():
