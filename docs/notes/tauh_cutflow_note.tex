@@ -14,10 +14,10 @@
 \newcommand{\mtau}{m_{\tau}}
 \newcommand{\kl}{\kappa_{\lambda}}
 \newcommand{\dR}{\Delta R}
+\newcommand{\ptmiss}{p_{T}^{\mathrm{miss}}}
 
-\title{\vspace{-1.5cm}A $\tautau$ cutflow diagnostic for the Delphes
-HH$\rightarrow b\bar{b}\tau\tau$ sample:\\
-locating a factor $\sim$5 yield deficit against CMS NanoAOD}
+\title{\vspace{-1.5cm}Reconciling the Delphes $\tautau$ channel with CMS NanoAOD\\
+\large A cutflow diagnostic, six corrections, and what is still open}
 \author{Jingjing Pan}
 \date{\today}
 
@@ -26,287 +26,294 @@ locating a factor $\sim$5 yield deficit against CMS NanoAOD}
 
 \begin{abstract}
 \noindent
-The tuned Delphes HH$\rightarrow b\bar b\tau^{+}\tau^{-}$ sample selects
-$\sim$5$\times$ fewer $\tautau$ events than the CMS NanoAOD reference from the same
-number of generated events. A five-stage cutflow, applied identically to both
-samples, localises the entire deficit to a \emph{single} stage: the FastMTT di-$\tau$
-mass reconstruction, which keeps $0.111$ of Delphes events against $0.994$ of CMS
-events. Up to that stage Delphes is in fact \emph{ahead} of CMS in cumulative
-efficiency. The cause is identified as a definitional mismatch rather than a detector
-or tuning effect: in Delphes a $\tauh$ \emph{is} a jet and therefore carries the AK4
-jet mass ($\mathcal{O}(5\text{--}20)\,\si{\GeV}$), whereas the FastMTT hadronic decay
-prior vanishes identically unless $\mvis \le \mtau = 1.777\,\si{\GeV}$. Roughly 89\%
-of Delphes $\tautau$ pairs therefore admit no solution and return NaN. A proposed fix
---- an anchor-measured $\tauh$ visible-mass tuning map --- is described. This note is
-circulated for cross-check before the correction is adopted.
+The tuned Delphes HH$\rightarrow b\bar b\tau^{+}\tau^{-}$ sample initially selected
+$\sim$5$\times$ \emph{fewer} $\tautau$ events than the CMS NanoAOD reference, and its
+$\mtautau$ peaked $\sim$25\,\si{\GeV} high. A five-stage cutflow localised the yield
+deficit to a single stage --- the FastMTT di-$\tau$ mass --- and the cause turned out
+not to be a detector or tuning effect but a representational one: \textbf{in Delphes a
+$\tauh$ \emph{is} an AK4 jet, whereas in CMS it is an HPS $\tauh$ object}. Nearly every
+discrepancy we found traces to that one difference, expressed in a different component
+of the four-vector or in a different reference used to tune it. Six corrections are
+described, each anchored to the CMS NanoAOD and applied downstream so that no Delphes
+re-production is required. The $\tautau$ yield ratio moved from $0.20$ to $1.25$ and the
+$\mtautau$ peak offset from $\sim$25 to $\sim$7\,\si{\GeV}; seven of the ten NSBI input
+features now agree with CMS within statistics. Two discrepancies remain open. This note
+is circulated for cross-check.
 \end{abstract}
 
-\section{Motivation}
+\section{Motivation and summary}
 
-The Delphes fast-simulation sample is intended to reproduce the CMS
-HH$\rightarrow b\bar b\tau\tau$ Run-3 baseline closely enough to support a
-phenomenological unbinned NSBI $\kl$ measurement. Object-level agreement is already
-established: the tuned b-tagging, $\tauh$ efficiency, energy scales and lepton scale
-factors are anchored to a private 2024 NanoAODv15 sample, and the Level-0/1/4
-validation gates pass. The $m_{HH}$ and $m_{bb}$ distributions --- the $\kl$-carrying
-observables --- agree with CMS within statistics.
+The Delphes fast-simulation sample must reproduce the CMS HH$\rightarrow b\bar
+b\tau\tau$ Run-3 baseline closely enough to support a phenomenological unbinned NSBI
+$\kl$ measurement. The $b\bar b$ side and the $\kl$-carrying observable $m_{HH}$ agreed
+from early on; the $\tau\tau$ side did not, in two ways that resisted object-level
+tuning: a factor $\sim$5 yield deficit and a $\sim$25\,\si{\GeV} shift in $\mtautau$.
 
-One discrepancy resisted every object-level fix: from $2\times10^{4}$ generated events
-the overlay selects $\approx$300 $\tautau$ events on Delphes against $\approx$1500 on
-CMS. Because this ratio directly caps the statistics available for NSBI training, it
-matters \emph{which} stage of the selection creates it. A per-stage efficiency
-comparison is the minimal measurement that answers this.
-
-\section{Method}
-
-Both samples are walked through the same five stages. Definitions are matched
-object-for-object; where the two data tiers expose different collections, the
-counterpart with the same physical meaning is used.
+Table~\ref{tab:progress} is the summary. Each row is one correction, all of them
+downstream of the Delphes card (the production is unchanged), and each was adopted only
+after a measurement identified it.
 
 \begin{table}[h]
-\centering
-\small
+\centering\small
+\begin{tabular}{llrrl}
+\toprule
+\# & correction & Delphes $N$ & Delphes/CMS & $\mtautau$ peak offset \\
+\midrule
+0 & (starting point, symmetric selection) & 289  & 0.20 & $+25$ \\
+1 & $\tauh$ visible \emph{mass} from the anchor & 2590 & 1.81 & $+25$ \\
+2 & hadronic vs leptonic gen $\tau$            & 2100 & 1.47 & $+25$ \\
+3 & common $\tau$-candidate acceptance          & 1729 & 1.30 & $+25$ \\
+4 & $\tau$ energy scale anchored to CMS         & 1721 & 1.30 & $+25$ \\
+5 & $\ptmiss$ smearing (pileup)                 & 1721 & 1.30 & $+12$ \\
+6 & visible-$\tau$ energy reference             & 1660 & 1.25 & $\sim+7$ \\
+\bottomrule
+\end{tabular}
+\caption{Cumulative effect of the six corrections, at $\kl=0$ from $2\times10^{4}$
+generated events (CMS reference: 1431 events, falling to 1328 once the common $\tau$
+acceptance is applied to both sides). Peak offsets are read off the normalised
+histograms and are approximate.\label{tab:progress}}
+\end{table}
+
+\section{The diagnostic}
+
+Both samples are walked through the same five stages; a stage whose \emph{conditional}
+efficiency differs between the two columns is where a difference is created.
+
+\begin{table}[h]
+\centering\small
 \begin{tabular}{clll}
 \toprule
 \# & stage & Delphes & CMS NanoAOD \\
 \midrule
-1 & gen  & $\ge 2$ \texttt{GenJet} matched to a gen $\tau$ & $\ge 2$ \texttt{GenVisTau} \\
-2 & reco & $\ge 2$ accepted jets matched to those          & $\ge 2$ \texttt{Tau} objects matched \\
-3 & ID   & $\ge 2$ passing the re-tagged \texttt{TauTag}   & $\ge 2$ passing DeepTau v2.5 VSjet Medium \\
-4 & jets & $\ge 2$ jets surviving the overlap removal      & identical \\
-5 & $\mtautau$ & FastMTT mass finite and $>20\,\si{\GeV}$  & identical \\
+1 & gen  & $\ge 2$ visible hadronic gen $\tau$ & $\ge 2$ \texttt{GenVisTau} \\
+2 & reco & $\ge 2$ accepted jets matched to those & $\ge 2$ \texttt{Tau} objects matched \\
+3 & ID   & $\ge 2$ passing the re-tagged \texttt{TauTag} & $\ge 2$ passing DeepTau v2.5 VSjet Medium \\
+4 & jets & $\ge 2$ jets surviving the overlap removal & identical \\
+5 & $\mtautau$ & FastMTT mass finite and $>20\,\si{\GeV}$ & identical \\
 \bottomrule
 \end{tabular}
-\caption{Cutflow stages. Acceptance is $p_{T}>20\,\si{\GeV}$, $|\eta|<2.3$ for $\tau$
-candidates and $p_{T}>20\,\si{\GeV}$, $|\eta|<2.4$ for jets; matching and overlap
-removal both use $\dR<0.4$.}
+\caption{Cutflow stages. $\tau$ candidates $p_{T}>20\,\si{\GeV}$, $|\eta|<2.3$; jets
+$p_{T}>20\,\si{\GeV}$, $|\eta|<2.4$; matching and overlap removal $\dR<0.4$.}
 \end{table}
-
-Two choices deserve comment. First, stage 1 uses Delphes \texttt{GenJet}s rather than
-the gen $\tau$ four-vector as the visible-$\tau$ proxy: \texttt{GenJet}s are clustered
-after the neutrino filter and are therefore already the visible object, matching the
-definition of \texttt{GenVisTau}. Binning the Delphes side by the \emph{full} gen-$\tau$
-$p_{T}$ would compare different quantities, since a hadronic $\tau$ carries only
-$\sim$65\% of its momentum visibly. Second, stage 4 applies a symmetric overlap
-removal: the di-$\tau$ pair is selected first, then jets within $\dR<0.4$ of either
-selected $\tau$ are removed on \emph{both} sides. Without this, the Delphes side
-removes $\tau$-tagged jets from the $b$ pool while the CMS side does not (there
-$\tauh$ live in a separate \texttt{Tau} collection but their jets remain in
-\texttt{Jet}), which previously produced a spurious $\dR_{bb}$ discrepancy.
-
-\section{Results}
-
-Tables~\ref{tab:kl0}--\ref{tab:kl5} give the cutflow at three $\kl$ points, from
-$2\times10^{4}$ generated events each, with the tuning maps applied. $\varepsilon_{\rm
-step}$ is the conditional efficiency of each stage, $\varepsilon_{\rm tot}$ the
-cumulative one, and $\Delta\varepsilon$ the Delphes/CMS ratio of $\varepsilon_{\rm
-step}$; values far from unity mark the stage responsible.
-
-\newcommand{\cfrow}[8]{#1 & #2 & #3 & #4 & #5 & #6 & #7 & #8 \\}
-\newcommand{\cftab}[2]{%
-\begin{table}[h]\centering\small
-\begin{tabular}{lrrrrrrr}
-\toprule
-& \multicolumn{3}{c}{Delphes} & \multicolumn{3}{c}{CMS NanoAOD} & \\
-\cmidrule(lr){2-4}\cmidrule(lr){5-7}
-stage & $N$ & $\varepsilon_{\rm step}$ & $\varepsilon_{\rm tot}$
-      & $N$ & $\varepsilon_{\rm step}$ & $\varepsilon_{\rm tot}$ & $\Delta\varepsilon$ \\
-\midrule
-#1
-\bottomrule
-\end{tabular}
-\caption{#2}
-\end{table}}
-
-\cftab{
-\cfrow{0 events read}{20000}{---}{1.0000}{20000}{---}{1.0000}{}
-\cfrow{1 gen visible $\tauh$}{9859}{0.493}{0.4929}{4657}{0.233}{0.2329}{2.12}
-\cfrow{2 reco $\tauh$ object}{6330}{0.642}{0.3165}{3965}{0.851}{0.1983}{0.75}
-\cfrow{3 $\tauh$ ID}{2268}{0.358}{0.1134}{1465}{0.369}{0.0732}{0.97}
-\cfrow{4 cleaned jets}{1961}{0.865}{0.0980}{1267}{0.865}{0.0634}{1.00}
-\cfrow{5 FastMTT $\mtautau$}{\textbf{217}}{\textbf{0.111}}{0.0109}{1259}{0.994}{0.0630}{\textbf{0.11}}
-}{Cutflow at $\kl=0$. Final CMS/Delphes yield ratio 5.80.\label{tab:kl0}}
-
-\cftab{
-\cfrow{0 events read}{20000}{---}{1.0000}{20000}{---}{1.0000}{}
-\cfrow{1 gen visible $\tauh$}{9987}{0.499}{0.4994}{4708}{0.235}{0.2354}{2.12}
-\cfrow{2 reco $\tauh$ object}{6339}{0.635}{0.3170}{4027}{0.855}{0.2014}{0.74}
-\cfrow{3 $\tauh$ ID}{2348}{0.370}{0.1174}{1554}{0.386}{0.0777}{0.96}
-\cfrow{4 cleaned jets}{2030}{0.865}{0.1015}{1375}{0.885}{0.0688}{0.98}
-\cfrow{5 FastMTT $\mtautau$}{\textbf{243}}{\textbf{0.120}}{0.0121}{1362}{0.991}{0.0681}{\textbf{0.12}}
-}{Cutflow at $\kl=1$ (SM). Final CMS/Delphes yield ratio 5.60.\label{tab:kl1}}
-
-\cftab{
-\cfrow{0 events read}{20000}{---}{1.0000}{20000}{---}{1.0000}{}
-\cfrow{1 gen visible $\tauh$}{8863}{0.443}{0.4431}{4257}{0.213}{0.2129}{2.08}
-\cfrow{2 reco $\tauh$ object}{6101}{0.688}{0.3050}{3487}{0.819}{0.1744}{0.84}
-\cfrow{3 $\tauh$ ID}{2064}{0.338}{0.1032}{1083}{0.311}{0.0541}{1.09}
-\cfrow{4 cleaned jets}{1758}{0.852}{0.0879}{932}{0.861}{0.0466}{0.99}
-\cfrow{5 FastMTT $\mtautau$}{\textbf{195}}{\textbf{0.111}}{0.0097}{928}{0.996}{0.0464}{\textbf{0.11}}
-}{Cutflow at $\kl=5$. Final CMS/Delphes yield ratio 4.76.\label{tab:kl5}}
-
-\paragraph{Reading the tables.}
-Stages 3 and 4 agree between the two samples to within a few percent at all three
-$\kl$ points ($\Delta\varepsilon = 0.96$--$1.09$ and $0.98$--$1.00$): the $\tauh$
-identification and the jet selection are \emph{not} the problem. Stage~5 is
-catastrophic and consistent across $\kl$: Delphes retains $11$--$12\%$ where CMS
-retains $99\%$. Crucially, the cumulative efficiency through stage~4 is
-\emph{higher} on Delphes ($0.098$ vs $0.063$ at $\kl=1$); the entire deficit, and more,
-is generated at stage~5 alone.
-
-\paragraph{Known artefacts in stages 1--2.}
-The stage-1 ratio $\Delta\varepsilon\simeq2.1$ is an artefact of the diagnostic itself,
-not of the simulation. The Delphes \texttt{GenJet} proxy cannot distinguish a hadronic
-from a leptonic $\tau$ decay --- a $\tau\rightarrow\ell\nu\bar\nu$ also produces a
-\texttt{GenJet} --- so the Delphes denominator is inflated by roughly
-$1/\mathcal{B}(\tautau)$. Stage 2 ($\Delta\varepsilon\simeq0.75$) is the mirror image:
-those leptonic-$\tau$ events fail to produce a $\tau$-jet. The two largely cancel and
-neither contributes to the final deficit. Removing this artefact requires the gen
-decay chain, which the current reader does not retain.
-
-\section{Cause}
-
-In Delphes a $\tauh$ candidate \emph{is} a jet, so the object handed to the di-$\tau$
-mass estimator carries the AK4 jet mass --- underlying event and additional particles
-clustered within $R=0.4$ --- typically $5$--$20\,\si{\GeV}$. A reconstructed CMS
-$\tauh$ instead carries its decay-mode visible mass, bounded above by
-$\mtau=1.777\,\si{\GeV}$ ($\pi^{\pm}$: $0.14$; $\rho$: $0.77$; $a_{1}$: $1.26\,
-\si{\GeV}$).
-
-The covariance-free FastMTT estimator maximises, per event, a likelihood over the
-visible energy fractions $x_{1},x_{2}\in(0,1]$,
-\begin{equation}
-\mathcal{L}(x_1,x_2) \;=\;
-\mathcal{L}_{\rm MET}(x_1,x_2)\;\prod_{i=1,2}\mathcal{L}_{\rm dec}(x_i)\,,
-\qquad
-\mtautau \;=\; \frac{\mvis}{\sqrt{x_1x_2}}\,,
-\end{equation}
-where the hadronic decay prior is the phase-space density
-\begin{equation}
-\mathcal{L}_{\rm dec}(x) \;=\;
-\begin{cases}
-1, & x_{\min}\le x\le 1\,,\\[2pt]
-0, & \text{otherwise}\,,
-\end{cases}
-\qquad
-x_{\min}\;\equiv\;\left(\frac{\mvis}{\mtau}\right)^{2}\,.
-\label{eq:prior}
-\end{equation}
-If $\mvis>\mtau$ then $x_{\min}>1$ and the admissible interval in
-Eq.~\eqref{eq:prior} is \emph{empty}: the prior vanishes for every $x$, the likelihood
-is identically zero, and the estimator returns NaN. Table~\ref{tab:xmin} shows the
-effect on a $40$-point scan.
 
 \begin{table}[h]
 \centering\small
-\begin{tabular}{lrrl}
+\begin{tabular}{lrrrrrr}
 \toprule
-$\mvis$ [\si{\GeV}] & $x_{\min}$ & valid grid points & \\
+& \multicolumn{2}{c}{initial} & \multicolumn{2}{c}{after correction 1}
+& \multicolumn{2}{c}{after correction 2} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}
+stage & $\varepsilon_{\rm step}$ D/CMS & $\Delta\varepsilon$
+      & $\varepsilon_{\rm step}$ D/CMS & $\Delta\varepsilon$
+      & $\varepsilon_{\rm step}$ D/CMS & $\Delta\varepsilon$ \\
 \midrule
-$0.14$ ($\pi^{\pm}$) & $0.006$ & $40/40$ & \\
-$0.77$ ($\rho$)      & $0.188$ & $33/40$ & CMS $\tauh$ \\
-$1.26$ ($a_{1}$)     & $0.503$ & $20/40$ & \\
-$1.78$ ($=\mtau$)    & $1.000$ & $1/40$  & \\
-$3.0$                & $2.850$ & $0/40$  & \\
-$8.0$                & $20.27$ & $0/40$  & typical Delphes $\tau$-jet \\
-$15.0$               & $71.25$ & $0/40$  & \\
+1 gen visible $\tauh$ & 0.499 / 0.235 & \textbf{2.12} & 0.499 / 0.235 & \textbf{2.12} & 0.274 / 0.235 & 1.17 \\
+2 reco $\tauh$ object & 0.635 / 0.855 & \textbf{0.74} & 0.635 / 0.855 & \textbf{0.74} & 0.946 / 0.855 & 1.11 \\
+3 $\tauh$ ID          & 0.370 / 0.386 & 0.96 & 0.370 / 0.386 & 0.96 & 0.373 / 0.386 & 0.97 \\
+4 cleaned jets        & 0.865 / 0.885 & 0.98 & 0.865 / 0.885 & 0.98 & 0.870 / 0.885 & 0.98 \\
+5 FastMTT $\mtautau$  & 0.120 / 0.991 & \textbf{0.12} & 1.000 / 0.991 & 1.01 & 0.999 / 0.991 & 1.01 \\
+\midrule
+\multicolumn{1}{l}{CMS/Delphes yield} & \multicolumn{2}{c}{5.60} & \multicolumn{2}{c}{0.67} & \multicolumn{2}{c}{0.81} \\
 \bottomrule
 \end{tabular}
-\caption{Number of admissible grid points in the FastMTT $x$ scan as a function of the
-leg visible mass. Above $\mtau$ no solution exists.\label{tab:xmin}}
+\caption{Cutflow at $\kl=1$, $2\times10^{4}$ events. $\Delta\varepsilon$ is the
+Delphes/CMS ratio of the per-stage efficiency. Stage~5 alone carried the entire initial
+deficit; stages 1--2 were an artefact of the diagnostic itself, removed by correction~2.
+\label{tab:cutflow}}
 \end{table}
 
-The $11\%$ of Delphes events that do survive are those rare pairs in which
-\emph{both} $\tau$-jets happen to have a mass below $\mtau$ --- a biased, unusually
-narrow subset. This also offers a natural explanation for two residual shape
-discrepancies seen in the feature overlays, namely a $\mtautau$ peak shifted
-$\sim$$10\,\si{\GeV}$ high and a $\dR_{\tau\tau}$ distribution displaced to larger
-values, and for the low acceptance$\times$efficiency ($0.082$) reported by the
-Level-4 $m_{HH}$ gate.
+Two readings matter. First, \textbf{stage 5 alone} carried the deficit: Delphes retained
+$12\%$ where CMS retained $99\%$, and through stage~4 Delphes was in fact \emph{ahead}
+in cumulative efficiency. Second, the large stage-1/2 ratios were an artefact of the
+diagnostic, not of the simulation: the Delphes visible-$\tau$ proxy could not
+distinguish a hadronic from a leptonic $\tau$ decay, so the denominator was inflated by
+roughly $1/\mathcal{B}(\tautau)$. Correction~2 removed it.
 
-\section{Proposed correction}
+\section{One root cause, several components}
 
-The Delphes $\tauh$ four-vector should carry a physical $\tau$ visible mass. The jet
-mass is a clustering artefact, not a property of the $\tau$, and since
-$\mtautau=\mvis/\sqrt{x_1x_2}$ it sets the $\mtautau$ \emph{scale} as well as
-determining whether a solution exists at all.
+A CMS $\tauh$ is an HPS object built from a narrow set of decay products. A Delphes
+$\tauh$ is an anti-$k_{T}$ $R=0.4$ jet that happens to carry \texttt{TauTag}. The two
+therefore differ in \emph{every} component of the four-vector, and additionally in the
+generator-level reference one would naturally use to tune each component:
 
-The correction adopted follows the existing tuning pattern used for the energy scales:
-the median $\tauh$ visible mass is measured on the CMS anchor as a function of $p_{T}$
-(from \texttt{Tau} objects passing DeepTau Medium), stored as a tuning map, and applied
-downstream to $\tau$-tagged Delphes jets. It requires no change to the Delphes card and
-no re-production: the existing samples are corrected in place at analysis level. The
-implementation applies the map after the energy-scale correction (so the lookup uses
-the corrected $p_{T}$ and the assigned mass is not subsequently rescaled), caps the
-assigned mass strictly below $\mtau$, and leaves all non-$\tau$ jets untouched, so
-$m_{bb}$ and the $b$-side observables are unaffected.
+\begin{itemize}
+\item \textbf{mass} --- the jet mass is $\mathcal{O}(5\text{--}20)\,\si{\GeV}$; a $\tauh$
+visible mass is bounded by $\mtau=1.777\,\si{\GeV}$ (correction~1);
+\item \textbf{energy} --- the jet carries the underlying event inside the cone, so it is
+$\sim$17\% harder than the visible $\tau$ at low $p_{T}$ (corrections~4 and~6);
+\item \textbf{reference} --- a Delphes \texttt{GenJet} is also a jet and also contains
+the underlying event, so it is \emph{not} the analogue of \texttt{GenVisTau}
+(correction~6);
+\item \textbf{identity} --- ``matched to a gen $\tau$'' does not mean ``hadronic''
+(correction~2), and the two data tiers expose $\tau$ candidates with different intrinsic
+thresholds (correction~3).
+\end{itemize}
 
-\paragraph{Why the mass must be sampled, not averaged.}
-An initial implementation assigned the per-$p_{T}$ \emph{median} anchor mass
-deterministically, on the expectation that losing the decay-mode spread would affect the
-$\mtautau$ resolution but not its scale. That expectation is wrong, and the reason is
-worth recording because it is easy to get backwards. The visible mass does not enter
-FastMTT as a smearing: via Eq.~\eqref{eq:prior} it is a \emph{one-sided lower bound} on
-$x$. Its contribution to the numerator $\mvis$ of $\mtautau=\mvis/\sqrt{x_1x_2}$ is
-negligible ($m^{2}\sim1.6\,\si{\GeV\squared}$ against
-$\mvis^{2}\sim3600\,\si{\GeV\squared}$). Assigning a single value therefore
-\emph{relaxes} a real constraint for every leg whose true mass lies above it, opening the
-low-$x$ region in which $\mtautau$ diverges.
+Only correction~5 ($\ptmiss$) is unrelated to this; it follows from the card running
+without pileup by design.
 
-The effect is large and one-sided. For a 3-prong $a_1$ leg
-($\mvis=1.26\,\si{\GeV}$, true floor $x_{\min}=0.503$) given the median
-$0.77\,\si{\GeV}$ ($x_{\min}=0.188$), with $p_T^{\rm miss}$ favouring $x\simeq0.25$, the
-fit moves from $x=0.525$ to $x=0.250$ and $\mtautau$ from $224$ to
-$470\,\si{\GeV}$ --- a factor $2.1$. Over a realistic decay-mode mixture the median
-assignment inflates the $\mtautau$ width by ${\sim}60\%$ and pulls the mean up by
-${\sim}9\%$, with the upward tail growing accordingly, while leaving the \emph{mode}
-unchanged. Two consequences deserve emphasis: the $Z\rightarrow\tau\tau$ candle gates the
-mode and would not have caught it, and because the distortion is applied to the Delphes
-side only it does \emph{not} cancel in the CMS comparison --- unlike the covariance-free
-MET approximation, which both sides share.
+\subsection{Correction 1: the $\tauh$ visible mass, and why it must be sampled}
 
-The implementation therefore stores the anchor's per-$p_{T}$ mass \emph{quantiles} and
-draws a mass per $\tau$-jet from them, using the random stream already threaded through
-the re-tagging so the tuning lens and the ntuplizer remain bit-identical. Resampling from
-the correct marginal restores the $\mtautau$ mean to within ${\sim}0.5\%$ and the width to
-within ${\sim}2\%$ of the true per-decay-mode result. \emph{A residual limitation
-remains}: the mass is drawn independently of the $\tau$ energy and of the partner leg,
-whereas the true visible mass correlates with the decay mode and hence with the
-prong multiplicity and the energy sharing.
+The covariance-free FastMTT estimator maximises, per event, a likelihood over the
+visible energy fractions $x_{1},x_{2}\in(0,1]$, with
+$\mtautau = \mvis/\sqrt{x_1x_2}$ and a hadronic decay prior
+\begin{equation}
+\mathcal{L}_{\rm dec}(x) =
+\begin{cases} 1, & x_{\min}\le x\le 1,\\ 0, & \text{otherwise,}\end{cases}
+\qquad
+x_{\min}\equiv\left(\mvis/\mtau\right)^{2}.
+\label{eq:prior}
+\end{equation}
+If $\mvis>\mtau$ then $x_{\min}>1$, the admissible interval is empty, the likelihood
+vanishes identically and the estimator returns NaN. A Delphes $\tau$-jet carrying its
+jet mass therefore admits \emph{no solution at all}: $\sim$89\% of $\tautau$ pairs were
+silently lost, which was the whole of the stage-5 collapse.
+
+The correction measures the CMS $\tauh$ visible mass on the anchor and assigns it to
+$\tau$-tagged Delphes jets. Crucially it must be \textbf{sampled, not averaged}. An
+initial implementation assigned the per-$p_{T}$ median; that is wrong because via
+Eq.~\eqref{eq:prior} the mass is a one-sided \emph{lower bound} on $x$, not a smearing.
+Its contribution to the numerator $\mvis$ is negligible
+($m^{2}\sim1.6$ against $\mvis^{2}\sim3600\,\si{\GeV\squared}$), so a single value
+\emph{relaxes} a real constraint for every leg whose true mass lies above it. For a
+3-prong $a_1$ leg ($\mvis=1.26$, floor $x_{\min}=0.503$) given the median $0.77$
+($x_{\min}=0.188$), with $\ptmiss$ favouring $x\simeq0.25$, the fit moves from
+$x=0.525$ to $x=0.250$ and $\mtautau$ from $224$ to $470\,\si{\GeV}$. Over a realistic
+decay-mode mixture the median assignment inflates the $\mtautau$ width by $\sim$60\% and
+the mean by $\sim$9\% while leaving the \emph{mode} unchanged --- so the
+$Z\rightarrow\tau\tau$ candle, which gates the mode, would not have caught it. The
+implementation therefore stores the anchor's per-$p_{T}$ mass \emph{quantiles} and draws
+per $\tau$-jet from them.
+
+\subsection{Corrections 2--3: identity and acceptance}
+
+The $\tauh$ efficiency map is measured on the anchor as \texttt{GenVisTau}$\rightarrow$
+DeepTau-Medium \texttt{Tau}, and \texttt{GenVisTau} exists only for hadronic decays.
+Treating every gen $\tau$ as genuine handed a leptonic $\tau$'s jet that efficiency
+($\sim$0.5) instead of the jet$\rightarrow\tauh$ fake rate ($\sim$0.004), fabricating
+$\tautau$ events out of $\tau_h\tau_\ell$ and $\tau_\ell\tau_\ell$ ones. A gen $\tau$ is
+now classified by looking for a status-1 $e/\mu$ whose first non-self-copy ancestor is a
+$\tau$, using the generator mother links only.
+
+Separately, the two tiers expose $\tau$ candidates with different intrinsic floors: a
+Delphes $\tauh$ is a jet and so exists down to the card's \texttt{JetPTMin} of
+$15\,\si{\GeV}$ and out to $|\eta|<2.5$, while the CMS \texttt{Tau} collection begins
+near $18$--$20\,\si{\GeV}$. A common acceptance ($p_{T}>20$, $|\eta|<2.3$, the analysis
+values) is now applied to both sides before the pair is chosen.
+
+\subsection{Corrections 4 and 6: the $\tau$ energy scale and its reference}
+
+The energy-scale map was originally derived by inverting the Delphes response to unity
+against its own \texttt{GenJet} --- a \emph{self}-comparison, where every other map in
+the framework is a comparison \emph{to CMS}. Correction~4 replaced it with the anchor
+ratio,
+$\texttt{tau\_escale} = \mathcal{R}_{\rm CMS}/\mathcal{R}_{\rm Delphes}$, in the same
+form already used for the lepton scale factors.
+
+That alone changed almost nothing (1--3\%), and the reason is instructive: the two
+responses were still measured against \emph{different} references. The CMS response is
+$\texttt{Tau}/\texttt{GenVisTau}$ --- clean --- while the Delphes response was
+$\tau\text{-jet}/\texttt{GenJet}$, and a \texttt{GenJet} is an $R=0.4$ cluster that
+still contains the underlying event (only \emph{pileup} is absent from the card).
+Correction~6 builds a genuine visible gen $\tau$ on the Delphes side using the identity
+that a hadronic $\tau$ decay has exactly one neutrino,
+\begin{equation}
+p_{\rm vis} = p_{\tau} - p_{\nu_\tau},
+\end{equation}
+with the $\nu_\tau$ located through the same mother-link walk (no generator daughter
+links are needed). Profiled against \emph{that}, the Delphes $\tau$-jet is
+\textbf{17\% harder than the visible $\tau$ at $25\,\si{\GeV}$}, falling to $\sim$2\% at
+$250\,\si{\GeV}$ --- the shape expected of a roughly fixed underlying-event offset. The
+resulting map is $\texttt{tau\_escale} = [0.85, 0.88, 0.90, 0.91, 0.93, 0.94, 0.94,
+0.95]$, against $[0.91,\ldots,0.96]$ before.
+
+\subsection{Correction 5: $\ptmiss$ resolution (pileup)}
+
+The card runs without pileup by construction, and its header states that ``pileup enters
+through the tuning maps''. That map had never been built. Measured with the same
+estimator on both sides, the per-component $\ptmiss$ resolution is
+$16.5\,\si{\GeV}$ on Delphes against $32.6\,\si{\GeV}$ on the CMS anchor --- a factor of
+two, and the largest single mismatch anywhere in the map set. Gaussian noise of the
+quadrature difference ($28.1\,\si{\GeV}$) is added per component. Since $\ptmiss$ is what
+FastMTT fits the energy fractions against, this is the correction that moved $\mtautau$
+most: the peak offset fell from $\sim$25 to $\sim$12\,\si{\GeV} and the distribution
+broadened from far-too-narrow into the right range.
+
+\section{What is still open}
+
+\begin{enumerate}
+\item \textbf{$\dR_{\tau\tau}$ shoulder.} Delphes carries an excess at
+$\dR_{\tau\tau}\simeq2.2$--$3.2$ that CMS does not. It has survived every correction
+above, which is informative: none of them touched the $\tau$ \emph{direction} or the
+selected \emph{population}. Large $\dR_{\tau\tau}$ corresponds to a low-$p_{T}$ Higgs,
+hence soft $\tau$.
+\item \textbf{Residual yield excess} of $1.25\times$ and a $\mtautau$ distribution still
+somewhat broader than CMS.
+\end{enumerate}
+
+A single candidate explains both, and is our current working hypothesis. The downstream
+corrections are applied in the order (b-tag, $\tauh$ tag, energy scale, mass), so the
+$\tauh$ efficiency is drawn at the \emph{raw} jet $p_{T}$ --- which correction~6 shows to
+be $\sim$17\% too high at low $p_{T}$. The efficiency rises steeply there
+($0.39\rightarrow0.52$ between 25 and $35\,\si{\GeV}$), so evaluating it $\sim$17\% too
+far to the right produces a systematic over-efficiency for soft $\tau$: too many
+reconstructed pairs, concentrated exactly in the low-$p_{T}$, large-$\dR_{\tau\tau}$
+population. Applying the energy scale \emph{first} would make every subsequent map
+evaluate at a CMS-like $p_{T}$. This is falsifiable: if the hypothesis is right the
+excess should vanish preferentially at low $\tau$ $p_{T}$ and take the shoulder with it;
+if the shoulder survives a corrected low-$p_{T}$ efficiency it is genuinely angular, and
+the $\tau$ direction (jet axis versus HPS axis) is the next candidate.
+
+\paragraph{Hypotheses tested and rejected.} For the record, three explanations for the
+$\mtautau$ shift were proposed and excluded by direct measurement: (i) \emph{fake
+$\tauh$} --- the gen-matched/fake split gives fake fractions of 5.7\% (Delphes) against
+5.0\% (CMS), essentially equal, with both shape discrepancies living entirely in the
+gen-matched component; (ii) \emph{$\tau$-pair selection} --- making the selection fully
+symmetric moved $\dR_{\tau\tau}$ but left $\mtautau$ untouched; (iii) \emph{a large CMS
+$\tau$ energy miscalibration} --- the anchor response is $0.97$--$0.99$, so CMS $\tauh$
+are calibrated to the visible $\tau$ to within a few percent.
+
+\paragraph{Not addressed here.} Pileup also affects the jet energy \emph{resolution}
+(only the scale is corrected) and produces pileup jets that Delphes cannot make at all.
+Both act on the $b\bar b$ side, which currently agrees well with CMS, and the second
+cannot be fixed downstream in any case.
 
 \section{Points for cross-check}
 
 \begin{enumerate}
-\item \textbf{Is the diagnosis accepted?} The claim is that a single definitional
-mismatch --- jet mass versus $\tau$ visible mass --- accounts for the entire
-$\tautau$ yield deficit, and that no detector-level or tuning effect need be invoked.
-\item \textbf{Is quantile sampling of the visible mass sufficient?} The spread is now
+\item \textbf{Is the framing accepted?} The claim is that essentially the whole
+$\tau$-side discrepancy follows from representing a $\tauh$ as an AK4 jet, and that the
+remedy is to correct each component of that four-vector against a CMS-anchored,
+like-for-like reference.
+\item \textbf{Is quantile sampling of the visible mass sufficient?} The spread is
 reproduced, but the drawn mass is independent of the $\tau$ energy and of the partner
-leg. Would sampling a decay mode per $\tau$ (and deriving the mass from it) be preferable,
-so that the mass, the prong multiplicity and the energy sharing stay correlated?
-\item \textbf{Should the $\tauh$ four-momentum be corrected further?} Only the mass is
-addressed here; the $\tau$-jet direction and energy already receive an energy-scale
-correction, but the jet axis may differ from the HPS $\tauh$ axis.
-\item \textbf{Stage-1/2 artefact.} Is it worth retaining the gen decay chain in the
-reader so hadronic and leptonic $\tau$ decays can be separated, making stages 1--2
-directly comparable?
-\item \textbf{Residual shape differences.} If the correction does not fully resolve the
-$\mtautau$ and $\dR_{\tau\tau}$ shifts, the next candidate is the MET resolution, which
-the tuning lens still reports as requiring adjustment (Delphes MET is
-\emph{cleaner} than the CMS anchor) and which enters FastMTT directly.
+leg. Would sampling a decay mode per $\tau$ be preferable, so that mass, prong
+multiplicity and energy sharing stay correlated?
+\item \textbf{Is isotropic $\ptmiss$ smearing adequate?} Real $\ptmiss$ resolution is
+anisotropic and scales with $\Sigma E_{T}$; ours is round and flat. Delphes $\mtautau$ is
+now marginally \emph{broader} than CMS, which is what one would expect from
+over-simplified noise.
+\item \textbf{The order-of-application hypothesis} in Section~5 --- does it look right,
+and is applying the energy scale first the correct remedy?
+\item \textbf{Residual normalisation.} Is a $1.25\times$ yield excess acceptable for an
+unbinned NSBI study, given that the training uses shapes and the normalisation is
+fitted, or should it be closed before production?
 \end{enumerate}
 
 \section*{Reproducing}
 
-The diagnostic is \texttt{scripts/tauh\_cutflow.py} in the \texttt{delphes-pipeline}
-repository:
+All corrections live in \texttt{delphes-pipeline} and are applied downstream of the
+Delphes card; the existing production is unchanged. Re-derive the maps and remake the
+comparison with
 \begin{verbatim}
-python scripts/tauh_cutflow.py --config config.v1.yml \
-    --delphes-dir /ceph/jpan/gen-delphes \
-    --nano-dir    /ceph/jpan/cms_nanoaod_2024_hh2b2tau \
-    --max-events 20000 --out outputs/validation_v1/tauh_cutflow.md
+python -m delphes_pipeline.tuning.derive_maps --config config.v1.yml \
+    --output cards/tuning/maps_v1.json
+python scripts/tauh_cutflow.py  --config config.v1.yml [...]  # the diagnostic
+python scripts/nsbi_overlay.py  --config config.v1.yml [...] \
+    --tautau-only --diagnostics
 \end{verbatim}
-Unit tests inject a loss at one known stage at a time and assert the cutflow
-attributes it to that stage and no other.
+The cutflow's unit tests inject a loss at one known stage at a time and assert it is
+attributed to that stage and no other; the overlay's tests assert that the same physical
+object is accepted or rejected identically on both sides.
 
 \end{document}
