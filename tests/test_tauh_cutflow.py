@@ -46,17 +46,36 @@ def _met():
     return ak.zip({"met": ak.Array(np.full(_N, 35.0)), "phi": ak.Array(np.full(_N, 1.0))})
 
 
-def _delphes(*, genjets=(_T1, _T2), tau_jets=(_T1, _T2), tautag=(1, 1)):
-    """Delphes view. ``genjets`` = visible τ proxies, ``tau_jets`` = the reco jets."""
+_VIS_FRAC = 0.65        # visible / full gen τ pT; the rest is the ν_τ
+
+
+def _delphes(*, vis_taus=(_T1, _T2), tau_jets=(_T1, _T2), tautag=(1, 1)):
+    """Delphes view.
+
+    ``vis_taus`` gives the VISIBLE gen τ kinematics; the gen record is written as the
+    full τ plus its collinear ν_τ, because that is what a real record contains and what
+    ``obs.gen_visible_taus`` reconstructs (τ − ν). Writing a bare τ would leave stage 1
+    unable to build a visible τ at all.
+    """
     jets = _col(list(tau_jets) + [_B1, _B2],
                 tautag=list(tautag) + [0, 0], btag=[0] * len(tau_jets) + [1, 1],
                 charge=[0] * (len(tau_jets) + 2))
-    # hadronic τ: gen τ with no status-1 e/μ daughter nearby (see obs.gen_taus)
-    gen = ak.zip({"pt": _jag([_T1[0] * 1.4, _T2[0] * 1.4]), "eta": _jag([_T1[1], _T2[1]]),
-                  "phi": _jag([_T1[2], _T2[2]]), "mass": _jag([1.777, 1.777]),
-                  "pid": _jagi([15, -15]), "status": _jagi([2, 2]), "m1": _jagi([-1, -1])})
+    pid, status, m1, pt, eta, phi, mass = [], [], [], [], [], [], []
+    for k, t in enumerate(vis_taus):
+        sign = 1 if k % 2 == 0 else -1
+        full = t[0] / _VIS_FRAC
+        tau_at = len(pid)
+        pid += [15 * sign, 16 * sign]
+        status += [2, 1]
+        m1 += [-1, tau_at]                       # the ν points at its own τ
+        pt += [full, full - t[0]]
+        eta += [t[1], t[1]]
+        phi += [t[2], t[2]]
+        mass += [1.777, 0.0]
+    gen = ak.zip({"pid": _jagi(pid), "status": _jagi(status), "m1": _jagi(m1),
+                  "pt": _jag(pt), "eta": _jag(eta), "phi": _jag(phi), "mass": _jag(mass)})
     empty = ak.zip({k: _jag([]) for k in ("pt", "eta", "phi", "charge")})
-    return SimpleNamespace(jets=jets, gen=gen, genjets=_col(list(genjets)),
+    return SimpleNamespace(jets=jets, gen=gen, genjets=_col(list(vis_taus)),
                            electrons=empty, muons=empty, met=_met())
 
 
@@ -85,7 +104,7 @@ def test_full_efficiency_passes_every_step():
 
 def test_loss_localises_to_the_gen_step():
     """A visible τ below acceptance -> step 1 drops, and it cascades (nothing recovers)."""
-    cf = _cutflow(_delphes(genjets=((5.0, 0.5, 0.0), _T2)), nano=False)
+    cf = _cutflow(_delphes(vis_taus=((5.0, 0.5, 0.0), _T2)), nano=False)
     assert _eff(cf)[0] == 0.0        # step 1 kills it
     cf_n = _cutflow(_nano(genvistau=((5.0, 0.5, 0.0), _T2)), nano=True)
     assert _eff(cf_n)[0] == 0.0
@@ -135,7 +154,7 @@ def test_gen_dr_is_the_separation_of_the_two_visible_gen_taus():
 
 def test_gen_dr_is_nan_when_there_is_no_pair():
     """Fewer than two visible gen τ -> no ΔR to speak of, and it must not be faked."""
-    cf, d = _cutflow(_delphes(genjets=(_T1,)), nano=False, detail=True)
+    cf, d = _cutflow(_delphes(vis_taus=(_T1,)), nano=False, detail=True)
     assert np.isnan(d["gen_dr"]).all()
 
 

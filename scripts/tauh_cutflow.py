@@ -85,12 +85,13 @@ def _cutflow(ev, *, nano, pt_min=20.0, eta_max=2.3, dr=0.4, jet_pt_min=20.0,
         cand_all = _acc(ev.taus, pt_min, eta_max)
         passes_id = lambda c: c[c.vsjet >= ev.deeptau_medium()]
     else:
-        # HADRONIC gen τ only, mirroring NanoAOD's GenVisTau. Counting every gen τ here
-        # inflated the Delphes denominator by ~1/BR(τ_hτ_h): a leptonic τ also produces a
-        # GenJet, so it entered stage 1 and (when its lepton failed isolation) stage 2.
-        taus = obs.gen_taus(ev.gen, hadronic_only=True, dr=dr)
-        gj = _acc(ev.genjets, pt_min, eta_max)
-        vis = gj[matched_to_any(gj, taus, dr)]              # neutrino-filtered = visible
+        # The ν-subtracted hadronic gen τ — the true GenVisTau analogue. A GenJet matched
+        # to a τ is NOT that: it is an R=0.4 cluster carrying the underlying event, ~17%
+        # harder than the visible τ at low pT, so cutting pT>20 on it let ~17% more events
+        # through than the CMS side. Same GenJet-vs-GenVisTau reference error that the τ
+        # energy scale had. Verified against CMS GenVisTau by scripts/gen_tau_check.py:
+        # this construction reproduces CMS's stage-1 rate to ~1%.
+        vis = _acc(obs.gen_visible_taus(ev.gen, dr=dr), pt_min, eta_max)
         cand_all = _acc(ev.jets, pt_min, eta_max)
         passes_id = lambda c: c[c.tautag == 1]
 

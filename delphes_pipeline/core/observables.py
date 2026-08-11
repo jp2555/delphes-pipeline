@@ -203,14 +203,26 @@ def tau_ancestor_index(gen: ak.Array, max_depth: int = 12) -> ak.Array:
 
 
 def gen_taus(gen: ak.Array, *, hadronic_only: bool = False, dr: float = 0.4,
-             veto: str = "descent") -> ak.Array:
+             veto: str = "geometric") -> ak.Array:
     """Gen τ leptons, optionally only those decaying hadronically.
 
     Delphes' gen record carries no decay-mode flag, so a leptonic τ is identified by its
-    own daughter: a status-1 e/μ that *descends from that τ* (``veto="descent"``, exact).
-    ``veto="geometric"`` is the older proximity test — it requires the daughter within
-    ``dr`` of the τ and therefore misses soft or wide-angle ones, wrongly keeping some
-    leptonic τ; it is retained only so the two can be compared.
+    own daughter: a status-1 e/μ descended from a τ and lying within ``dr`` of it
+    (``veto="geometric"``, the default).
+
+    ``veto="descent"`` looks exact — it uses the m1 chain to find *which* τ a lepton came
+    from, so no wide-angle daughter can escape — but it is measurably WORSE, because the
+    gen record holds several copies of each τ and it vetoes only the single copy the
+    lepton's chain points at; the remaining copies survive as fake hadronic τ. Scored
+    against CMS ``GenVisTau`` on 200k anchor events (``scripts/gen_tau_check.py``):
+
+        veto        objects   eff     purity   stage-1 ratio
+        geometric   0.995x    0.991   0.996    0.989
+        descent     1.186x    0.986   0.831    1.460
+
+    The geometric test is accidentally copy-robust — every copy sits at the same η/φ, so
+    all of them are removed together. Keep it; ``descent`` is retained only to reproduce
+    that measurement.
 
     This matters because ``tau_eff`` is measured on the anchor as ``GenVisTau`` →
     DeepTau-Medium ``Tau``, and ``GenVisTau`` is **hadronic-only**. Treating every gen τ
