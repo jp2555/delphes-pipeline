@@ -198,3 +198,45 @@ def test_tau_escale_is_the_cms_over_delphes_response_ratio():
     assert np.allclose(self_anchored, 1.0), "self-anchoring leaves Delphes τ untouched"
     assert np.allclose(cms_anchored, 0.88), "CMS-anchoring softens Delphes τ onto CMS"
     assert (cms_anchored < self_anchored).all(), "the correction must lower the τ energy"
+
+
+# --------------------------------------------------------------------------- #
+# order of application: energy scale BEFORE the tag draws
+# --------------------------------------------------------------------------- #
+def test_tau_eff_is_evaluated_at_the_energy_corrected_pt():
+    """The maps are measured against CMS-scale pT, so they must be APPLIED at a
+    CMS-scale pT. With a steeply rising tau_eff and an escale of 0.5, drawing on the raw
+    jets would use ε(100)=1.0 and tag everything; drawing after the correction uses
+    ε(50)=0.0 and tags nothing."""
+    n = 400
+    jets = ak.zip({
+        "pt": ak.values_astype(ak.Array([[100.0]] * n), np.float64),
+        "eta": ak.values_astype(ak.Array([[0.3]] * n), np.float64),
+        "phi": ak.values_astype(ak.Array([[0.0]] * n), np.float64),
+        "mass": ak.values_astype(ak.Array([[8.0]] * n), np.float64),
+        "tautag": ak.values_astype(ak.Array([[0]] * n), np.float64),
+        "btag": ak.values_astype(ak.Array([[0]] * n), np.float64),
+        "flavor": ak.values_astype(ak.Array([[0]] * n), np.float64),
+    })
+    gen = ak.zip({                       # a hadronic gen τ on the jet
+        "pid": ak.values_astype(ak.Array([[15]] * n), np.int64),
+        "status": ak.values_astype(ak.Array([[2]] * n), np.int64),
+        "m1": ak.values_astype(ak.Array([[-1]] * n), np.int64),
+        "pt": ak.values_astype(ak.Array([[100.0]] * n), np.float64),
+        "eta": ak.values_astype(ak.Array([[0.3]] * n), np.float64),
+        "phi": ak.values_astype(ak.Array([[0.0]] * n), np.float64),
+        "mass": ak.values_astype(ak.Array([[1.777]] * n), np.float64),
+    })
+    ev = SimpleNamespace(jets=jets, gen=gen)
+    step = {"x": "pt", "centers": [50.0, 100.0], "values": [0.0, 1.0], "counts": [10, 10]}
+    flat = lambda v: {"x": "pt", "centers": [50.0, 100.0], "values": [v, v], "counts": [10, 10]}
+    maps = TuningMaps({
+        "tau_eff": step, "tau_mistag": flat(0.0),
+        "bjet_escale": flat(1.0), "tau_escale": flat(0.5),   # halve the τ-jet pT
+        "tau_mass": flat(0.85),
+    })
+    out, fields = retag_jets(ev, maps, np.random.default_rng(0))
+    assert {"escale", "tautag"} <= fields
+    assert ak.to_numpy(out.pt)[0][0] == pytest.approx(50.0)     # escale applied
+    assert not ak.to_numpy(out.tautag).any(), \
+        "tau_eff must be evaluated at the corrected pT (ε=0), not the raw pT (ε=1)"

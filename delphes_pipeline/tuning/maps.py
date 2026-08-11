@@ -143,12 +143,15 @@ class TuningMaps:
         return np.interp(pt, c, v, left=v[0], right=v[-1])  # flat extrapolation
 
 
-def retag_btag(events, maps: TuningMaps, rng: np.random.Generator) -> ak.Array:
+def retag_btag(events, maps: TuningMaps, rng: np.random.Generator, jets=None) -> ak.Array:
     """Stochastic b-tag from ``Jet.Flavor`` + the map: BTag = Bernoulli(ε(flavour, pT)).
 
-    Returns a jagged int array aligned with ``events.jets`` (replaces ``Jet.BTag``).
+    ``jets`` defaults to ``events.jets`` but is taken explicitly by ``retag_jets`` so the
+    efficiency is evaluated on the ENERGY-CORRECTED jets: the map is measured against
+    CMS-scale pT, so it must be applied at a CMS-scale pT too.
+    Returns a jagged int array aligned with ``jets`` (replaces ``Jet.BTag``).
     """
-    jets = events.jets
+    jets = events.jets if jets is None else jets
     counts = ak.num(jets)
     pt = ak.to_numpy(ak.flatten(jets.pt))
     flavour = ak.to_numpy(ak.flatten(jets.flavor))
@@ -163,15 +166,16 @@ def retag_btag(events, maps: TuningMaps, rng: np.random.Generator) -> ak.Array:
     return ak.unflatten(tag, counts)
 
 
-def retag_tautag(events, maps: TuningMaps, rng: np.random.Generator) -> ak.Array:
+def retag_tautag(events, maps: TuningMaps, rng: np.random.Generator, jets=None) -> ak.Array:
     """Stochastic τ_h tag from the gen record + maps (note D2-A): TauTag = Bernoulli(ε),
     ε = ``tau_eff`` for jets matched (ΔR<0.4) to a gen hadronic τ, else ``tau_mistag``.
 
-    Returns a jagged int array aligned with ``events.jets`` (replaces ``Jet.TauTag``).
+    Returns a jagged int array aligned with ``jets`` (replaces ``Jet.TauTag``).
     Mirrors the ``observables.tau_efficiency`` / ``tau_mistag`` genuine-vs-fake split, so
     re-measuring those observables on the re-tagged jets recovers the maps by construction.
+    ``jets`` defaults to ``events.jets``; ``retag_jets`` passes the energy-corrected jets.
     """
-    jets = events.jets
+    jets = events.jets if jets is None else jets
     counts = ak.num(jets)
     # HADRONIC gen τ only: tau_eff is measured on the anchor's GenVisTau (hadronic by
     # construction), so handing a leptonic τ's jet that efficiency instead of the fake
@@ -269,26 +273,32 @@ def tau_visible_mass(jets: ak.Array, maps: TuningMaps, rng: np.random.Generator)
 def retag_jets(events, maps: TuningMaps, rng: np.random.Generator):
     """Apply the downstream tuning-v0 corrections to the jets.
 
-    b-tag (flavour maps) and τ_h (tau_eff+tau_mistag) tags are re-derived; b-jet/τ-jet
-    pT+mass are rescaled by the energy-scale maps; τ-tagged jets then take the anchor
-    τ_h visible mass. Fixed order (btag, tautag, escale, tau_mass) so the same seed
-    yields identical output in the tuning lens and the ntuplizer — tau_mass runs last so
-    it is applied at the corrected pT and is not then rescaled by the energy scale.
+    Fixed order — **energy scale first**, then the tag draws, then the visible mass:
+
+        escale -> btag -> tautag -> tau_mass
+
+    Every map is measured against a CMS-scale quantity, so every map must be *applied* at
+    a CMS-scale pT. Drawing the tags on the raw jets instead evaluates the efficiency at
+    a pT that is ~17% too high at low pT (the underlying event inside the R=0.4 cone),
+    and ``tau_eff`` rises steeply there (0.39 -> 0.52 between 25 and 35 GeV), so soft τ
+    were being over-efficient. ``tau_mass`` stays last so the assigned mass is final and
+    is not then rescaled. The order is fixed so the same seed yields identical output in
+    the tuning lens and the ntuplizer.
     Returns ``(jets, fields)`` with the set of corrections actually applied.
     """
     jets = events.jets
     fields = set()
-    if all(q in maps.maps for q in BTAG_MAP_QUANTITIES):
-        jets = ak.with_field(jets, retag_btag(events, maps, rng), "btag")
-        fields.add("btag")
-    if all(q in maps.maps for q in TAU_MAP_QUANTITIES):
-        jets = ak.with_field(jets, retag_tautag(events, maps, rng), "tautag")
-        fields.add("tautag")
     if all(q in maps.maps for q in ESCALE_MAP_QUANTITIES):
         esc = escale_factor(events, jets, maps)
         jets = ak.with_field(jets, jets.pt * esc, "pt")
         jets = ak.with_field(jets, jets.mass * esc, "mass")
         fields.add("escale")
+    if all(q in maps.maps for q in BTAG_MAP_QUANTITIES):
+        jets = ak.with_field(jets, retag_btag(events, maps, rng, jets), "btag")
+        fields.add("btag")
+    if all(q in maps.maps for q in TAU_MAP_QUANTITIES):
+        jets = ak.with_field(jets, retag_tautag(events, maps, rng, jets), "tautag")
+        fields.add("tautag")
     if "tau_mass" in maps.maps:
         jets = ak.with_field(jets, tau_visible_mass(jets, maps, rng), "mass")
         fields.add("tau_mass")
