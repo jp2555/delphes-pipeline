@@ -173,3 +173,54 @@ def test_tau_without_a_found_neutrino_is_dropped_not_faked():
     })
     assert ak.to_list(ak.num(obs.gen_taus(gen, hadronic_only=True)))[0] == 1
     assert ak.to_list(ak.num(obs.gen_visible_taus(gen)))[0] == 0
+
+
+# --------------------------------------------------------------------------- #
+# descent beats proximity: a wide-angle daughter must not escape the veto
+# --------------------------------------------------------------------------- #
+def _gen_wide_leptonic(sep=0.9):
+    """A hadronic τ (+ν) and a leptonic τ whose muon is ``sep`` away in eta."""
+    return ak.zip({
+        #      0: had τ  1: its ν  2: lep τ  3: its ν  4: the μ, far from its parent
+        "pid":    _i([15, 16, -15, -16, -13]),
+        "status": _i([2, 1, 2, 1, 1]),
+        "m1":     _i([-1, 0, -1, 2, 2]),
+        "pt":     _f([100.0, 35.0, 90.0, 30.0, 40.0]),
+        "eta":    _f([0.5, 0.5, -1.0, -1.0, -1.0 + sep]),
+        "phi":    _f([0.0, 0.0, 2.0, 2.0, 2.0]),
+        "mass":   _f([1.777, 0.0, 1.777, 0.0, 0.105]),
+    })
+
+
+def test_descent_veto_catches_a_wide_angle_leptonic_tau():
+    """The decisive case: the μ is 0.9 away, so a ΔR<0.4 proximity veto misses it and
+    the leptonic τ is wrongly counted as hadronic. Descent cannot miss it."""
+    gen = _gen_wide_leptonic(0.9)
+    geo = obs.gen_taus(gen, hadronic_only=True, veto="geometric")
+    des = obs.gen_taus(gen, hadronic_only=True, veto="descent")
+    assert ak.to_list(ak.num(geo))[0] == 2, "proximity veto misses it (the bug)"
+    assert ak.to_list(ak.num(des))[0] == 1, "descent veto catches it (the fix)"
+
+
+def test_both_vetoes_agree_when_the_daughter_is_collinear():
+    gen = _gen_wide_leptonic(0.05)
+    for v in ("geometric", "descent"):
+        assert ak.to_list(ak.num(obs.gen_taus(gen, hadronic_only=True, veto=v)))[0] == 1
+
+
+def test_tau_ancestor_index_points_at_the_right_tau():
+    gen = _gen_wide_leptonic(0.9)
+    anc = ak.to_numpy(obs.tau_ancestor_index(gen))[0]
+    assert anc[4] == 2, "the μ descends from the τ at index 2"
+    assert anc[1] == 0, "the ν_τ descends from the τ at index 0"
+    assert anc[0] == -1 and anc[2] == -1, "the τ themselves descend from no τ"
+
+
+def test_visible_taus_use_the_descent_veto_by_default():
+    gen = _gen_wide_leptonic(0.9)
+    assert ak.to_list(ak.num(obs.gen_visible_taus(gen)))[0] == 1
+
+
+def test_unknown_veto_is_rejected():
+    with pytest.raises(ValueError, match="descent.*geometric"):
+        obs.gen_taus(_gen_wide_leptonic(), hadronic_only=True, veto="bogus")

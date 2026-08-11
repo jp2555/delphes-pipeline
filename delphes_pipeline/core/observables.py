@@ -183,12 +183,34 @@ def prompt_mother_match(gen: ak.Array, prompt_pids=_PROMPT_MOTHER_PIDS, max_dept
     return match
 
 
-def gen_taus(gen: ak.Array, *, hadronic_only: bool = False, dr: float = 0.4) -> ak.Array:
+def tau_ancestor_index(gen: ak.Array, max_depth: int = 12) -> ak.Array:
+    """Per-entry index of the τ each particle descends from (-1 if it descends from none).
+
+    Walks ``m1`` upward and stops at the first τ. Unlike a ΔR proximity test this is
+    exact: a τ→ℓνν daughter is identified by *descent*, so a soft or wide-angle lepton
+    cannot escape the classification.
+    """
+    n = ak.num(gen)
+    cur = gen.m1
+    found = ak.zeros_like(gen.m1) - 1
+    for _ in range(max_depth):
+        valid = (cur >= 0) & (cur < n)
+        safe = ak.where(valid, cur, 0)
+        is_tau = valid & (np.abs(gen.pid[safe]) == _GEN_TAU_PID)
+        found = ak.where((found < 0) & is_tau, cur, found)
+        cur = ak.where(valid & ~is_tau, gen.m1[safe], -1)   # stop once a τ is found
+    return found
+
+
+def gen_taus(gen: ak.Array, *, hadronic_only: bool = False, dr: float = 0.4,
+             veto: str = "descent") -> ak.Array:
     """Gen τ leptons, optionally only those decaying hadronically.
 
-    Delphes' gen record carries no decay-mode flag, so a leptonic τ is identified by
-    its own daughter: a status-1 e/μ whose first non-self-copy ancestor is a τ, lying
-    within ``dr`` of the τ (the τ is boosted, so its daughter is collinear).
+    Delphes' gen record carries no decay-mode flag, so a leptonic τ is identified by its
+    own daughter: a status-1 e/μ that *descends from that τ* (``veto="descent"``, exact).
+    ``veto="geometric"`` is the older proximity test — it requires the daughter within
+    ``dr`` of the τ and therefore misses soft or wide-angle ones, wrongly keeping some
+    leptonic τ; it is retained only so the two can be compared.
 
     This matters because ``tau_eff`` is measured on the anchor as ``GenVisTau`` →
     DeepTau-Medium ``Tau``, and ``GenVisTau`` is **hadronic-only**. Treating every gen τ
@@ -200,12 +222,23 @@ def gen_taus(gen: ak.Array, *, hadronic_only: bool = False, dr: float = 0.4) -> 
     if not hadronic_only:
         return taus
     is_lep = ((np.abs(gen.pid) == 11) | (np.abs(gen.pid) == 13)) & (gen.status == 1)
-    # prompt_mother_match walks the m1 chain, so it must run on the FULL gen array
-    from_tau = gen[is_lep & prompt_mother_match(gen, (_GEN_TAU_PID,))]
-    return taus[~matched_to_any(taus, from_tau, dr)]
+    if veto == "geometric":
+        # legacy: veto a τ with a τ-descended lepton within dr. Misses soft/wide-angle
+        # daughters, so some leptonic τ are wrongly kept — kept only for comparison.
+        from_tau = gen[is_lep & prompt_mother_match(gen, (_GEN_TAU_PID,))]
+        return taus[~matched_to_any(taus, from_tau, dr)]
+    if veto != "descent":
+        raise ValueError(f"veto must be 'descent' or 'geometric' (got {veto!r})")
+    # exact: a τ is leptonic iff some status-1 e/μ descends from *that* τ
+    anc = tau_ancestor_index(gen)
+    lep_anc = anc[is_lep & (anc >= 0)]
+    tau_idx = ak.local_index(gen)[np.abs(gen.pid) == _GEN_TAU_PID]
+    pairs = ak.cartesian({"i": tau_idx, "a": lep_anc}, nested=True)
+    is_leptonic = ak.fill_none(ak.any(pairs["i"] == pairs["a"], axis=-1), False)
+    return taus[~is_leptonic]
 
 
-def gen_visible_taus(gen: ak.Array, *, dr: float = 0.4) -> ak.Array:
+def gen_visible_taus(gen: ak.Array, *, dr: float = 0.4, veto: str = "descent") -> ak.Array:
     """Visible hadronic gen τ — the Delphes analogue of NanoAOD's ``GenVisTau``.
 
     A hadronic τ decay has exactly ONE neutrino, so the visible four-vector is simply
@@ -216,7 +249,7 @@ def gen_visible_taus(gen: ak.Array, *, dr: float = 0.4) -> ak.Array:
     card), so profiling against it leaves the Delphes τ ~10% harder than a CMS ``Tau``
     profiled against ``GenVisTau`` — which inflates m_vis and hence m_ττ.
     """
-    taus = gen_taus(gen, hadronic_only=True, dr=dr)
+    taus = gen_taus(gen, hadronic_only=True, dr=dr, veto=veto)
     is_nu = (np.abs(gen.pid) == 16) & (gen.status == 1)
     nu = gen[is_nu & prompt_mother_match(gen, (_GEN_TAU_PID,))]
     matched, v = nearest_target_fields(taus, nu, dr, ("pt", "eta", "phi"))
