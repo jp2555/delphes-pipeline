@@ -37,8 +37,10 @@ measurement, and all of it sits in the \emph{gen-matched} population. Since the
 energy-scale map is a per-$p_{T}$ \emph{median} ratio, it can align the peak but cannot
 reshape a response distribution --- so the residual may lie outside what the correction
 approach can reach at all. That would turn the open decision (Section~\ref{sec:decision})
-from a question of elegance into one of feasibility. One measurement settles it, and it
-has not been run yet.
+from a question of elegance into one of feasibility. The response distribution has now
+been measured and does show the predicted one-sided tail, with a $p_{T}$ dependence
+characteristic of underlying event inside the $R=0.4$ cone --- but one control remains
+outstanding before the conclusion is clean (Section~\ref{sec:response}).
 \end{abstract}
 
 \section{Status}
@@ -159,12 +161,37 @@ the peak into place and still be left with entries in a kinematically forbidden 
 because a scale factor cannot depopulate one. If that is what is happening, it is a hard
 floor on the correction approach rather than a defect in its implementation.
 
-\paragraph{The measurement that settles it (not yet run).} Plot the $\tau$ energy response
---- reco $\tau$ $p_{T}$ over gen-visible-$\tau$ $p_{T}$ --- as a \emph{distribution} on
-both sides rather than as a per-bin median. A longer Delphes high tail at matched median
-confirms the paragraph above and makes the case for rebuilding. Agreeing shapes would
-instead indict the derivation, with selection bias the prime suspect, since the response is
-measured only on $\tau$ that were both reconstructed \emph{and} passed ID.
+\paragraph{The response distribution: measured.}
+\label{sec:response}
+Plotting the $\tau$ energy response --- reco $\tau$ $p_{T}$ over gen-visible-$\tau$ $p_{T}$
+--- as a \emph{distribution} rather than a per-bin median, with each side divided by its
+\emph{own} median so that the scale difference is removed by construction, leaves only what
+the map cannot change. Delphes carries a one-sided shelf above $1.5\times$ its median that
+CMS does not have: roughly $6\%$ of Delphes $\tau$ lie there against essentially none on
+CMS. The excess is strongly $p_{T}$-dependent --- a flat shelf out to $3\times$ the median
+at gen $p_{T}=20$--$30\,\si{\GeV}$, shrinking through $30$--$50$ and $50$--$100$, and
+\emph{consistent with CMS} by $100$--$300\,\si{\GeV}$. That is the signature expected of
+underlying event collected inside an $R=0.4$ cone: an approximately constant absolute
+contribution, which matters as a \emph{fraction} only at low $p_{T}$. The raw response
+agrees, peaking at $1.1$--$1.15$ at low $p_{T}$ and converging on CMS by
+$100\,\si{\GeV}$. (CMS shows a \emph{low}-side tail that Delphes lacks --- HPS losing
+neutrals --- which is the opposite direction and secondary here.)
+
+\paragraph{The control still outstanding.} That run required no $\tau$ ID on either side,
+and in that configuration the two are not symmetric: Delphes matches each gen $\tau$ to the
+nearest jet of \emph{any} kind, so a $\tau$ whose own $\tau$-jet was lost can match a
+nearby $b$-jet and yield a spurious response, whereas CMS matches within the \texttt{Tau}
+collection and cannot pick up a $b$-jet at all. Part of the shelf may therefore be
+mis-matching, and unhelpfully mis-matching predicts the \emph{same} $p_{T}$ dependence,
+since soft $\tau$-jets are more often lost. Repeating with the $\tau$ ID required on both
+sides (\texttt{--require-id}) separates them: if the shelf survives it is cone
+contamination and the argument of Section~\ref{sec:decision} holds; if it largely
+disappears the escale is being derived on a contaminated population and the repair is in
+the derivation, not the representation. Note that even a surviving shelf retains a
+selection component --- Delphes' \texttt{TauTag} is a stochastic draw uncorrelated with
+contamination, while DeepTau actively rejects contaminated candidates --- but that
+component is equally unreachable by a scale map, so it falls on the same side of the
+decision.
 
 \paragraph{What has been excluded.} \emph{(i) The sampled $\tauh$ mass.} The FastMTT floor
 $x_{\min}=(\mvis^{\rm leg}/\mtau)^{2}$ exceeds a typical fitted $x\simeq0.5$--$0.9$ only
@@ -218,11 +245,15 @@ limitation instead of documenting one. On cost, the implementation is contained 
 \emph{not} on the critical path --- running the full $5\times10^{5}$-event samples through
 the ladder and training the NSBI is the multi-day item.
 
-The decisive argument, \emph{if} the response measurement of Section~\ref{sec:mtautau}
-confirms it, is stronger than elegance: a multiplicative per-$p_{T}$ median cannot
-depopulate a kinematically forbidden region, so no refinement of the current maps would
-close the gap. That is the one argument here a referee could not answer with ``tune it
-better''.
+The decisive argument is stronger than elegance: a multiplicative per-$p_{T}$ median
+cannot depopulate a kinematically forbidden region, so if the Delphes response is
+one-sidedly broader then no refinement of the current maps closes the gap. That is the one
+argument here a referee could not answer with ``tune it better''. The response measurement
+of Section~\ref{sec:response} \emph{does} show such a tail, with the $p_{T}$ dependence of
+cone contamination --- but pending the \texttt{--require-id} control it is not yet possible
+to say how much of it is contamination and how much is mis-matching in the derivation. The
+case is materially stronger than at the previous version, and one cheap run from being
+settled.
 
 \paragraph{What does \emph{not} argue for it.} Rebuilding is sometimes said to retire
 three corrections at once --- the visible-mass map, the energy scale and the visible-$\tau$
@@ -305,6 +336,16 @@ properties the reading depends on ($\mvis\le\mtautau$ always; invariant under a
 $40\rightarrow200\,\si{\GeV}$ $\ptmiss$ change; exactly linear in the $\tau$ energy scale).
 The split normalises both components to the side's \emph{total}, so the area under the fake
 curve is the fake fraction. Results in Section~\ref{sec:mtautau}.
+
+\item \textbf{$\tau$ energy response shape} (\texttt{tau\_response.py}). The response as
+a distribution, per gen-$p_{T}$ bin, with a lower row in which each side is divided by its
+own median --- so the upper row shows what \texttt{tau\_escale} is built to remove and the
+lower row shows what it cannot. Unit tests assert exactly that separation: a pure scale
+difference vanishes under median normalisation, while an injected one-sided tail survives
+it. Two flags expose an asymmetry in the shipped derivation --- the anchor gates its
+acceptance on the \emph{gen} visible $\tau$ while the Delphes side gates on the \emph{reco}
+jet (\texttt{--gate}), and the anchor always conditions on DeepTau while the Delphes side
+conditions on nothing (\texttt{--require-id}). Result in Section~\ref{sec:response}.
 
 \item \textbf{Map accuracy audit.} No map is statistics-limited at the configured
 $2\times10^{5}$ anchor events: $b$-tag $0.25$--$0.42\%$ per bin, $\tauh$ efficiency
