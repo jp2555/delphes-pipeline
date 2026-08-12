@@ -1,0 +1,107 @@
+# tt̄ tuning config — the BACKGROUND counterpart of config.v1.yml.
+#
+# Every map in maps_v1.json is derived on the HH signal, on BOTH sides (CMS HH NanoAOD
+# anchor, kl=1 HH Delphes). Until this config existed, tt̄ was only a level-1 closure
+# candle and received the signal maps wholesale. For NSBI that is the wrong way round:
+# the likelihood ratio is p(x|S)/p(x|B), so the background defines the denominator over
+# the whole feature space.
+#
+# Run:
+#   0. derive tt̄ maps : pixi run python -m delphes_pipeline.tuning.derive_maps \
+#                          --config config.ttbar.yml --output cards/tuning/maps_ttbar_v1.json \
+#                          --max-events 200000
+#   1. how different?  : pixi run python scripts/compare_maps.py \
+#                          cards/tuning/maps_v1.json cards/tuning/maps_ttbar_v1.json \
+#                          --labels signal ttbar --out plots/maps_compare
+#   2. validation gate : pixi run python -m delphes_pipeline.validation.run_validation \
+#                          --config config.ttbar.yml --output-dir outputs/validation_ttbar
+#   3. ntuplize tt̄ with ITS OWN maps (--tuning-maps overrides the config):
+#        python -m delphes_pipeline.ntuplizer.convert <ttbar.root> ttbar.parquet \
+#            --tuning-maps cards/tuning/maps_ttbar_v1.json
+#
+# TTto2L2Nu is the primary: it carries prompt leptons, real tau from W->tau nu, and
+# genuine MET, so it exercises every map the signal config does. The other two channels
+# are complementary rather than redundant -- TTto4Q has no prompt tau at all, which makes
+# it the right sample for tau_mistag (a pure fake-rate measurement); see the note.
+
+input:
+  delphes_root: /ceph/jpan/gen-delphes/*TTto2L2Nu*Delphes_v1
+  treename: Delphes
+  max_events: 200000
+
+# MUST match the card the samples were produced with (level-0 closure dispatches on it).
+card: cards/cms_card_v1.tcl
+
+references:
+  dir: delphes_pipeline/validation/references/data
+
+# The CMS tt̄ anchor. Same directory as the signal NanoAOD despite its bbtautau name.
+anchor:
+  enabled: true
+  nanoaod_path: /ceph/jpan/cms_nanoaod_2024_hh2b2tau/TTto2L2Nu*NanoAODv15-150X*
+  max_events: 200000
+  wp:
+    btag_medium: null
+    btag_correctionlib:
+      json: /cvmfs/cms.cern.ch/rsync/cms-nanoAOD/jsonpog-integration/POG/BTV/2024_Summer24/btagging.json.gz
+      tagger: UParT
+      wp: M
+    deeptau_vsjet_medium: 5
+  branches:
+    jet: { btag_disc: Jet_btagUParTAK4B }
+    tau: { vsjet: Tau_idDeepTau2018v2p5VSjet }
+
+tuning_maps: cards/tuning/maps_ttbar_v1.json
+
+output:
+  dir: outputs/validation_ttbar
+
+# The level-1 candle IS this sample, so it becomes an in-situ closure on the tuned tt̄.
+candles:
+  ttbar: /ceph/jpan/gen-delphes/*TTto2L2Nu*Delphes_v1
+  max_events: 200000
+
+levels:
+  pilot_gate: { enabled: true }
+  level0:
+    enabled: true
+    pt_bins:  [20, 30, 40, 50, 70, 100, 150, 200, 300]
+    eta_bins: [0.0, 0.8, 1.5, 2.4]
+    sumet_bins: [0, 100, 200, 300, 500, 800, 1200]
+    min_bin_count: 25
+  ntuplizer:
+    enabled: true
+    max_events: 2000
+  level1: { enabled: true }
+  level2: { enabled: false }
+  level3: { enabled: false }
+  # level4 is the kappa_lambda m_HH faithfulness check on the SIGNAL. There is no
+  # trilinear coupling in tt̄, so it is not merely uninformative here but meaningless.
+  level4: { enabled: false }
+
+tolerances:
+  pilot_gate:
+    neg_weight_fraction_max: 0.30
+    min_gen_taus: 0          # tt̄ -> 2L2Nu has few prompt tau; the signal floor of 1 would fire
+    mbb_width_max_gev: 30.0
+    mbb_core_fraction_min: 0.30
+    met_resolution_max_gev: 60.0   # tt̄ carries genuine MET from two neutrinos
+    kb_per_event_max: 150.0
+  level1:
+    eb_closure_rel_tol: 0.10
+    mtautau_peak_tol_gev: 10.0
+    mtautau_met_sigma_gev: 25.0
+  level0:
+    closure_rel_tol: 0.05
+    closure_nsigma: 2.0
+    max_failing_bin_fraction: 0.20
+    met_resolution_max_gev: 60.0
+    closure_severity:
+      tau_mistag: warn
+      electron_eff: warn
+      muon_eff: warn
+      btag_eff_c: warn
+    closure_severity_v1:
+      tau_mistag: warn
+      electron_eff: warn
+      muon_eff: warn
