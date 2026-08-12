@@ -86,7 +86,122 @@ $\dR_{\tau\tau}$ (excess at $2.2$--$3.2$) \\
 cutflow $1.01$, analysis-level $1.18\times$.\label{tab:features}}
 \end{table}
 
-\paragraph{Known limitations.} In three buckets, because ``known'' was covering
+\section{The decision}
+\label{sec:decision}
+
+A CMS $\tauh$ is an HPS object built from a narrow set of decay products; a Delphes $\tauh$
+is an $R=0.4$ jet carrying \texttt{TauTag}. Mass, energy and direction are therefore wrong
+at source and we correct the first two rather than fix the representation.
+Section~\ref{sec:mtautau} shows the correction cannot succeed as built: a multiplicative
+per-$p_{T}$ median cannot depopulate a kinematically forbidden region, and the Delphes
+response is one-sidedly broader at matched median by $3\times$ at low $p_{T}$. That is
+narrower than ``only rebuilding works'' --- hence three options, not two.
+
+The three options have now been costed and their accuracy quantified: throughput and
+storage by benchmark, the accuracy axis by a toy that propagates the \emph{measured}
+response quantiles (Table~\ref{tab:response}) into $\mtautau$ for $H(125)$, $Z(91)$ and a
+$t\bar t$ continuum. Scale context: the full campaign is $\sim$300M events (3$\times$5M
+signal, 3$\times$50M $t\bar t$, $\sim$100M DY), and the fake-$\tauh$ population inverts
+there --- in the signal selection fakes are 4\% and demonstrably irrelevant, but in
+\texttt{TTto4Q} every selected $\tauh$ is a fake by construction, and fakes currently keep
+their raw jet $p_{T}$.
+
+\begin{table}[htbp]
+\centering\small
+\begin{tabular}{lccc}
+\toprule
+ & (A) HPS rebuild & (B) response resampling & (C) accept \\
+\midrule
+dev time & 3--5 weeks & $\sim$1 day ($+$1--2 fake map) & 0 \\
+extra CPU / I/O / storage at 300M & $\sim$0 / $+$13\% / 0 & $+$0.02\% / 0 / 0 & 0 \\
+$\mtautau$ fidelity vs CMS (real $\tau$) & $\sim$96\% (assumed) & \textbf{100\% by construction} & 90\% (84--92) \\
+fake-$\tauh$ energies & fixed by construction & fixed by the fake-map extension & broken, no recovery \\
+$\tau$ \emph{direction} & \textbf{only option that touches it} & unchanged & unchanged \\
+\bottomrule
+\end{tabular}
+\caption{The three options at the 300M-event production scale. Fidelity = fraction of the
+CMS $\mtautau$ S/B sensitivity reproduced (1D Fisher bound; see text).\label{tab:options}}
+\end{table}
+
+\paragraph{(A) Rebuild the $\tauh$ from particle flow.} The samples retain the EFlow
+candidates (32\,TB), so A needs no re-production; the cone kernel benchmarks 5--20$\times$
+above the pipeline wall and the added read volume is $\sim$13\%, so A's cost is purely
+3--5 weeks of development and 10--25 tuning iterations (cone size, strip merging,
+$\pi^{0}$ threshold). Its risks are now itemised: 60--70\% likelihood that tower-granular
+neutrals ($0.017\times0.017$, but with smeared centres) make the rebuilt \emph{mass} no
+better than the sampled one, and 50--60\% that a residual energy-scale map returns anyway
+(a narrow cone removes contamination, but Delphes calorimeter thresholds still differ from
+CMS PF). Its unique, B-inaccessible deliverable is the $\tau$ \emph{direction} --- the one
+lever on $\dR_{\tau\tau}$, which no energy correction reaches.
+
+\paragraph{(B) Correct the distribution, not the scale.} For each gen-matched $\tau$-jet
+set $p_{T}^{\rm reco}=p_{T}^{\rm gen}\times r$ with $r$ drawn from the CMS response
+quantiles --- the machinery already used for the visible mass. By construction the
+gen-matched response then \emph{is} the CMS response: 100\% fidelity, exactly. The
+measured marginal cost is 0.02\% of pipeline CPU. Three extensions close its gaps:
+a \emph{fake-response map} (CMS fake response measured on the $t\bar t$ anchor already on
+disk: gen-unmatched \texttt{Tau} vs matched \texttt{GenJet}) recovers the fake-energy
+mismodeling in full; \emph{vectorial MET propagation} (subtract the old $\tau$ vectors,
+add the new) closes the balance objection; and one \emph{transfer check} of the CMS
+response quantiles between the HH and $t\bar t$ anchors (medians within 1\%, quantile
+ratios within 5\%) validates using one map across processes --- if DY is doubted, a 200k-event
+DY anchor is a $\sim$2--3\,GB download. What B leaves untouched: the $\tau$ direction,
+decay mode, and charge.
+
+\paragraph{(C) Accept and document --- now excluded by measurement.} With medians
+perfectly aligned, the residual \emph{shape} alone widens $H$ by 21\% and $Z$ by 33\%,
+drops the $H$-vs-$Z$ AUC from 0.976 to 0.905, and multiplies $Z\rightarrow\tau\tau$
+leakage into the $H$ window \textbf{by 5.2} (2.5\%$\rightarrow$13.3\%). A 1D Fisher fit
+puts C at 90\% (84--92) of the CMS $\mtautau$ sensitivity. The DY leakage would be visible
+in the paper's own $\mtautau$ figure --- a reviewer problem independent of the $\kl$
+number.
+
+\paragraph{Reading the fidelity numbers.} They are 1D bounds on the $\mtautau$-mediated
+share of the $\kl$ error, not the $\kl$ error itself ($\kl$ information lives mostly in
+$m_{HH}$, identical across options). Two further caveats: the response's \emph{lower} half
+is unmeasured (all scenarios share a mirrored CMS-like lower tail), and A's 96\% assumes a
+30\% core widening from tower granularity --- a labelled guess. The fake near-cancellation
+in the 1D fit (0.5--1.7\%) is toy-specific; a 10-feature NSBI sees the full $+16$\,GeV /
+20\%-width fake-shape mismodeling (13\% of the dominant background's shape
+non-overlapping), which is why the fake map is not optional for B.
+
+\paragraph{Cost is not the axis.} The full 300M-event ntuplization is $\sim$185 core-hours
+flat, and $\sim$50 with the (verified bit-identical) restricted-ancestry walk; DY events
+are $\sim$10$\times$ lighter still. Storage: the ntuplizer currently writes the full gen
+record --- 99.5\% of a 9\,TB output; pruning to $\tau$ ancestry $+$ bosons cuts it to
+$\sim$0.4\,TB. Both worth doing under any option. The real trade is \emph{weeks of
+development and tuning judgement (A) versus a day (B)}, against the accuracy column above.
+
+\paragraph{Recommendation.} \textbf{B$+$ now} (resampling, fake map, MET propagation,
+anchor transfer check): $<$1\% $\mtautau$ fidelity error for the whole campaign, this
+month. \textbf{Not C.} \textbf{Gate A on the one thing only it can fix}: measure the
+$\tau$ \emph{axis} residual (jet axis vs gen-visible-$\tau$ axis, both tiers --- the same
+probe pattern as the response study, angle instead of energy; a few hours on existing
+files). If Delphes' axis residual is large where CMS's is small, A has a unique
+quantified justification for $\dR_{\tau\tau}$ and the weeks become defensible; if not,
+B$+$ closes the case. Keep the 32\,TB of EFlow until that measurement is done.
+
+\paragraph{Questions for $\tau$ expertise.}
+\begin{enumerate}\itemsep0pt
+\item Is tower-granular neutral reconstruction adequate for a useful decay-mode assignment,
+or does it degrade $\pi^{0}$ content enough that the rebuilt mass is no better than the
+anchor-sampled one?
+\item Signal cone: fixed $0.1$ or $p_{T}$-dependent, over the $20$--$60\,\si{\GeV}$ range
+that dominates here?
+\item Seeding: jets (as HPS) or direct PF clustering? Would either change the efficiency
+for collimated pairs, $\dR_{\tau\tau}\lesssim1$?
+\item Is the $\dR_{\tau\tau}$ pattern --- over-efficient above $2.5$, possibly
+under-efficient below $1$ --- recognisable as a jet-versus-HPS effect?
+\item Is option (B) acceptable in a pheno paper, or does resampling a reconstructed
+quantity undercut the claim?
+\item Is a $1.18\times$ analysis-level yield excess acceptable for unbinned NSBI, where
+training uses shapes and normalisation is fitted?
+\end{enumerate}
+
+\section{Known limitations}
+\label{sec:limits}
+
+In four buckets, because ``known'' was covering
 different things.
 
 \emph{Accepted by design.} FastMTT is covariance-free (a fixed $\ptmiss$ resolution rather
@@ -137,74 +252,6 @@ correction is small and slowly varying where the extrapolation begins.
 \end{itemize}
 What would change this is a boosted or high-$m_{HH}$ category, where the extrapolated region
 stops being a $3\%$ tail and becomes the signal region.
-
-\section{The decision}
-\label{sec:decision}
-
-A CMS $\tauh$ is an HPS object built from a narrow set of decay products; a Delphes $\tauh$
-is an $R=0.4$ jet carrying \texttt{TauTag}. Mass, energy and direction are therefore wrong
-at source and we correct the first two rather than fix the representation.
-Section~\ref{sec:mtautau} shows the correction cannot succeed as built: a multiplicative
-per-$p_{T}$ median cannot depopulate a kinematically forbidden region, and the Delphes
-response is one-sidedly broader at matched median by $3\times$ at low $p_{T}$. That is
-narrower than ``only rebuilding works'' --- hence three options, not two.
-
-\paragraph{(A) Rebuild the $\tauh$ from particle flow.} The card already writes the three
-\texttt{EFlow} collections, per its header, precisely for ``$\tau$ redefinition''. HPS-like:
-seed from a jet, collect charged hadrons and photons in a narrow signal cone (fixed
-$\dR\simeq0.1$ or $p_{T}$-dependent $3.0/p_{T}$ bounded at $0.05$--$0.1$), form the standard
-decay-mode hypotheses, sum signal-cone constituents, isolation annulus as a fake handle.
-Mass, energy and direction become correct \emph{by construction}; for a pheno paper this
-removes a fast-simulation limitation instead of documenting one. Weeks, but \emph{not} on
-the critical path --- the multi-day item is running the full $5\times10^{5}$-event samples
-and training the NSBI.
-
-\emph{Against:} it cannot reproduce DeepTau, so the ID and fake-rate maps remain (they
-work). It is not obviously the cure for $\dR_{\tau\tau}$ --- CMS HPS also seeds from AK4
-jets, so merging scales are similar. \emph{The caveat we most want checked:} Delphes neutral
-PF candidates are \emph{calorimeter towers} ($\sim0.02\times0.02$ barrel), not clustered PF
-objects. Since $\pi^{0}$ content sets both the visible mass and the decay mode, an HPS-like
-reconstruction here would be approximate in exactly the place that matters --- possibly no
-better than the anchor-sampled mass already in use.
-
-\paragraph{(B) Correct the distribution, not the scale.} What is forbidden is a
-multiplicative \emph{median} map, not every downstream correction. For each gen-matched
-$\tau$-jet set $p_{T}^{\rm reco}=p_{T}^{\rm gen}\times r$ with $r$ \emph{drawn} from the
-anchor's response quantiles --- the machinery already used for the visible mass, applied to
-the energy. Reproduces the CMS response distribution including its tail. About a day.
-\emph{Against:} only covers the $\sim$96\% gen-matched (fakes have no gen $\tau$); $\ptmiss$
-is built from reco objects, so resampling afterwards breaks the balance (we already smear
-$\ptmiss$ independently, so a difference of degree, but it compounds); the $\tau$ energy
-becomes partly synthetic, which for an unbinned NSBI result resting on realistic simulation
-is defensible but weaker than a rebuild; and it does nothing for $\dR_{\tau\tau}$, decay
-mode or charge.
-
-\paragraph{(C) Accept it and document.} Eight of ten features and the yield already agree.
-The $\mtautau$ residual is $\sim$7\,\si{\GeV} on $\sim$100, and NSBI trains on shapes with
-a fitted normalisation.
-
-\paragraph{What does \emph{not} decide it.} Rebuilding is sometimes said to retire three
-corrections --- visible mass, energy scale, visible-$\tau$ reference. Badly weighted: the
-mass map's residual imperfection is worth $0.11\%$ on $\langle\mtautau\rangle$, so retiring
-it buys almost nothing, and the visible-$\tau$ reference is a derivation-side
-simplification. One of the three matters, and it is the energy scale.
-
-\paragraph{Questions for $\tau$ expertise.}
-\begin{enumerate}\itemsep0pt
-\item Is tower-granular neutral reconstruction adequate for a useful decay-mode assignment,
-or does it degrade $\pi^{0}$ content enough that the rebuilt mass is no better than the
-anchor-sampled one?
-\item Signal cone: fixed $0.1$ or $p_{T}$-dependent, over the $20$--$60\,\si{\GeV}$ range
-that dominates here?
-\item Seeding: jets (as HPS) or direct PF clustering? Would either change the efficiency
-for collimated pairs, $\dR_{\tau\tau}\lesssim1$?
-\item Is the $\dR_{\tau\tau}$ pattern --- over-efficient above $2.5$, possibly
-under-efficient below $1$ --- recognisable as a jet-versus-HPS effect?
-\item Is option (B) acceptable in a pheno paper, or does resampling a reconstructed
-quantity undercut the claim?
-\item Is a $1.18\times$ analysis-level yield excess acceptable for unbinned NSBI, where
-training uses shapes and normalisation is fitted?
-\end{enumerate}
 
 \section{The two open questions}
 \label{sec:open}
@@ -341,6 +388,13 @@ $0.16$--$0.21\%$); what limits a map is $np$, not $n$. Two defects do not improv
 statistics: the mass quantile grid interpolates across the empty region between the
 $\pi^{\pm}$ atom and the $\rho$ shoulder ($\sim6\times$ over-populated, measured inert), and
 the $300\,\si{\GeV}$ flat extrapolation (untested).
+\item \textbf{Option tradeoff analysis.} Costs by benchmark (resampling marginal cost,
+HPS cone kernel, restricted-ancestry walk --- the last verified bit-identical against the
+current \texttt{gen\_taus} on records with copy chains); accuracy by a common-random-number
+toy propagating the measured response quantiles into $\mtautau$ for $H$/$Z$/$t\bar t$
+(AUC, overlap, 1D Fisher), every headline number re-derived by an independent check.
+Result in Section~\ref{sec:decision}.
+
 \item \textbf{Generator copies.} Delphes writes the full Pythia history, CMS
 \texttt{GenPart} is pruned. Rule: anything that \textbf{counts} generator objects must
 collapse copies first; anything that \textbf{matches} geometrically need not.
