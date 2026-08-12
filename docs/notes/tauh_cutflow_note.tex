@@ -86,6 +86,58 @@ $\dR_{\tau\tau}$ (excess at $2.2$--$3.2$) \\
 cutflow $1.01$, analysis-level $1.18\times$.\label{tab:features}}
 \end{table}
 
+\paragraph{Known limitations.} In three buckets, because ``known'' was covering
+different things.
+
+\emph{Accepted by design.} FastMTT is covariance-free (a fixed $\ptmiss$ resolution rather
+than the per-event covariance), but is run identically on both sides, so it cancels in the
+comparison and bounds the absolute $\mtautau$ resolution rather than the agreement. The card
+runs without pileup, so jet energy \emph{resolution} is untuned and pileup jets cannot
+exist; both act on the $b\bar b$ side, which agrees, and the second cannot be fixed
+downstream in any case. $\ptmiss$ smearing is isotropic and flat where the real resolution
+is anisotropic and grows with $\Sigma E_{T}$: this reproduces the width but not its
+structure, and it remains a candidate for $\mtautau$ being marginally \emph{broader} on
+Delphes --- Section~\ref{sec:mtautau} exonerates $\ptmiss$ for the \emph{offset}, not for
+the width.
+
+\emph{A scope bound, not a defect.} \texttt{tau\_mistag} is measured on the $b$-rich signal
+anchor, and fake rates are strongly jet-flavour dependent, so it is \emph{not} valid for the
+fake-dominated backgrounds (QCD, W+jets). This does not limit the present signal study, but
+the samples cannot support a background-heavy analysis until those are measured separately.
+
+\emph{Real defects, not yet fixed.} Two in the energy-scale \emph{application}: fake $\tauh$
+match neither branch of \texttt{escale\_factor} and are left uncorrected while still
+receiving a $\tau$-like mass, and the $\tau$ branch matches \emph{all} gen $\tau$
+(\texttt{|pid|==15}) including leptonically decaying ones, whereas the map is derived on the
+hadronic visible set. Both were measured \emph{not} to be the cause of the $\mtautau$ offset
+(Section~\ref{sec:mtautau}), but both are wrong.
+
+\emph{Untested --- risks, not accepted limitations.} \textbf{(a)} The sampled $\tauh$ mass
+is drawn independently of the $\tau$ energy and of the partner leg, whereas the true visible
+mass correlates with decay mode and hence with prong multiplicity and energy sharing. Size
+unknown. \textbf{(b)} Every map is flat-extrapolated above $300\,\si{\GeV}$, the last bin
+edge, so a $500\,\si{\GeV}$ jet is given the $200$--$300$ bin's value verbatim. Four reasons
+this is probably benign, none of them yet checked directly:
+\begin{itemize}\itemsep0pt
+\item \emph{Population.} Only $\sim$2.8\% of b-jets exceed $300\,\si{\GeV}$.
+\item \emph{It is not where $\kl$ lives.} The $gg\rightarrow HH$ amplitude is
+$\kl\times$(triangle)$\,+\,$(box), and the triangle carries an $s$-channel Higgs propagator
+falling with $\hat{s}$. The $m_{HH}$ \emph{shape} difference between $\kl$ hypotheses is
+therefore largest near threshold, $m_{HH}\simeq250$--$400\,\si{\GeV}$, where the destructive
+interference is most modified; the high-$m_{HH}$ tail is box-dominated and comparatively
+$\kl$-insensitive. b-jets from the discriminating region sit well below $300\,\si{\GeV}$.
+(An earlier version of this note asserted the opposite and used it to argue the
+extrapolation was dangerous; that was wrong.)
+\item \emph{Flat is the right asymptote.} The v1 card's b-tag formula,
+$(p_{T}>4)\times(0.904-3.53/p_{T})$, tends to $0.904$, so a constant extrapolation matches
+the underlying behaviour rather than being arbitrary.
+\item \emph{The escale has little left to do there.} Table~\ref{tab:response} shows the
+Delphes response converging on CMS by $100$--$300\,\si{\GeV}$ ($1.035$ vs $0.970$), so the
+correction is small and slowly varying where the extrapolation begins.
+\end{itemize}
+What would change this is a boosted or high-$m_{HH}$ category, where the extrapolated region
+stops being a $3\%$ tail and becomes the signal region.
+
 \section{The decision}
 \label{sec:decision}
 
@@ -153,61 +205,6 @@ quantity undercut the claim?
 \item Is a $1.18\times$ analysis-level yield excess acceptable for unbinned NSBI, where
 training uses shapes and normalisation is fitted?
 \end{enumerate}
-
-\section{Known limitations}
-\label{sec:limits}
-
-In four buckets, because ``known'' was covering
-different things.
-
-\emph{Accepted by design.} FastMTT is covariance-free (a fixed $\ptmiss$ resolution rather
-than the per-event covariance), but is run identically on both sides, so it cancels in the
-comparison and bounds the absolute $\mtautau$ resolution rather than the agreement. The card
-runs without pileup, so jet energy \emph{resolution} is untuned and pileup jets cannot
-exist; both act on the $b\bar b$ side, which agrees, and the second cannot be fixed
-downstream in any case. $\ptmiss$ smearing is isotropic and flat where the real resolution
-is anisotropic and grows with $\Sigma E_{T}$: this reproduces the width but not its
-structure, and it remains a candidate for $\mtautau$ being marginally \emph{broader} on
-Delphes --- Section~\ref{sec:mtautau} exonerates $\ptmiss$ for the \emph{offset}, not for
-the width.
-
-\emph{A scope bound, not a defect.} \texttt{tau\_mistag} is measured on the $b$-rich signal
-anchor, and fake rates are strongly jet-flavour dependent, so it is \emph{not} valid for the
-fake-dominated backgrounds (QCD, W+jets). This does not limit the present signal study, but
-the samples cannot support a background-heavy analysis until those are measured separately.
-
-\emph{Real defects, not yet fixed.} Two in the energy-scale \emph{application}: fake $\tauh$
-match neither branch of \texttt{escale\_factor} and are left uncorrected while still
-receiving a $\tau$-like mass, and the $\tau$ branch matches \emph{all} gen $\tau$
-(\texttt{|pid|==15}) including leptonically decaying ones, whereas the map is derived on the
-hadronic visible set. Both were measured \emph{not} to be the cause of the $\mtautau$ offset
-(Section~\ref{sec:mtautau}), but both are wrong.
-
-\emph{Untested --- risks, not accepted limitations.} \textbf{(a)} The sampled $\tauh$ mass
-is drawn independently of the $\tau$ energy and of the partner leg, whereas the true visible
-mass correlates with decay mode and hence with prong multiplicity and energy sharing. Size
-unknown. \textbf{(b)} Every map is flat-extrapolated above $300\,\si{\GeV}$, the last bin
-edge, so a $500\,\si{\GeV}$ jet is given the $200$--$300$ bin's value verbatim. Four reasons
-this is probably benign, none of them yet checked directly:
-\begin{itemize}\itemsep0pt
-\item \emph{Population.} Only $\sim$2.8\% of b-jets exceed $300\,\si{\GeV}$.
-\item \emph{It is not where $\kl$ lives.} The $gg\rightarrow HH$ amplitude is
-$\kl\times$(triangle)$\,+\,$(box), and the triangle carries an $s$-channel Higgs propagator
-falling with $\hat{s}$. The $m_{HH}$ \emph{shape} difference between $\kl$ hypotheses is
-therefore largest near threshold, $m_{HH}\simeq250$--$400\,\si{\GeV}$, where the destructive
-interference is most modified; the high-$m_{HH}$ tail is box-dominated and comparatively
-$\kl$-insensitive. b-jets from the discriminating region sit well below $300\,\si{\GeV}$.
-(An earlier version of this note asserted the opposite and used it to argue the
-extrapolation was dangerous; that was wrong.)
-\item \emph{Flat is the right asymptote.} The v1 card's b-tag formula,
-$(p_{T}>4)\times(0.904-3.53/p_{T})$, tends to $0.904$, so a constant extrapolation matches
-the underlying behaviour rather than being arbitrary.
-\item \emph{The escale has little left to do there.} Table~\ref{tab:response} shows the
-Delphes response converging on CMS by $100$--$300\,\si{\GeV}$ ($1.035$ vs $0.970$), so the
-correction is small and slowly varying where the extrapolation begins.
-\end{itemize}
-What would change this is a boosted or high-$m_{HH}$ category, where the extrapolated region
-stops being a $3\%$ tail and becomes the signal region.
 
 \section{The two open questions}
 \label{sec:open}
