@@ -72,7 +72,7 @@ needs a card change.\label{tab:matched}}
 
 \begin{table}[htbp]
 \centering\small
-\begin{tabular}{ll}
+\begin{tabular}{lp{11.5cm}}
 \toprule
 \yes\ agree & $m_{HH}$ (the $\kl$ observable, across $\kl=0,1,5$); $m_{bb}$ (both peak
 $\sim$$112\,\si{\GeV}$); $p_{T}^{HH}$; $\Delta\phi_{HH}$; $p_{T}^{H1}$, $p_{T}^{H2}$;
@@ -107,16 +107,17 @@ there --- in the signal selection fakes are 4\% and demonstrably irrelevant, but
 their raw jet $p_{T}$.
 
 \begin{table}[htbp]
-\centering\small
+\centering\footnotesize
+\setlength{\tabcolsep}{5pt}
 \begin{tabular}{lccc}
 \toprule
- & (A) HPS rebuild & (B) response resampling & (C) accept \\
+ & (A) HPS rebuild & (B) resampling & (C) accept \\
 \midrule
-dev time & 3--5 weeks & $\sim$1 day ($+$1--2 fake map) & 0 \\
-extra CPU / I/O / storage at 300M & $\sim$0 / $+$13\% / 0 & $+$0.02\% / 0 / 0 & 0 \\
-$\mtautau$ fidelity vs CMS (real $\tau$) & $\sim$96\% (assumed) & \textbf{100\% by construction} & 90\% (84--92) \\
-fake-$\tauh$ energies & fixed by construction & fixed by the fake-map extension & broken, no recovery \\
-$\tau$ \emph{direction} & \textbf{only option that touches it} & unchanged & unchanged \\
+dev time & 3--5 weeks & $\sim$1 day ($+$fake map) & 0 \\
+extra CPU / I/O / storage & $\sim$0 / $+$13\% / 0 & $+$0.02\% / 0 / 0 & 0 / 0 / 0 \\
+$\mtautau$ fidelity vs CMS (real $\tau$) & $\sim$96\% (assumed) & \textbf{100\% exact} & 90\% (84--92) \\
+fake-$\tauh$ energies & fixed & fixed via fake map & broken \\
+$\tau$ \emph{direction} & \textbf{only A} & unchanged & unchanged \\
 \bottomrule
 \end{tabular}
 \caption{The three options at the 300M-event production scale. Fidelity = fraction of the
