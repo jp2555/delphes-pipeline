@@ -97,7 +97,7 @@ def test_retag_jets_applies_tau_mass_last_so_escale_does_not_rescale_it():
         "tau_eff": flat(1.0), "tau_mistag": flat(0.0),
         "bjet_escale": flat(1.0), "tau_escale": flat(0.5),
     })
-    out, fields = retag_jets(ev, maps, np.random.default_rng(0))
+    out, fields, _ = retag_jets(ev, maps, np.random.default_rng(0))
     assert "tau_mass" in fields and "escale" in fields
     m = ak.to_numpy(out.mass)[0][0]
     # applied AFTER escale -> the map value stands (0.85). Applied before, the escale
@@ -111,7 +111,7 @@ def test_tau_mass_absent_leaves_masses_alone():
                   "phi": _jag([0.0]), "mass": _jag([1.777]), "status": _jagi([2]),
                   "m1": _jagi([-1])})
     ev = SimpleNamespace(jets=jets, gen=gen)
-    out, fields = retag_jets(ev, TuningMaps({}), np.random.default_rng(0))
+    out, fields, _ = retag_jets(ev, TuningMaps({}), np.random.default_rng(0))
     assert "tau_mass" not in fields
     assert ak.to_numpy(out.mass)[0][0] == pytest.approx(8.0)
 
@@ -235,7 +235,7 @@ def test_tau_eff_is_evaluated_at_the_energy_corrected_pt():
         "bjet_escale": flat(1.0), "tau_escale": flat(0.5),   # halve the τ-jet pT
         "tau_mass": flat(0.85),
     })
-    out, fields = retag_jets(ev, maps, np.random.default_rng(0))
+    out, fields, _ = retag_jets(ev, maps, np.random.default_rng(0))
     assert {"escale", "tautag"} <= fields
     assert ak.to_numpy(out.pt)[0][0] == pytest.approx(50.0)     # escale applied
     assert not ak.to_numpy(out.tautag).any(), \

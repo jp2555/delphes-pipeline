@@ -22,10 +22,23 @@ from delphes_pipeline.core.observables import Profile
 
 # observables for which the NanoAOD anchor provides a target
 _MASS_QUANTILES = 21          # uniform quantile grid stored for the τ_h visible mass
+# 101, not 21: the grid's TOP segment runs from its last stored level to the sample MAX,
+# and a linear draw across it inflates the extreme tail — measured 7.2% high at q99 with 21
+# levels, 0.11% with 101, because q99 then lands exactly on a grid point. The response tail
+# is the whole reason option B exists, so it must not be an interpolation artefact. (The
+# τ_h MASS grid keeps 21: it is clipped at 1.70 GeV, which pins its endpoint, and its
+# residual was measured inert.)
+_RESPONSE_QUANTILES = 101
+# Levels stop SHORT of 0 and 1 on purpose. Level 1.0 is the sample MAX — an order
+# statistic that never converges — and a uniform draw into the top segment interpolates
+# toward it, turning a handful of anchor outliers into a percent-level response tail. The
+# response tail is the whole point of option B, so it must not be an artefact of its own
+# grid. Truncating 0.5% at each end is the conservative direction.
+_RESPONSE_LEVELS = np.linspace(0.005, 0.995, _RESPONSE_QUANTILES)
 
 ANCHOR_OBSERVABLES = ("btag_eff_b", "btag_eff_c", "btag_mistag_light",
                       "electron_eff", "muon_eff", "tau_eff", "tau_mistag", "tau_mass",
-                      "tau_energy_response", "met_resolution")
+                      "tau_energy_response", "tau_fake_response", "met_resolution")
 
 
 def anchor_profiles(config: dict, *, bins, max_events: Optional[int] = None) -> dict[str, Profile]:
@@ -55,6 +68,7 @@ def anchor_profiles(config: dict, *, bins, max_events: Optional[int] = None) -> 
     out["tau_mistag"] = _nano_tau_mistag(nano, bins)
     out["tau_mass"] = _nano_tau_mass(nano, bins)
     out["tau_energy_response"] = _nano_tau_energy_response(nano, bins)
+    out["tau_fake_response"] = _nano_tau_fake_response(nano, bins)
     out["met_resolution"] = _nano_met_resolution(nano)
     # label the source for the report/plot
     for p in out.values():
@@ -150,9 +164,67 @@ def _nano_tau_energy_response(nano: NanoAODEvents, bins, *, dr=0.4, eta_max=2.5,
     matched, tau_pt = nearest_target_field(acc, medium, dr, "pt")
     gen_pt = ak.to_numpy(ak.flatten(acc.pt))
     ok = matched & (np.nan_to_num(tau_pt, nan=0.0) > 0) & (gen_pt > 0)
-    prof = obs.binned_response(gen_pt[ok], tau_pt[ok] / gen_pt[ok], bins,
+    resp = tau_pt[ok] / gen_pt[ok]
+    prof = obs.binned_response(gen_pt[ok], resp, bins,
                                quantity="tau_energy_response", x="pt")
     prof.xlabel, prof.ylabel = "gen visible-tau pT [GeV]", "reco/gen pT"
+    # The median alone only supports a multiplicative escale, which by construction can
+    # align medians and nothing else. Measured on this anchor the Delphes response is
+    # one-sidedly BROADER at matched median (3x at 20-30 GeV), and a scale factor cannot
+    # depopulate that tail — it survives into m_vis above the kinematic limit. Carrying
+    # the per-pT quantiles lets the Delphes tau energy be *redrawn* from the CMS
+    # distribution instead (maps.resample_tau_energy), which reproduces the shape too.
+    levels = _RESPONSE_LEVELS
+    edges = np.asarray(bins, dtype=float)
+    qvals = []
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        in_bin = (gen_pt[ok] >= lo) & (gen_pt[ok] < hi)
+        if not in_bin.any():
+            continue
+        qvals.append(np.quantile(resp[in_bin], levels).tolist())
+    prof.aux = {"quantile_levels": levels.tolist(), "quantile_values": qvals}
+    return prof
+
+
+def _nano_tau_fake_response(nano: NanoAODEvents, bins, *, dr=0.4, eta_max=2.5,
+                            pt_min=20.0) -> Profile:
+    """CMS FAKE τ_h energy response: Medium ``Tau`` with NO gen τ, over its matched GenJet.
+
+    A fake τ_h is a quark or gluon jet that passed the τ ID. In CMS it still carries an HPS
+    narrow-cone four-vector; in Delphes it is the whole AK4 jet, and it receives no energy
+    correction at all — it matches neither branch of ``escale_factor``, so it keeps a raw
+    jet pT. In the signal selection that is ~4% of pairs and harmless, but ``TTto4Q``
+    selects fakes *exclusively*, so at production scale this is the energy scale of the
+    dominant background. Delphes fakes have a GenJet too, so this map gives them a target.
+
+    The reference is the GenJet, not a visible τ: a fake has no gen τ by definition.
+    """
+    empty = Profile("tau_fake_response", "pt", np.array([]), np.array([]),
+                    np.array([]), np.array([], dtype=int))
+    # an anchor skim without GenJet yields a field-less collection; no reference, no map
+    if not ak.fields(nano.genjets) or not ak.fields(nano.genvistau):
+        return empty
+    medium = nano.taus[nano.taus.vsjet >= nano.deeptau_medium()]
+    acc = medium[(np.abs(medium.eta) <= eta_max) & (medium.pt > pt_min)]
+    fake = acc[~matched_to_any(acc, nano.genvistau, dr)]      # same ΔR as the real-τ match
+    matched, gj_pt = nearest_target_field(fake, nano.genjets, dr, "pt")
+    tau_pt = ak.to_numpy(ak.flatten(fake.pt))
+    gj_pt = np.nan_to_num(gj_pt, nan=0.0)
+    ok = matched & (gj_pt > 0)
+    if not ok.any():        # no fake passed the ID, or none matched a GenJet
+        return empty
+    resp = tau_pt[ok] / gj_pt[ok]
+    prof = obs.binned_response(gj_pt[ok], resp, bins, quantity="tau_fake_response", x="pt")
+    prof.xlabel, prof.ylabel = "matched GenJet pT [GeV]", "fake tau reco/gen pT"
+    levels = _RESPONSE_LEVELS
+    edges = np.asarray(bins, dtype=float)
+    qvals = []
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        in_bin = (gj_pt[ok] >= lo) & (gj_pt[ok] < hi)
+        if not in_bin.any():
+            continue
+        qvals.append(np.quantile(resp[in_bin], levels).tolist())
+    prof.aux = {"quantile_levels": levels.tolist(), "quantile_values": qvals}
     return prof
 
 
