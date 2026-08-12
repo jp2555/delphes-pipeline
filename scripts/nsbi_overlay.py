@@ -45,7 +45,7 @@ _FEATURES = ["mHH", "cosThetaStar", "pHH_T", "mbb", "dR_bb", "mtautau", "dR_taut
 # diagnostic (not NSBI) observables: the FastMTT *inputs*. m_ττ = m_vis/√(x₁x₂) with the
 # x fitted against pT_miss, so if the selection matches but m_ττ does not, the difference
 # has to be in the τ four-vectors or in the MET — these panels separate the two.
-_DIAG = ["tau1_pt", "tau2_pt", "met"]
+_DIAG = ["mvis", "tau1_pt", "tau2_pt", "met"]
 
 # The CMS Run-3 HH->bbtautau DNN input set (AN table 29), in the rotated frame it uses:
 # every momentum is rotated by -phi(visible di-tau), so the tau pair lies at phi=0.
@@ -72,7 +72,7 @@ CMS_DNN_NOT_OVERLAID = [
 _RANGES = {"mHH": (200, 900), "cosThetaStar": (0, 1), "pHH_T": (0, 300), "mbb": (0, 250),
            "dR_bb": (0, 5), "mtautau": (0, 250), "dR_tautau": (0, 5), "dphi_HH": (0, 3.2),
            "pH1_T": (0, 400), "pH2_T": (0, 400),
-           "tau1_pt": (0, 200), "tau2_pt": (0, 150), "met": (0, 200)}
+           "mvis": (0, 200), "tau1_pt": (0, 200), "tau2_pt": (0, 150), "met": (0, 200)}
 
 
 def _cms_range(name):
@@ -248,7 +248,13 @@ def features(ev, *, nano, tautau_only=False, mtautau_min=20.0, clean=True,
         "mHH": _mass(HH), "cosThetaStar": _cos_theta_star(H1, HH), "pHH_T": _pt(HH),
         "mbb": _mass(H1), "dR_bb": _dR(b1, b2), "mtautau": _mass(H2), "dR_tautau": _dR(t1, t2),
         "dphi_HH": _dphi(H1, H2), "pH1_T": np.maximum(pH1, pH2), "pH2_T": np.minimum(pH1, pH2),
-        # FastMTT inputs, for diagnosing an m_ττ shift that survives a symmetric selection
+        # FastMTT inputs, for diagnosing an m_ττ shift that survives a symmetric selection.
+        # m_vis is the decisive one: m_ττ = m_vis/√(x₁x₂) factorises, so comparing the
+        # VISIBLE di-τ mass — no FastMTT at all — splits an m_ττ offset in two. If m_vis is
+        # already off by the same fraction the τ four-vector scale is wrong (tau_escale);
+        # if m_vis agrees and only m_ττ does not, the τ energies are right and the error is
+        # in the x fit, i.e. MET. The two have disjoint fixes, so measure before tuning.
+        "mvis": _mass(_add(t1, t2)),
         "tau1_pt": _pt(t1), "tau2_pt": _pt(t2), "met": np.hypot(met_x, met_y),
     }
     if cms_dnn:

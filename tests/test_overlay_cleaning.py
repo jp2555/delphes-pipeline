@@ -284,3 +284,50 @@ def test_cms_dnn_works_on_the_nano_side_too():
     n = features(_nano_ev(), nano=True, clean=True, cms_dnn=True, **_KW)
     assert all(k in n for k in ov._CMS)
     assert n["Hbbtt_E"][0] > 0
+
+
+# --------------------------------------------------------------------------- #
+# m_vis: splits an m_ττ offset into "τ scale" vs "MET / x fit"
+# --------------------------------------------------------------------------- #
+def test_mvis_is_the_visible_ditau_mass_and_below_mtautau():
+    """m_ττ = m_vis/√(x₁x₂) with x ≤ 1, so m_vis must be the SMALLER of the two.
+    If this ever inverts, the panel is not measuring what the diagnostic assumes."""
+    d = features(_delphes_ev(), nano=False, clean=True, **_KW)
+    assert d["mvis"].size
+    assert np.all(d["mvis"] > 0)
+    assert np.all(d["mvis"] <= d["mtautau"] + 1e-9)
+
+
+def test_mvis_is_independent_of_the_met():
+    """The diagnostic only works if m_vis does NOT depend on the MET: that is what makes
+    'm_vis agrees but m_ττ does not' point at the x fit rather than the τ four-vectors."""
+    ev = _delphes_ev()
+    base = features(ev, nano=False, clean=True, **_KW)
+    shifted = _delphes_ev()
+    shifted.met = ak.zip({"met": ak.Array(np.full(_N, 200.0)),      # 40 -> 200 GeV
+                          "phi": ak.Array(np.full(_N, 2.5))})
+    moved = features(shifted, nano=False, clean=True, **_KW)
+    assert moved["mvis"][0] == pytest.approx(base["mvis"][0], rel=1e-9)
+    assert moved["mtautau"][0] != pytest.approx(base["mtautau"][0], rel=1e-6)
+
+
+def test_mvis_scales_linearly_with_the_tau_energy_scale():
+    """m_vis ∝ the τ four-vector scale, which is what makes it a tau_escale probe:
+    scaling both τ legs by k must scale m_vis by exactly k."""
+    k = 1.10
+    ev = _delphes_ev()
+    scaled = _delphes_ev()
+    j = scaled.jets
+    is_tau = j.tautag == 1
+    scaled.jets = ak.zip({"pt": ak.where(is_tau, j.pt * k, j.pt), "eta": j.eta, "phi": j.phi,
+                          "mass": j.mass, "btag": j.btag, "tautag": j.tautag,
+                          "charge": j.charge})
+    base, up = features(ev, nano=False, clean=True, **_KW), features(scaled, nano=False,
+                                                                    clean=True, **_KW)
+    assert up["mvis"][0] == pytest.approx(base["mvis"][0] * k, rel=1e-6)
+
+
+def test_mvis_is_a_diagnostic_not_an_nsbi_feature():
+    import nsbi_overlay as ov
+    assert "mvis" in ov._DIAG and "mvis" not in ov._FEATURES
+    assert "mvis" in ov._RANGES
