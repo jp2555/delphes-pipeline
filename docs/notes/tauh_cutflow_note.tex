@@ -28,396 +28,310 @@
 
 \begin{abstract}
 \noindent
-This note has three parts. \textbf{Section~1} audits what the Delphes fast simulation
-currently does relative to CMS NanoAOD, object by object: what is matched, what is tuned
-to a CMS anchor, what differences remain by choice or by limitation, and which of the ten
-NSBI input features still disagree. \textbf{Section~2} states the one open decision ---
-whether to continue correcting the jet-based $\tauh$ or to rebuild it from the Delphes
-particle-flow candidates --- with the considerations on each side and the questions we
-would like $\tau$ expertise on. \textbf{Section~3} is a reference list of the studies
-behind the numbers, for anyone who wants to check a specific claim.
-
-Short summary: the $\tautau$ yield deficit that motivated this work (a factor
-$\sim$5) is closed, the cutflow now agrees with CMS at every stage ($1.01$), and eight of
-the ten NSBI features agree within statistics. The two that do not are $\mtautau$
-(residual $\sim$7\,\si{\GeV} offset) and $\dR_{\tau\tau}$ (an excess at $2.2$--$3.2$).
-Since the previous version the $\mtautau$ offset has been \emph{localised}, and this
-sharpens the decision. It lives in the $\tau$ four-vectors, not in the mass estimator or
-the $\ptmiss$; fake $\tauh$ are excluded as its cause by direct measurement; and the whole
-of it --- both the offset and an unphysical high-mass tail --- sits in the
-\emph{gen-matched} population. Since the energy-scale map is a per-$p_{T}$ \emph{median}
-ratio, it can align the peak but cannot reshape a response distribution, so the residual
-appears to lie outside what the current correction method can reach
-(Section~\ref{sec:mtautau}).
+The $\tautau$ yield deficit that motivated this work (a factor $\sim$5) is closed: the
+cutflow agrees with CMS at every stage ($1.01$) and eight of the ten NSBI features agree
+within statistics. Two do not --- $\mtautau$ and $\dR_{\tau\tau}$ --- and both are on the
+$\tau$ side. The $\mtautau$ offset has now been traced: it is in the $\tau$ four-vectors
+rather than the mass estimator or the $\ptmiss$, fake $\tauh$ are excluded as its cause by
+measurement, and all of it sits in the \emph{gen-matched} population. Since the
+energy-scale map is a per-$p_{T}$ \emph{median} ratio, it can align the peak but cannot
+reshape a response distribution --- so the residual may lie outside what the correction
+approach can reach at all. That would turn the open decision (Section~\ref{sec:decision})
+from a question of elegance into one of feasibility. One measurement settles it, and it
+has not been run yet.
 \end{abstract}
 
-\section{Audit: what we do, relative to CMS}
+\section{Status}
 
-The Delphes card is the stock CMS card plus the patches in
-\texttt{docs/card\_patch\_validation.md}; all object tuning is applied \emph{downstream},
-so the produced samples are never re-made. Every efficiency and scale is measured on a
-private 2024 NanoAODv15 anchor and applied to Delphes, so ``tuned'' below always means
-``measured on CMS and transferred''.
-
-\subsection{Matched or tuned to CMS}
-
-Table~\ref{tab:matched} lists the quantities that either agree with CMS already or are
-transferred from it by a measured map. In every case the map is derived on the anchor and
-applied to Delphes downstream; none of them requires a change to the card.
+The card is the stock CMS card plus the patches in
+\texttt{docs/card\_patch\_validation.md}. All object tuning is applied \emph{downstream},
+so the produced samples are never re-made; every efficiency and scale is measured on a
+private 2024 NanoAODv15 anchor, so ``tuned'' below always means ``measured on CMS and
+transferred''.
 
 \begin{table}[htbp]
 \centering\small
-\begin{tabular}{llp{6.6cm}}
+\begin{tabular}{llp{6.4cm}}
 \toprule
 quantity & status & how \\
 \midrule
 b-tag efficiency ($b$, $c$, light) & \yes\ tuned & stochastic re-tag from \texttt{Jet.Flavor} at the anchor-measured UParT-AK4 Medium efficiency \\
-b-jet energy scale & \yes\ tuned & response inverted to unity against \texttt{GenJet} \\
+b-jet energy scale & \yes\ tuned & response inverted to unity against \texttt{GenJet} (self-anchored, not like-for-like) \\
 $m_{bb}$ peak and width & \yes\ matched & follows from the above \\
 $\tauh$ identification efficiency & \yes\ tuned & anchor \texttt{GenVisTau}$\rightarrow$DeepTau v2.5 Medium; includes CMS's HPS reconstruction inefficiency \\
 $\tauh$ visible mass & \yes\ tuned & \emph{sampled} per jet from the anchor's per-$p_{T}$ mass quantiles \\
-$\tauh$ energy scale & (\no) tuned & CMS/Delphes response ratio, both against a \emph{visible} $\tau$ reference --- but it under-corrects; see Section~\ref{sec:mtautau} \\
-$\tauh$ acceptance & \yes\ identical & common $p_{T}>20\,\si{\GeV}$, $|\eta|<2.3$ on both sides \\
-jet--$\tau$ overlap removal & \yes\ identical & di-$\tau$ pair chosen first, then $\dR>0.4$ on both sides \\
+$\tauh$ acceptance & \yes\ identical & common $p_{T}>20\,\si{\GeV}$, $|\eta|<2.3$ \\
+jet--$\tau$ overlap removal & \yes\ identical & di-$\tau$ pair chosen first, then $\dR>0.4$ \\
 $\ptmiss$ resolution & \yes\ tuned & Gaussian smearing to the anchor resolution ($16.5\rightarrow32.6\,\si{\GeV}$ per component) \\
-lepton reconstruction efficiency & \yes\ tuned & per-$p_{T}$ scale factors (large: $1.57\rightarrow1.22$ for $e$, $1.30\rightarrow1.13$ for $\mu$) \\
-di-$\tau$ mass estimator & \yes\ identical & the same covariance-free FastMTT is run on both sides \\
+lepton reconstruction efficiency & \yes\ tuned & per-$p_{T}$ scale factors ($1.57\rightarrow1.22$ for $e$, $1.30\rightarrow1.13$ for $\mu$) \\
+di-$\tau$ mass estimator & \yes\ identical & the same covariance-free FastMTT on both sides \\
+\midrule
+$\tauh$ energy scale & (\no) tuned & CMS/Delphes response ratio against a \emph{visible} $\tau$ reference --- but it under-corrects; Section~\ref{sec:mtautau} \\
 \bottomrule
 \end{tabular}
-\caption{Quantities that agree with CMS or are transferred from it.\label{tab:matched}}
+\caption{Object-level status. Every map is derived on the anchor and applied downstream;
+none requires a change to the card.\label{tab:matched}}
 \end{table}
 
-\subsection{Residual differences, by choice or by limitation}
-\label{sec:residual}
-
-\begin{enumerate}
-\item \textbf{A $\tauh$ is an AK4 jet.} This is the structural difference. In CMS a
-$\tauh$ is an HPS object built from a narrow set of decay products; in Delphes it is an
-$R=0.4$ jet carrying \texttt{TauTag}. Its mass, energy and direction are therefore all
-wrong at source, and we correct the first two against the anchor rather than fixing the
-representation. This is the subject of Section~\ref{sec:decision}.
-
-\item \textbf{The $\tauh$ fake rate is measured on signal.} \texttt{tau\_mistag} comes
-from the $b$-rich HH$\rightarrow b\bar b\tau\tau$ anchor. Fake rates are strongly
-jet-flavour dependent, so this value is not appropriate for the fake-dominated
-backgrounds (QCD, W+jets); those need their own measurement before they are trusted.
-
-\item \textbf{$\ptmiss$ smearing is isotropic and flat.} Real $\ptmiss$ resolution is
-anisotropic (larger along the hadronic recoil) and grows with $\Sigma E_{T}$. Ours is
-round and constant, which reproduces the overall width but not its structure --- and
-$\mtautau$ is now marginally \emph{broader} on Delphes than on CMS, as one would expect
-from over-simplified noise.
-
-\item \textbf{Pileup enters only through $\ptmiss$.} The card runs without pileup by
-design. The jet energy \emph{resolution} is therefore untuned (only the scale is
-corrected), and pileup jets cannot be produced at all. Both act on the $b\bar b$ side,
-which currently agrees well; the second cannot be fixed downstream in any case.
-
-\item \textbf{The b-jet energy scale is self-anchored.} It is corrected to its own
-\texttt{GenJet} rather than to CMS. This is defensible --- CMS jet energies are
-JEC-calibrated to gen --- and $m_{bb}$ agrees, but it is not the like-for-like comparison
-used everywhere else.
-
-\item \textbf{The sampled $\tauh$ mass is drawn independently} of the $\tau$ energy and
-of the partner leg, whereas the true visible mass correlates with the decay mode and
-hence with prong multiplicity and energy sharing.
-
-\item \textbf{Fake $\tauh$ receive no energy correction.} The energy-scale factor is
-selected per jet by gen-matching: \texttt{bjet\_escale} for \texttt{flavor==5},
-\texttt{tau\_escale} for jets within $\dR<0.4$ of a hadronic gen $\tau$ ($\tau$
-precedence), and $1$ otherwise. A \emph{fake} $\tauh$ --- a light jet promoted by the
-stochastic tag draw --- satisfies neither condition and is therefore left uncorrected,
-while still receiving a $\tau$-like visible mass. A related, smaller mismatch: the match
-is made against \emph{all} gen $\tau$ (\texttt{|pid|==15}), including leptonically
-decaying ones, whereas the map is derived on the hadronic visible set only. Both are real
-defects and worth fixing, but neither explains the $\mtautau$ offset --- see
-Section~\ref{sec:mtautau}, where fakes are excluded by measurement.
-
-\item \textbf{FastMTT is covariance-free} (a fixed $\ptmiss$ resolution rather than the
-per-event covariance). This is run identically on both sides, so it largely cancels in
-the comparison; it limits the absolute $\mtautau$ resolution, not the agreement.
-\end{enumerate}
-
-\subsection{The ten NSBI features}
-
-\begin{table}[h]
+\begin{table}[htbp]
 \centering\small
 \begin{tabular}{lll}
 \toprule
 feature & status & comment \\
 \midrule
-$m_{HH}$          & \yes & the $\kl$-carrying observable; agrees across $\kl=0,1,5$ \\
-$m_{bb}$          & \yes & both peak near $112\,\si{\GeV}$ \\
-$p_{T}^{HH}$      & \yes & \\
-$\dR_{bb}$        & \yes & after symmetric overlap removal on both sides \\
-$\Delta\phi_{HH}$ & \yes & \\
-$p_{T}^{H1}$, $p_{T}^{H2}$ & \yes & \\
-$\cos\theta^{*}$  & \yes & statistically limited but consistent \\
+$m_{HH}$ & \yes & the $\kl$-carrying observable; agrees across $\kl=0,1,5$ \\
+$m_{bb}$ & \yes & both peak near $112\,\si{\GeV}$ \\
+$p_{T}^{HH}$, $\Delta\phi_{HH}$, $p_{T}^{H1}$, $p_{T}^{H2}$ & \yes & \\
+$\dR_{bb}$ & \yes & after symmetric overlap removal on both sides \\
+$\cos\theta^{*}$ & \yes & statistically limited but consistent \\
 \midrule
-$\mtautau$        & (\no) & residual $\sim$7\,\si{\GeV} high; localised to the $\tau$ energy scale, Section~\ref{sec:mtautau} \\
-$\dR_{\tau\tau}$  & \no  & Delphes excess at $2.2$--$3.2$ \\
+$\mtautau$ & \no & $\sim$7\,\si{\GeV} high, Delphes broader; Section~\ref{sec:mtautau} \\
+$\dR_{\tau\tau}$ & \no & Delphes excess at $2.2$--$3.2$; Section~\ref{sec:drtautau} \\
 \bottomrule
 \end{tabular}
-\caption{Agreement of the NSBI inputs with CMS at $\kl=0$ (the other $\kl$ points behave
-the same). Yields: gen-matched cutflow $1.01$; analysis-level selection $1.18\times$.}
+\caption{NSBI inputs at $\kl=0$; the other $\kl$ points behave the same. Yields:
+gen-matched cutflow $1.01$, analysis-level selection $1.18\times$.\label{tab:features}}
 \end{table}
 
-\paragraph{What is known about the two that disagree.} A dedicated study (Section~3,
-item~6) compared the \emph{generator-level} $\dR_{\tau\tau}$ and the selection efficiency
-against it, on both sides. The gen spectra agree --- so the samples are the same physics
-and no generator-level explanation is available --- but the efficiencies differ: Delphes
-selects $0.22$--$0.23$ of events at gen $\dR>2.5$ where CMS selects $0.15$--$0.17$
-($\sim$3$\sigma$), with a weaker ($\sim$2$\sigma$) hint that Delphes also loses pairs
-below $\dR<1$. Both push the normalised distribution rightward. Three explanations were
-proposed and excluded by measurement: fake $\tauh$ (fake fractions are $5.7\%$ Delphes
-against $5.0\%$ CMS, and the discrepancy lives entirely in the gen-matched component);
-$\tau$-pair selection (making it fully symmetric moved $\dR_{\tau\tau}$ but not
-$\mtautau$); and a large CMS $\tau$ energy miscalibration (the anchor response is
-$0.97$--$0.99$).
+\paragraph{Known limitations, accepted for now.} None of these is implicated in the two
+disagreements above, but they bound what the samples can be used for.
+\begin{itemize}\itemsep2pt
+\item \textbf{The $\tauh$ fake rate is measured on signal.} \texttt{tau\_mistag} comes
+from the $b$-rich HH anchor. Fake rates are strongly jet-flavour dependent, so this value
+is \emph{not} appropriate for the fake-dominated backgrounds (QCD, W+jets), which need
+their own measurement before they are trusted.
+\item \textbf{$\ptmiss$ smearing is isotropic and flat}, where the real resolution is
+anisotropic and grows with $\Sigma E_{T}$. This reproduces the width but not its
+structure.
+\item \textbf{Pileup enters only through $\ptmiss$.} The card runs without pileup, so jet
+energy \emph{resolution} is untuned and pileup jets cannot be produced at all. Both act on
+the $b\bar b$ side, which agrees; the second cannot be fixed downstream in any case.
+\item \textbf{Two defects in the energy-scale application}, real but not the cause of the
+$\mtautau$ offset: fake $\tauh$ match neither the $b$ nor the $\tau$ branch of
+\texttt{escale\_factor} and are left uncorrected while still receiving a $\tau$-like mass;
+and the $\tau$ branch matches \emph{all} gen $\tau$ (\texttt{|pid|==15}) including
+leptonic ones, whereas the map is derived on the hadronic visible set.
+\item \textbf{The sampled $\tauh$ mass is drawn independently} of the $\tau$ energy and
+of the partner leg, whereas the true visible mass correlates with the decay mode and hence
+with prong multiplicity and energy sharing. Unmeasured; distinct from the quantile-grid
+defect below, which \emph{was} measured.
+\item \textbf{FastMTT is covariance-free} (a fixed $\ptmiss$ resolution rather than the
+per-event covariance). Run identically on both sides, so it largely cancels in the
+comparison; it limits the absolute $\mtautau$ resolution, not the agreement.
+\item \textbf{Every map is flat-extrapolated above $300\,\si{\GeV}$}, the last bin edge.
+Untested, and worth checking: $\kl$ discrimination lives at high $m_{HH}$ and therefore at
+high jet $p_{T}$.
+\end{itemize}
 
-\subsection{$\mtautau$: where the offset lives}
+\section{The two open questions}
+
+\subsection{$\mtautau$: the offset is in the $\tau$ four-vectors}
 \label{sec:mtautau}
 
 Because $\mtautau=\mvis/\sqrt{x_{1}x_{2}}$ factorises, the \emph{visible} di-$\tau$ mass
 $\mvis$ --- built from the two selected $\tau$ four-vectors, with no $\ptmiss$ and no
 FastMTT --- separates a $\tau$ energy-scale error from an error in the $x$ fit. The two
-have disjoint fixes, so it is worth measuring before tuning anything. On the $\kl=0$
-overlay $\mvis$ is offset by \emph{at least} as much as $\mtautau$ is (peak ratios
-$\approx1.24$ against $\approx1.17$, read off the histograms), so the $\tau$ four-vectors
-carry the discrepancy and the FastMTT fit is not its source --- if anything it compresses
-it slightly. The individual leg spectra agree: both $\tau$ legs are harder on Delphes.
+have disjoint fixes, so it is worth measuring before tuning anything.
 
-Two features of that panel are not explained by a pure scale. Delphes populates
-$\mvis>125\,\si{\GeV}$, which is kinematically impossible for $H\rightarrow\tau\tau$ --- a
-visible mass cannot exceed its parent --- and CMS respects that edge; and scaling the CMS
-distribution by $1.24$ reaches $\sim155\,\si{\GeV}$, not the $\sim200\,\si{\GeV}$ observed.
-The uncorrected fakes of Section~\ref{sec:residual} would produce both: the offset,
-because the correction is measured only on the gen-matched population, which least needs
-it; and the tail, because a fake $\tauh$ carries a full AK4 jet $p_{T}$ with no kinematic
-ceiling from $m_{H}$. Consistently, with an applied scale of $\simeq0.85$ and a residual
-ratio of $\simeq1.24$, the raw Delphes $\tau$ are $\sim46\%$ harder than CMS while the map
-corrects only $15\%$.
+\paragraph{What is measured.} On the $\kl=0$ overlay, $\mvis$ is offset by \emph{at least}
+as much as $\mtautau$ is (peak ratios $\approx1.24$ against $\approx1.17$, read off the
+histograms). The $\tau$ four-vectors therefore carry the discrepancy and the FastMTT fit
+is not its source; if anything it compresses it. Both $\tau$ legs are individually harder
+on Delphes. Consistently, with an applied scale of $\simeq0.85$ and a residual ratio of
+$\simeq1.24$, the raw Delphes $\tau$ are $\sim46\%$ harder than CMS while the map corrects
+only $15\%$.
 
-\paragraph{The split, and what it excludes.} That hypothesis is now tested and
-\textbf{wrong}. Splitting every distribution into gen-matched and fake components gives
-fake fractions of $4.1\%$ on Delphes against $4.3\%$ on CMS, with the two fake shapes
-indistinguishable; the fake components are simply not different between the two tiers.
-The gen-matched component carries everything --- the peak displacement and the whole
-$\mvis>125\,\si{\GeV}$ tail. The energy-scale treatment is therefore failing on
-\emph{real} $\tau$. This matches the $\dR_{\tau\tau}$ result of Section~1.3, where the
-discrepancy also lived entirely in the gen-matched component; both $\tau$-side
-disagreements now point the same way.
+Splitting into gen-matched and fake components then \textbf{excludes fakes}: the fake
+fractions are $4.1\%$ on Delphes against $4.3\%$ on CMS with indistinguishable shapes,
+while the gen-matched component carries the whole discrepancy --- both the peak
+displacement and an unphysical tail at $\mvis>125\,\si{\GeV}$, which is kinematically
+impossible for $H\rightarrow\tau\tau$ and which CMS does not populate. The same pattern
+holds for $\dR_{\tau\tau}$ (Section~\ref{sec:drtautau}); both $\tau$-side disagreements
+live in \emph{real} $\tau$.
 
-\paragraph{Why this is a statement about the representation.} \texttt{tau\_escale} is a
-per-$p_{T}$-bin \emph{median} ratio, applied multiplicatively. By construction it can
-align medians; it cannot change the \emph{shape} of the response distribution. An $R=0.4$
-cone absorbs underlying event and nearby particles for some $\tau$, where an HPS signal
-cone would not, which produces a one-sided high tail in the response. Such a tail is
-\emph{not reachable} by any multiplicative median map: one can move the peak into place
-and still be left with events at $\mvis>125\,\si{\GeV}$, since a scale factor cannot
-remove entries from a kinematically forbidden region. If confirmed by the response-shape
-measurement below, this is a hard floor on the correction approach rather than a defect in
-its implementation, and it bears directly on Section~\ref{sec:decision}.
+\paragraph{Why this may be a statement about the representation.}
+\texttt{tau\_escale} is a per-$p_{T}$-bin \emph{median} ratio applied multiplicatively. By
+construction it aligns medians; it cannot change the \emph{shape} of the response
+distribution. An $R=0.4$ cone absorbs underlying event and nearby particles for some
+$\tau$, where an HPS signal cone would not, producing a one-sided high tail in the
+response. Such a tail is not reachable by any multiplicative median map --- one can move
+the peak into place and still be left with entries in a kinematically forbidden region,
+because a scale factor cannot depopulate one. If that is what is happening, it is a hard
+floor on the correction approach rather than a defect in its implementation.
 
-\paragraph{The measurement that would confirm it.} Plot the $\tau$ energy response ---
-reco $\tau$ $p_{T}$ over gen-visible-$\tau$ $p_{T}$ --- as a \emph{distribution} on both
-sides rather than as a per-bin median: the same move $\mvis$ made for $\mtautau$, looking
-at what the map is built from instead of what it produces. A longer Delphes high tail at
-matched median confirms the paragraph above. Agreeing shapes would instead indict the
-derivation, with selection bias the prime suspect, since the response is measured only on
-$\tau$ that were both reconstructed and passed ID.
+\paragraph{The measurement that settles it (not yet run).} Plot the $\tau$ energy response
+--- reco $\tau$ $p_{T}$ over gen-visible-$\tau$ $p_{T}$ --- as a \emph{distribution} on
+both sides rather than as a per-bin median. A longer Delphes high tail at matched median
+confirms the paragraph above and makes the case for rebuilding. Agreeing shapes would
+instead indict the derivation, with selection bias the prime suspect, since the response is
+measured only on $\tau$ that were both reconstructed \emph{and} passed ID.
 
-\paragraph{What the offset is \emph{not}.} Two candidates were measured and excluded.
-\emph{(i) The sampled $\tauh$ mass.} The FastMTT floor
-$x_{\min}=(\mvis^{\rm leg}/\mtau)^{2}$ only exceeds a typical fitted $x\simeq0.5$--$0.9$
+\paragraph{What has been excluded.} \emph{(i) The sampled $\tauh$ mass.} The FastMTT floor
+$x_{\min}=(\mvis^{\rm leg}/\mtau)^{2}$ exceeds a typical fitted $x\simeq0.5$--$0.9$ only
 once the leg mass passes $\sim1.26\,\si{\GeV}$, so below that the assigned mass is inert:
-displacing the entire low-mass region by $200\,\si{\MeV}$ moves $\langle\mtautau\rangle$
-by $0.00\%$, against $-2.4\%$ for the same displacement in the $a_{1}$ tail. Replacing the
-21-quantile grid by an explicit atom at $m_{\pi^{\pm}}$ plus a histogram CDF --- which is
-both more faithful to a distribution that genuinely has an atom, and mergeable across
-shards --- changes $\langle\mtautau\rangle$ by $0.11\%$.
-\emph{(ii) A symmetric $\tau$ energy resolution mismatch.} Widening the response from
-$7\%$ to $25\%$ at fixed median moves the mean by $0.05\%$; it does broaden the
-$\mtautau$ RMS by $\sim2\%$, which is worth correcting for shape, but it cannot shift the
-peak. Note the scope of this one: it was measured with a roughly \emph{symmetric}
-(log-normal) widening, so it does \emph{not} cover the one-sided high tail discussed
-above, which is a different object. Of the candidates tested, only the energy
-\emph{scale} --- which enters $\mtautau$ linearly --- and a one-sided response tail remain
-capable of what is observed.
+displacing the entire low-mass region by $200\,\si{\MeV}$ moves $\langle\mtautau\rangle$ by
+$0.00\%$, against $-2.4\%$ for the same displacement in the $a_{1}$ tail. Replacing the
+21-quantile grid with an explicit atom at $m_{\pi^{\pm}}$ plus a histogram CDF --- more
+faithful to a distribution that genuinely has an atom --- changes $\langle\mtautau\rangle$
+by $0.11\%$. \emph{(ii) A symmetric resolution mismatch.} Widening the response from $7\%$
+to $25\%$ at fixed median moves the mean by $0.05\%$ (though it broadens the $\mtautau$
+RMS by $\sim2\%$). Note the scope: that test used a roughly symmetric log-normal widening,
+so it does \emph{not} cover the one-sided tail above. Of everything tested, only the energy
+\emph{scale} --- linear in $\mtautau$ --- and a one-sided response tail remain capable of
+what is observed.
 
-\section{The decision: keep correcting the jet, or rebuild the $\tauh$?}
+\subsection{$\dR_{\tau\tau}$: a selection effect, cause unknown}
+\label{sec:drtautau}
+
+Comparing the \emph{generator-level} $\dR_{\tau\tau}$ and the selection efficiency against
+it: the gen spectra agree, so the samples are the same physics and no generator-level
+explanation is available. The efficiencies differ --- Delphes selects $0.22$--$0.23$ of
+events at gen $\dR>2.5$ where CMS selects $0.15$--$0.17$ ($\sim$3$\sigma$), with a weaker
+($\sim$2$\sigma$) hint that Delphes also loses pairs below $\dR<1$. Both push the
+normalised distribution rightward. Three explanations were proposed and excluded by
+measurement: fake $\tauh$ (the discrepancy lives entirely in the gen-matched component);
+$\tau$-pair selection (making it fully symmetric moved $\dR_{\tau\tau}$ but not
+$\mtautau$); and a large CMS $\tau$ energy miscalibration (the anchor response is
+$0.97$--$0.99$).
+
+This one matters more than its size suggests: it is a \emph{selection} effect, not a scale,
+so no downstream correction can reach it. Unlike $\mtautau$, we have no candidate
+mechanism.
+
+\section{The decision to think about: keep correcting the jet, or rebuild the $\tauh$?}
 \label{sec:decision}
 
-Items 1 and 6 of Section~\ref{sec:residual}, and arguably the $\dR_{\tau\tau}$
-disagreement, all descend from representing a $\tauh$ as a jet. The alternative is to
-rebuild it from the Delphes particle-flow candidates, which the card already writes (the
-three \texttt{EFlow} collections --- tracks, photons, neutral hadrons --- kept, per the
-card header, precisely for ``$\tau$ redefinition'').
-
-\paragraph{What rebuilding would involve.} An HPS-like construction: seed from a jet,
-collect charged hadrons and photons in a narrow signal cone (fixed $\dR\simeq0.1$, or the
-$p_{T}$-dependent $3.0/p_{T}$ bounded at $0.05$--$0.1$), form the standard decay-mode
-hypotheses (1-prong, 1-prong$+\pi^{0}$, 3-prong), take the $\tauh$ four-vector as the sum
-of signal-cone constituents, and use an isolation annulus as a fake handle.
+A $\tauh$ in CMS is an HPS object built from a narrow set of decay products; in Delphes it
+is an $R=0.4$ jet carrying \texttt{TauTag}. Its mass, energy and direction are therefore
+all wrong at source, and we correct the first two against the anchor rather than fixing the
+representation. The alternative is to rebuild it from the Delphes particle-flow candidates,
+which the card already writes (the three \texttt{EFlow} collections --- tracks, photons,
+neutral hadrons --- kept, per the card header, precisely for ``$\tau$ redefinition''):
+seed from a jet, collect charged hadrons and photons in a narrow signal cone (fixed
+$\dR\simeq0.1$, or $p_{T}$-dependent $3.0/p_{T}$ bounded at $0.05$--$0.1$), form the
+standard decay-mode hypotheses, take the four-vector as the sum of signal-cone
+constituents, and use an isolation annulus as a fake handle.
 
 \paragraph{In favour.} Mass, energy and direction become correct \emph{by construction}
-rather than by correction, and three of the current corrections --- the visible-mass map,
-the CMS-anchored energy scale and the visible-$\tau$ reference --- are \emph{retired}
-rather than joined by a fourth. For a phenomenological paper this is a materially
-stronger statement than a jet-plus-corrections chain, and it removes a fast-simulation
+rather than by correction. For a phenomenological paper that removes a fast-simulation
 limitation instead of documenting one. On cost, the implementation is contained and is
-\emph{not} on the critical path: running the full $5\times10^{5}$-event samples through
+\emph{not} on the critical path --- running the full $5\times10^{5}$-event samples through
 the ladder and training the NSBI is the multi-day item.
 
-\paragraph{The strongest argument, if the response measurement confirms it.} The
-result of Section~\ref{sec:mtautau} changes the character of this decision. The residual
-$\mtautau$ disagreement is not a mis-measured number: it sits in gen-matched $\tau$, and
-the correction that would have to remove it is a multiplicative per-$p_{T}$ median, which
-cannot reshape a distribution. If the $\tau$ energy response really is one-sidedly
-broader on Delphes --- as an $R=0.4$ cone absorbing underlying event would make it --- then
-\emph{no} refinement of the current maps can close the gap, because a scale factor cannot
-depopulate a kinematically forbidden region. That is a hard floor on the correction
-approach, and it is the one argument here that a referee could not answer with ``tune it
+The decisive argument, \emph{if} the response measurement of Section~\ref{sec:mtautau}
+confirms it, is stronger than elegance: a multiplicative per-$p_{T}$ median cannot
+depopulate a kinematically forbidden region, so no refinement of the current maps would
+close the gap. That is the one argument here a referee could not answer with ``tune it
 better''.
 
-Note also what the audit did \emph{not} support. The claim that rebuilding retires three
-corrections at once is true but badly weighted: the visible-mass map's residual
-imperfection is worth $0.11\%$ on $\langle\mtautau\rangle$ (Section~\ref{sec:mtautau}), so
-retiring it buys almost nothing --- the map already does the work. The visible-$\tau$
-reference is a derivation-side simplification, not a per-event gain. Effectively one of
-the three matters, and it is the energy scale.
+\paragraph{What does \emph{not} argue for it.} Rebuilding is sometimes said to retire
+three corrections at once --- the visible-mass map, the energy scale and the visible-$\tau$
+reference. That is badly weighted. The visible-mass map's residual imperfection is worth
+$0.11\%$ on $\langle\mtautau\rangle$, so retiring it buys almost nothing: the map already
+does the work. The visible-$\tau$ reference is a derivation-side simplification, not a
+per-event gain. Effectively one of the three matters, and it is the energy scale.
 
 \paragraph{Against, or at least uncertain.} It cannot reproduce DeepTau, so the
-identification efficiency and fake-rate maps remain (they already work). It is \emph{not}
-obviously the cure for $\dR_{\tau\tau}$: CMS HPS also seeds from AK4 jets, so the two
-merging scales are similar and a narrow signal cone may not change which pairs are
-resolved. And the current jet-based treatment now agrees with CMS on eight of ten
-features and on the yield, so the marginal gain may be small.
+identification and fake-rate maps remain (they already work). It is \emph{not} obviously
+the cure for $\dR_{\tau\tau}$: CMS HPS also seeds from AK4 jets, so the merging scales are
+similar and a narrow signal cone may not change which pairs are resolved. And the current
+treatment already agrees on eight of ten features and on the yield.
 
 \paragraph{The caveat we most want checked.} Delphes neutral particle-flow candidates are
 \emph{calorimeter towers} ($\sim0.02\times0.02$ in the barrel), not clustered PF objects.
-Since the $\pi^{0}$ content sets both the visible mass and the decay-mode assignment, an
+Since $\pi^{0}$ content sets both the visible mass and the decay-mode assignment, an
 HPS-like reconstruction on Delphes would be approximate in exactly the place that matters
-most --- possibly no better than the anchor-sampled mass we already use.
+most --- possibly no better than the anchor-sampled mass already in use.
 
 \paragraph{Questions for $\tau$ expertise.}
-\begin{enumerate}
+\begin{enumerate}\itemsep1pt
 \item Is tower-granular neutral reconstruction adequate for a useful decay-mode
 assignment, or does it degrade the $\pi^{0}$ content enough that the rebuilt mass is no
 better than the anchor-sampled one?
-\item Signal cone: fixed $0.1$ or $p_{T}$-dependent, at the $p_{T}$ range that dominates
-here ($20$--$60\,\si{\GeV}$)?
-\item Seeding: jets (as CMS HPS does) or direct clustering of particle-flow candidates?
-Would either change the efficiency for collimated pairs, $\dR_{\tau\tau}\lesssim1$?
-\item Is the observed pattern --- over-efficient at gen $\dR_{\tau\tau}>2.5$, possibly
+\item Signal cone: fixed $0.1$ or $p_{T}$-dependent, over the $20$--$60\,\si{\GeV}$ range
+that dominates here?
+\item Seeding: jets (as CMS HPS does) or direct clustering of PF candidates? Would either
+change the efficiency for collimated pairs, $\dR_{\tau\tau}\lesssim1$?
+\item Is the $\dR_{\tau\tau}$ pattern --- over-efficient above $2.5$, possibly
 under-efficient below $1$ --- recognisable as a jet-versus-HPS effect at all, or should we
 look elsewhere?
 \item Is a jet-based $\tauh$ with anchor-measured corrections defensible in a
 phenomenological paper, or is rebuilding the expected standard?
-\item Separately: is a $1.18\times$ analysis-level yield excess acceptable for an unbinned
-NSBI study, where training uses shapes and the normalisation is fitted?
+\item Is a $1.18\times$ analysis-level yield excess acceptable for an unbinned NSBI study,
+where training uses shapes and the normalisation is fitted?
 \end{enumerate}
 
+\appendix
 \section{Reference: the studies behind these numbers}
 
-Each item is reproducible from the \texttt{delphes-pipeline} repository; scripts are
-named where relevant.
+All reproducible from the \texttt{delphes-pipeline} repository.
 
-\begin{enumerate}
-\item \textbf{$\tautau$ cutflow} (\texttt{scripts/tauh\_cutflow.py}). Five stages --- gen
-visible $\tauh$, reco object, ID, cleaned jets, FastMTT --- walked identically on both
-samples, comparing \emph{conditional} efficiencies. Initially the FastMTT stage alone
-carried the whole deficit (Delphes retained $12\%$ against CMS's $99\%$); it now agrees
-at every stage, total $1.01$. Unit tests inject a loss at one known stage at a time and
-assert it is attributed there and nowhere else.
+\begin{enumerate}\itemsep2pt
+\item \textbf{$\tautau$ cutflow} (\texttt{tauh\_cutflow.py}). Five stages --- gen visible
+$\tauh$, reco object, ID, cleaned jets, FastMTT --- walked identically on both samples,
+comparing \emph{conditional} efficiencies. Initially FastMTT alone carried the whole
+deficit (Delphes retained $12\%$ against CMS's $99\%$); now $1.01$ overall. Unit tests
+inject a loss at one known stage and assert it is attributed there and nowhere else.
 
-\item \textbf{The FastMTT failure.} The hadronic decay prior is zero unless
-$x_{\min}=(\mvis/\mtau)^{2}\le1$. A Delphes $\tau$-jet carries the AK4 jet mass
-($\mathcal{O}(5\text{--}20)\,\si{\GeV}$) against $\mtau=1.777\,\si{\GeV}$, so
-\emph{no} solution exists and $\mtautau$ returns NaN --- silently removing $\sim$89\% of
-pairs. Fixed by assigning the anchor $\tauh$ visible mass.
+\item \textbf{The FastMTT failure, and why the mass must be sampled.} The hadronic prior is
+zero unless $x_{\min}=(\mvis/\mtau)^{2}\le1$; a Delphes $\tau$-jet carries the AK4 jet mass
+($\mathcal{O}(5\text{--}20)\,\si{\GeV}$ against $\mtau=1.777$), so no solution exists and
+$\mtautau$ returns NaN --- silently removing $\sim$89\% of pairs. Assigning the anchor
+visible mass fixes it, but it must be \emph{sampled}, not averaged: the mass is a one-sided
+floor, so a single median relaxes a real constraint for every leg above it, inflating the
+width $\sim$60\% and the mean $\sim$9\% while leaving the \emph{mode} unchanged --- a
+mode-gated $Z\rightarrow\tau\tau$ candle would not catch it.
 
-\item \textbf{Why the mass must be sampled, not averaged.} The visible mass is a
-one-sided \emph{lower bound} on the energy fraction, not a smearing; its contribution to
-$\mvis$ is negligible. Assigning a single median therefore \emph{relaxes} a real
-constraint for every leg whose true mass is higher. Worked case: a 3-prong $a_1$
-($\mvis=1.26$, floor $x_{\min}=0.503$) given the median $0.77$ ($x_{\min}=0.188$) moves
-from $x=0.525$ to $x=0.250$, and $\mtautau$ from $224$ to $470\,\si{\GeV}$. Over a
-realistic decay-mode mixture the median inflates the width $\sim$60\% and the mean
-$\sim$9\% while leaving the \emph{mode} unchanged --- so a mode-gated $Z\rightarrow\tau\tau$
-candle would not catch it. The map therefore stores per-$p_{T}$ quantiles and is sampled.
+\item \textbf{The reference error, twice.} A Delphes \texttt{GenJet} is also a jet and also
+contains the underlying event, so it is \emph{not} the analogue of \texttt{GenVisTau}.
+Against a genuine visible $\tau$ ($p_{\rm vis}=p_{\tau}-p_{\nu_\tau}$, exact since a
+hadronic decay has one neutrino), the Delphes $\tau$-jet is $17\%$ harder at
+$25\,\si{\GeV}$, falling to $\sim$2\% at $250\,\si{\GeV}$. The same error appeared
+independently in the energy-scale map and in the cutflow's stage-1 acceptance.
 
-\item \textbf{The reference error, twice.} A Delphes \texttt{GenJet} is also a jet and
-also contains the underlying event, so it is \emph{not} the analogue of
-\texttt{GenVisTau}. Profiled against a genuine visible $\tau$ (built as
-$p_{\rm vis}=p_{\tau}-p_{\nu_\tau}$, valid because a hadronic decay has exactly one
-neutrino), the Delphes $\tau$-jet is $17\%$ harder at $25\,\si{\GeV}$, falling to
-$\sim$2\% at $250\,\si{\GeV}$. The same error appeared independently in the energy-scale
-map and in the cutflow's stage-1 acceptance.
+\item \textbf{Order of application.} Maps measured against CMS-scale quantities must be
+\emph{applied} at a CMS-scale $p_{T}$. Drawing tags on raw jets evaluated a steeply-rising
+efficiency $\sim$17\% too far right; applying the energy scale first moved the
+analysis-level excess $1.25\rightarrow1.18$.
 
-\item \textbf{Order of application.} The maps are all measured against CMS-scale
-quantities, so they must be \emph{applied} at a CMS-scale $p_{T}$. Drawing the tags on
-raw jets evaluated a steeply-rising efficiency $\sim$17\% too far right; applying the
-energy scale first moved the analysis-level excess $1.25\rightarrow1.18$.
+\item \textbf{Gen-$\tau$ construction check} (\texttt{gen\_tau\_check.py}). Our
+visible-$\tau$ construction scored against CMS's own \texttt{GenVisTau} on the same events:
+efficiency $0.991$, purity $0.998$, reproducing CMS's stage-1 rate to $\sim$1.6\%.
 
-\item \textbf{Generator-level $\dR_{\tau\tau}$} (\texttt{scripts/tauh\_cutflow.py
---gen-dr}). Two panels: the gen $\dR$ spectrum (do the samples \emph{start} the same?)
-and the selection efficiency against it (do they \emph{select} it the same?). Only the
-second is a detector statement. Result quoted in Section~1.
+\item \textbf{$\mvis$ and the gen-matched/fake split} (\texttt{nsbi\_overlay.py
+--diagnostics --split-gen-matched}). $\mvis$ uses neither the $\ptmiss$ nor the fit, so it
+attributes an $\mtautau$ offset to one of two disjoint causes; three unit tests pin the
+properties the reading depends on ($\mvis\le\mtautau$ always; invariant under a
+$40\rightarrow200\,\si{\GeV}$ $\ptmiss$ change; exactly linear in the $\tau$ energy scale).
+The split normalises both components to the side's \emph{total}, so the area under the fake
+curve is the fake fraction. Results in Section~\ref{sec:mtautau}.
 
-\item \textbf{Gen-$\tau$ construction check} (\texttt{scripts/gen\_tau\_check.py}). The
-CMS anchor carries both \texttt{GenPart} and \texttt{GenVisTau}, so our visible-$\tau$
-construction can be scored against CMS's own definition on the same events: efficiency
-$0.991$, purity $0.998$, and it reproduces CMS's stage-1 rate to $\sim$1.6\%.
+\item \textbf{Map accuracy audit.} No map is statistics-limited at the configured
+$2\times10^{5}$ anchor events: $b$-tag $0.25$--$0.42\%$ per bin, $\tauh$ efficiency
+$0.43$--$1.26\%$, energy scale $0.2$--$0.3\%$, $\ptmiss$ resolution $0.16$--$0.21\%$. What
+limits a map is the numerator $np$, not $n$. Two structural defects do not improve with
+statistics --- the mass quantile grid interpolates across the physically empty region
+between the $\pi^{\pm}$ atom and the $\rho$ shoulder, over-populating it $\sim6\times$; and
+the $300\,\si{\GeV}$ flat extrapolation --- but the first was measured inert and the second
+is untested.
 
-\item \textbf{The $\mvis$ split} (\texttt{scripts/nsbi\_overlay.py --diagnostics}). The
-visible di-$\tau$ mass is plotted alongside $\mtautau$ and the FastMTT inputs. Because it
-uses neither the $\ptmiss$ nor the fit, it attributes an $\mtautau$ offset to one of two
-disjoint causes. Three unit tests pin the properties the reading depends on: $\mvis\le
-\mtautau$ always (since $x\le1$); $\mvis$ is invariant under a $\ptmiss$ change
-($40\rightarrow200\,\si{\GeV}$ leaves it bit-identical while moving $\mtautau$); and
-$\mvis$ scales exactly linearly with the $\tau$ energy scale. Result in
-Section~\ref{sec:mtautau}.
-
-\item \textbf{Gen-matched / fake split}
-(\texttt{scripts/nsbi\_overlay.py --split-gen-matched --diagnostics}). Each side is split
-into pairs whose two $\tau$ candidates both sit on a hadronic gen $\tau$ and those that do
-not, with both components normalised to the side's \emph{total} so the area under the fake
-curve is the fake fraction. Applied to $\mvis$ it excludes fakes as the cause of the
-$\mtautau$ offset: $4.1\%$ Delphes against $4.3\%$ CMS with indistinguishable shapes,
-while the gen-matched component carries the whole discrepancy. The same tool gave the
-corresponding $\dR_{\tau\tau}$ result quoted in Section~1.3.
-
-\item \textbf{Map accuracy audit.} Every tuning map was checked for statistical adequacy
-at the configured $2\times10^{5}$ anchor events, and none is limiting: $b$-tag efficiency
-$0.25$--$0.42\%$ per bin, $\tauh$ efficiency $0.43$--$1.26\%$, energy scale $0.2$--$0.3\%$,
-$\ptmiss$ resolution $0.16$--$0.21\%$. What limits a map is the numerator $np$, not $n$.
-Two structural defects were found that more events do \emph{not} fix --- the $\tauh$ mass
-quantile grid interpolates linearly across the physically empty region between the
-$\pi^{\pm}$ atom and the $\rho$ shoulder, over-populating it by $\sim6\times$; and every
-map is flat-extrapolated above $300\,\si{\GeV}$, the last bin edge --- but the first was
-measured to be inert (Section~\ref{sec:mtautau}) and the second is untested. The second is
-the one worth checking, since $\kl$ discrimination lives at high $m_{HH}$ and therefore at
-high jet $p_{T}$.
-
-\item \textbf{Generator copies.} Three of our own errors had one cause: Delphes writes
-the full Pythia history, so each physical $\tau$ appears several times, while CMS NanoAOD
-\texttt{GenPart} is pruned. The rule that emerged --- anything that \textbf{counts}
-generator objects must collapse copies first; anything that \textbf{matches} them
-geometrically need not, since copies are collinear. This is why the energy-scale maps,
-the re-tagging and the overlay were never affected, while a stage-1 \emph{count} was.
+\item \textbf{Generator copies.} Three of our own errors had one cause: Delphes writes the
+full Pythia history, so each physical $\tau$ appears several times, while CMS
+\texttt{GenPart} is pruned. The rule: anything that \textbf{counts} generator objects must
+collapse copies first; anything that \textbf{matches} them geometrically need not, since
+copies are collinear.
 \end{enumerate}
 
-\paragraph{Reproducing.} Derive the maps, then run the ladder and the comparison:
+\paragraph{Reproducing.}
 \begin{verbatim}
 # NB --max-events is required: derive_maps caps the ANCHOR from the config but reads
 # the Delphes side uncapped, so without it this reads the whole production into memory.
 python -m delphes_pipeline.tuning.derive_maps --config config.v1.yml \
     --output cards/tuning/maps_v1.json --max-events 200000
 python -m delphes_pipeline.validation.run_validation --config config.v1.yml
-python scripts/tauh_cutflow.py --config config.v1.yml [...] --gen-dr plots/gen_dr
-python scripts/nsbi_overlay.py --config config.v1.yml [...] \
-    --tautau-only --diagnostics
+python scripts/tauh_cutflow.py  --config config.v1.yml [...] --gen-dr plots/gen_dr
+python scripts/nsbi_overlay.py  --config config.v1.yml [...] \
+    --tautau-only --diagnostics --split-gen-matched
 \end{verbatim}
 
 \end{document}
