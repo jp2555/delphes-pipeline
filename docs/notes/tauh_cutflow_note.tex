@@ -3,6 +3,7 @@
 \usepackage{amsmath,amssymb}
 \usepackage{booktabs}
 \usepackage{graphicx}
+\graphicspath{{figures/}}
 \usepackage{xcolor}
 \usepackage[colorlinks=true,linkcolor=blue,urlcolor=blue,citecolor=blue]{hyperref}
 \usepackage{siunitx}
@@ -196,7 +197,8 @@ its own median so the scale is removed by construction, leaves only what the map
 change. One control first: without a $\tau$ ID, Delphes matches a gen $\tau$ to the nearest
 jet of \emph{any} kind (so a lost $\tau$-jet can match a $b$-jet), while CMS matches within
 the \texttt{Tau} collection --- and mis-matching mimics the same $p_{T}$ dependence. With
-the ID required on both sides the tail survives:
+the ID required on both sides the tail survives (Table~\ref{tab:response},
+Figure~\ref{fig:response}):
 
 \begin{table}[htbp]
 \centering\small
@@ -214,6 +216,21 @@ $100$--$300$ & $1.035$ & $0.970$ & $1.195$ & $1.115$ & $1.07\times$ \\
 \caption{$\tauh$ energy response, $\tau$ ID required both sides. $q_{95}$/median is pure
 \emph{shape}: the scale is divided out.\label{tab:response}}
 \end{table}
+
+\IfFileExists{figures/tau_response_id.pdf}{%
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{tau_response_id.pdf}
+\caption{$\tauh$ energy response per gen-$p_{T}$ bin, $\tau$ ID required on both sides.
+\textbf{Top:} as measured --- the offset \texttt{tau\_escale} is built to remove.
+\textbf{Bottom (log):} each side divided by its \emph{own} median, so the scale is gone by
+construction and only the shape remains --- i.e.\ only what a multiplicative map
+\emph{cannot} change. The Delphes shelf above $1.5\times$ shrinks with $p_{T}$ and is
+consistent with CMS by $100$--$300\,\si{\GeV}$; CMS is flat throughout. Numbers in
+Table~\ref{tab:response}.\label{fig:response}}
+\end{figure}}{%
+\par\noindent\emph{[Figure omitted: \texttt{figures/tau\_response\_id.pdf} not present.
+Run \texttt{tau\_response.py} with \texttt{-{}-require-id} and copy its output there.]}\par}
 
 CMS is flat in $p_{T}$ ($1.10$--$1.14$), as a calibrated object with constant fractional
 resolution should be ($q_{90}$/median $=1.076\Rightarrow\sigma\simeq6\%$, right for HPS), so
