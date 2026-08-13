@@ -77,7 +77,9 @@ def measure(ev, *, nano=False):
                     ev.met[keep], ev.genmet[keep])
 
 
-def _project(cand, vis, met, gmet):
+def _project(cand, vis, met, gmet, extra=None):
+    """Returns (|D|, R.u, R.v) and, when ``extra`` is given, that array aligned to the
+    same surviving events — so a caller can bin the projections by anything it likes."""
     ok, ref = nearest_target_fields(cand, vis, _DR, ("pt", "phi"))
     n = len(cand)
     ok = ok.reshape(n, 2)
@@ -101,7 +103,11 @@ def _project(cand, vis, met, gmet):
     d = np.hypot(dx, dy)
     good = d > 1e-6
     ux, uy = dx[good] / d[good], dy[good] / d[good]
-    return d[good], rx_[good] * ux + ry_[good] * uy, -rx_[good] * uy + ry_[good] * ux
+    para = rx_[good] * ux + ry_[good] * uy
+    perp = -rx_[good] * uy + ry_[good] * ux
+    if extra is None:
+        return d[good], para, perp
+    return d[good], para, perp, np.asarray(extra)[both][good]
 
 
 def _profile(x, y, edges):
