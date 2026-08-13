@@ -20,10 +20,23 @@ RUN="pixi run -e ${ENVN} python"
 # 35-leaf whitelist means only a few percent of those 32 TB is ever transferred).
 #   SRC='root://cmsdcache-kit-disk.gridka.de:1094//store/user/sdaigler/mc_production/delphes'
 SRC="${SRC:-/ceph/jpan/gen-delphes}"
-# MANDATORY when SRC holds more than one production subtree: they carry the SAME events,
-# so spanning them double-counts. make_shards refuses rather than guessing.
-SUBTREE="${SUBTREE:-}"
-SUBARG=""; [ -n "${SUBTREE}" ] && SUBARG="--subtree ${SUBTREE}"
+
+# Production subtrees are PER SAMPLE and the hash alone is not a portable key:
+# 6d2d1cb0 is the signal *test* subtree AND the ttbar/DY v0 one, so always pair the hash
+# with _Delphes_v1/. Spanning two subtrees double-counts (they hold the same events).
+#   full production:  signal 61fd1c12 (20k files, ~392 GB, 5M evt per kappa_lambda)
+#                     ttbar  2ff38f65 (~4k files, 7.6-8.8 TB, 50M evt per channel)
+SUB_SIGNAL="${SUB_SIGNAL:-_Delphes_v1/delphes-tree-61fd1c12}"
+SUB_TTBAR="${SUB_TTBAR:-_Delphes_v1/delphes-tree-2ff38f65}"
+
+# Grid proxy, needed only when SRC is root:// . voms-proxy-init writes
+# /tmp/x509up_u$(id -u), which the worker nodes cannot see, so copy it somewhere shared:
+#   voms-proxy-init --voms cms --valid 192:00
+#   install -m 600 /tmp/x509up_u$(id -u) "$HOME/.x509up_production"
+# NB the VOMS *attribute* lifetime is often capped well below the proxy lifetime; if the
+# attribute expires mid-campaign, dCache auth fails even though the proxy looks valid.
+PROXY="${PROXY:-}"
+PROXYARG=""; [ -n "${PROXY}" ] && PROXYARG="--proxy ${PROXY}"
 
 echo "=== 1/3  maps: signal ==="
 $RUN -m delphes_pipeline.tuning.derive_maps --config config.v1.yml \
@@ -35,9 +48,9 @@ $RUN -m delphes_pipeline.tuning.derive_maps --config config.ttbar.yml \
 
 echo "=== 3/3  plan the shards ==="
 $RUN scripts/make_shards.py \
-    --sample signal "${SRC}/*kl-*Delphes_v1" cards/tuning/maps_v1.json \
-    --sample ttbar  "${SRC}/*TT*Delphes_v1"  cards/tuning/maps_ttbar_v1.json \
-    --out "${OUT}" --shard-events "${SHARD_EVENTS:-150000}" ${SUBARG}
+    --sample signal "${SRC}/*kl-*" cards/tuning/maps_v1.json      "${SUB_SIGNAL}" \
+    --sample ttbar  "${SRC}/*TT*"   cards/tuning/maps_ttbar_v1.json "${SUB_TTBAR}" \
+    --out "${OUT}" --shard-events "${SHARD_EVENTS:-150000}" ${PROXYARG}
 
 cat <<EOF
 

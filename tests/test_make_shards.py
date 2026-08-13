@@ -185,3 +185,82 @@ def test_xrootd_urls_are_not_passed_to_glob():
     assert glob.glob("root://host//store/user/x/*.root") == []
     with pytest.raises(SystemExit):
         make_shards._xrd_files("not-a-url")
+
+
+# --------------------------------------------------------------------------- #
+# Subtrees are PER SAMPLE. The full production is delphes-tree-61fd1c12 for the
+# signal but delphes-tree-2ff38f65 for ttbar/DY, so one global flag cannot express
+# the campaign — and a bare hash is not a portable key, since 6d2d1cb0 is the
+# signal TEST subtree and also the ttbar/DY v0 one.
+# --------------------------------------------------------------------------- #
+def test_each_sample_selects_its_own_subtree():
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        _tree(tmp, "GluGluHH_kl-1p00_Delphes_v1", "61fd1c12")     # signal full
+        _tree(tmp, "GluGluHH_kl-1p00_Delphes_v1", "6d2d1cb0")     # signal TEST
+        _tree(tmp, "TTto2L2Nu_Delphes_v1", "2ff38f65")            # ttbar full
+        _tree(tmp, "TTto2L2Nu_Delphes_v1", "6d2d1cb0")            # ttbar v0
+        out = tmp / "out"
+        make_shards.main([
+            "--sample", "signal", str(tmp / "*kl-*"), "/m1.json",
+            "_Delphes_v1/delphes-tree-61fd1c12",
+            "--sample", "ttbar", str(tmp / "*TT*"), "/m2.json",
+            "_Delphes_v1/delphes-tree-2ff38f65",
+            "--out", str(out), "--shard-events", "2"])
+        sh = json.load(open(out / "_plan" / "manifest.json"))["shards"]
+        for e in sh:
+            want = "61fd1c12" if e["sample"] == "signal" else "2ff38f65"
+            assert all(want in f for f in e["files"]), e
+
+
+def test_a_bare_hash_shared_between_roles_is_not_enough():
+    """6d2d1cb0 is the signal test AND the ttbar v0 subtree, so it must be paired with
+    _Delphes_v1/ — a hash-only filter would silently keep the wrong role."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        _tree(tmp, "GluGluHH_kl-1p00_Delphes_v0", "6d2d1cb0")
+        _tree(tmp, "GluGluHH_kl-1p00_Delphes_v1", "6d2d1cb0")
+        bare = make_shards._files(str(tmp / "*kl-*"), subtree="delphes-tree-6d2d1cb0")
+        paired = make_shards._files(str(tmp / "*kl-*"),
+                                    subtree="_Delphes_v1/delphes-tree-6d2d1cb0")
+        assert len(bare) == 6 and len(paired) == 3
+
+
+def test_a_bad_sample_arity_is_rejected():
+    with pytest.raises(SystemExit):
+        make_shards.main(["--sample", "sig", "/g", "--out", "/tmp/x"])
+
+
+def test_proxy_is_written_into_the_submit_when_given():
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        _tree(tmp, "GluGluHH_Delphes_v1", "61fd1c12")
+        proxy = tmp / "x509up"
+        proxy.write_text("")
+        out = tmp / "out"
+        make_shards.main(["--sample", "sig", str(tmp / "*_Delphes_v1"), "/m.json",
+                          "--out", str(out), "--shard-events", "2", "--proxy", str(proxy)])
+        sub = (out / "_plan" / "ntuplize.sub").read_text()
+        assert "x509userproxy" in sub and "use_x509userproxy       = true" in sub
+
+
+def test_remote_inputs_without_a_proxy_are_warned_about(capsys):
+    """A root:// job with no proxy fails to authenticate to dCache; silence would mean
+    discovering that only after the whole campaign has been submitted."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        out = tmp / "out"
+        (tmp / "_plan").mkdir(parents=True, exist_ok=True)
+        orig = make_shards._files
+        make_shards._files = lambda p, subtree=None: [
+            "root://h//store/a_Delphes_v1/delphes-tree-61fd1c12/f.root"]
+        try:
+            make_shards.main(["--sample", "sig", "root://h//store/*", "/m.json",
+                              "--out", str(out), "--shard-events", "2"])
+        finally:
+            make_shards._files = orig
+        assert "no --proxy given" in capsys.readouterr().out
