@@ -376,6 +376,12 @@ def main(argv=None) -> int:
         if tuning is not None:
             from delphes_pipeline.tuning.maps import RetaggedEvents
             dev = RetaggedEvents(dev, tuning, np.random.default_rng(0))
+            # Say WHICH corrections actually fired. The maps file drives this, and a file
+            # predating a map degrades silently: an overlay run against maps without
+            # tau_response quietly falls back to the multiplicative escale and looks
+            # identical to an untuned run, with nothing in the log to say so.
+            print(f"[overlay] corrections applied: "
+                  f"{', '.join(sorted(dev.retagged_fields)) or '(none)'}")
         sel_kw = dict(tautau_only=args.tautau_only, mtautau_min=args.mtautau_min, clean=args.clean,
                       jet_pt_min=args.jet_pt_min, jet_eta_max=args.jet_eta_max, clean_dr=args.clean_dr,
                       tau_pt_min=args.tau_pt_min, tau_eta_max=args.tau_eta_max,

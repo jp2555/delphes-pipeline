@@ -41,6 +41,9 @@ def main(argv: list[str] | None = None) -> int:
     M.save_maps(maps, args.output, provenance)
 
     print(f"[maps] wrote {args.output}")
+    ob = [q for q in ("tau_response", "tau_fake_response") if maps.get(q, {}).get("quantile_values")]
+    print(f"[maps] option-B resampling maps: {', '.join(ob) if ob else 'NONE'}"
+          + ("" if ob else "  <-- downstream will fall back to the multiplicative escale"))
     # print EVERY derived map. A hardcoded list here silently hid tau_mass and
     # met_resolution, which made it impossible to tell from the log whether a map had
     # actually been derived — exactly what the operator checks this output for.

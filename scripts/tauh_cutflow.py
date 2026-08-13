@@ -235,6 +235,8 @@ def main(argv=None) -> int:
         if tuning is not None:
             from delphes_pipeline.tuning.maps import RetaggedEvents
             dev = RetaggedEvents(dev, tuning, np.random.default_rng(0))
+            print(f"[cutflow] corrections applied: "
+                  f"{', '.join(sorted(dev.retagged_fields)) or '(none)'}")
         nev = NanoAODEvents(nano_by_kl[kl], branches=branches, wp=wp,
                             entry_stop=args.max_events)
         if args.gen_dr:
