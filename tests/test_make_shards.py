@@ -11,6 +11,7 @@ looks identical to a complete one.
 
 from __future__ import annotations
 
+import glob
 import json
 import os
 import sys
@@ -121,3 +122,66 @@ def test_verify_catches_a_duplicated_shard_id(capsys):
             _write(s["out"], 5, 0)          # every file stamped shard 0
         assert make_shards.verify(str(out)) == 1
         assert "DUPLICATED" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- #
+# The production carries several `delphes-tree-<hash>` subtrees per dataset holding
+# the SAME events (download_gen_delphes.sh SUBTREE_RE). Both resolve_paths and this
+# planner expand a directory with **/*.root, so spanning two of them silently
+# DOUBLE-COUNTS every event — and nothing downstream would flag it.
+# --------------------------------------------------------------------------- #
+def _tree(tmp, dataset, h, n=3):
+    d = tmp / dataset / f"delphes-tree-{h}"
+    d.mkdir(parents=True, exist_ok=True)
+    for i in range(n):
+        (d / f"f{i}.root").write_text("")
+    return d
+
+
+def test_spanning_two_subtrees_is_refused():
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        _tree(tmp, "GluGluHH_Delphes_v1", "2ff38f65")
+        _tree(tmp, "GluGluHH_Delphes_v1", "9abc1234")
+        files = make_shards._files(str(tmp / "*_Delphes_v1"))
+        assert len(files) == 6, "the recursive expansion does pick up both"
+        assert make_shards.check_subtrees("sig", files) is False
+
+
+def test_a_single_subtree_passes():
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        _tree(tmp, "GluGluHH_Delphes_v1", "2ff38f65")
+        files = make_shards._files(str(tmp / "*_Delphes_v1"))
+        assert make_shards.check_subtrees("sig", files) is True
+
+
+def test_subtree_filter_selects_one_of_several():
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        _tree(tmp, "GluGluHH_Delphes_v1", "2ff38f65")
+        _tree(tmp, "GluGluHH_Delphes_v1", "9abc1234")
+        files = make_shards._files(str(tmp / "*_Delphes_v1"), subtree="delphes-tree-2ff38f65")
+        assert len(files) == 3 and all("2ff38f65" in f for f in files)
+        assert make_shards.check_subtrees("sig", files) is True
+
+
+def test_planning_aborts_rather_than_emitting_a_double_counting_plan():
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        _tree(tmp, "GluGluHH_Delphes_v1", "2ff38f65")
+        _tree(tmp, "GluGluHH_Delphes_v1", "9abc1234")
+        with pytest.raises(SystemExit):
+            make_shards.main(["--sample", "sig", str(tmp / "*_Delphes_v1"), "/m.json",
+                              "--out", str(tmp / "out"), "--shard-events", "2"])
+
+
+def test_xrootd_urls_are_not_passed_to_glob():
+    """glob cannot expand a root:// URL; it would silently return nothing."""
+    assert glob.glob("root://host//store/user/x/*.root") == []
+    with pytest.raises(SystemExit):
+        make_shards._xrd_files("not-a-url")

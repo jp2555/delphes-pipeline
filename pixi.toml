@@ -25,6 +25,8 @@ pandas = ">=2.3,<3"
 pyarrow = "*"
 pytest = "*"
 correctionlib = "*"            # resolve b-tag WPs from jsonpog-integration (anchor tuning)
+fsspec-xrootd = "*"            # read root:// directly from dCache (uproot backend)
+xrootd = "*"                   # xrdfs, to LIST the remote tree (glob cannot)
 
 [pypi-dependencies]
 delphes-pipeline = { path = ".", editable = true }

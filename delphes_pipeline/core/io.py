@@ -208,7 +208,14 @@ class DelphesEvents:
 
     @property
     def bytes_per_event(self) -> float:
-        """On-disk size per event over the files actually read (storage projection)."""
+        """On-disk size per event over the files actually read (storage projection).
+
+        NaN for remote inputs: ``os.path.getsize`` is POSIX-only, and the pilot gate
+        compares this against ``kb_per_event_max`` at GATE severity — so a root:// run
+        would fail on the size check rather than on anything physical.
+        """
+        if any(str(p).startswith("root://") for p in self._used):
+            return float("nan")
         try:
             total = sum(os.path.getsize(p) for p in self._used)
             return total / max(self.n, 1)
