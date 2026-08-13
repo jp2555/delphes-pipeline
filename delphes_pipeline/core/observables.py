@@ -17,6 +17,8 @@ so retuning a selection happens in a single place.
 
 from __future__ import annotations
 
+from typing import Optional
+
 from dataclasses import asdict, dataclass
 
 import awkward as ak
@@ -156,7 +158,8 @@ def mother_pid(gen: ak.Array) -> ak.Array:
     return ak.where(valid, gen.pid[safe], 0)
 
 
-def prompt_mother_match(gen: ak.Array, prompt_pids=_PROMPT_MOTHER_PIDS, max_depth: int = 12) -> ak.Array:
+def prompt_mother_match(gen: ak.Array, prompt_pids=_PROMPT_MOTHER_PIDS, max_depth: int = 12,
+                        rows: Optional[ak.Array] = None) -> ak.Array:
     """Per-entry bool: is the first non-self-copy ancestor a prompt source?
 
     A single ``m1`` hop is wrong on the full Pythia / pruned-NanoAOD record: a
@@ -164,10 +167,19 @@ def prompt_mother_match(gen: ak.Array, prompt_pids=_PROMPT_MOTHER_PIDS, max_dept
     FSR / last-copy chain), with the real τ/Z/W several links up. We walk ``m1``
     past those self-copies, then test whether the first genuinely different
     ancestor is in ``prompt_pids`` (15=τ, 23=Z, 24=W).
+
+    ``rows`` restricts the WALK to a boolean subset, returning the answer over
+    ``gen[rows]`` instead of the whole record. Every caller immediately ANDs the result
+    with a narrow selection (status-1 e/μ, or ν_τ — of order 10 rows against a 2000-entry
+    Pythia record), so walking everything is pure waste: each of the ``max_depth``
+    iterations does two full-record jagged gathers, and this dominates the tuning
+    derivation. Ancestors are still looked up in the FULL record, so the answer is
+    unchanged — only the set of starting points shrinks.
     """
     n = ak.num(gen)
-    self_apid = np.abs(gen.pid)
-    cur = gen.m1
+    sub = gen if rows is None else gen[rows]
+    self_apid = np.abs(sub.pid)
+    cur = sub.m1
     for _ in range(max_depth):
         valid = (cur >= 0) & (cur < n)
         safe = ak.where(valid, cur, 0)
@@ -183,16 +195,20 @@ def prompt_mother_match(gen: ak.Array, prompt_pids=_PROMPT_MOTHER_PIDS, max_dept
     return match
 
 
-def tau_ancestor_index(gen: ak.Array, max_depth: int = 12) -> ak.Array:
+def tau_ancestor_index(gen: ak.Array, max_depth: int = 12,
+                       rows: Optional[ak.Array] = None) -> ak.Array:
     """Per-entry index of the τ each particle descends from (-1 if it descends from none).
 
     Walks ``m1`` upward and stops at the first τ. Unlike a ΔR proximity test this is
     exact: a τ→ℓνν daughter is identified by *descent*, so a soft or wide-angle lepton
     cannot escape the classification.
+
+    ``rows`` restricts the walk to a subset; see ``prompt_mother_match``.
     """
     n = ak.num(gen)
-    cur = gen.m1
-    found = ak.zeros_like(gen.m1) - 1
+    sub = gen if rows is None else gen[rows]
+    cur = sub.m1
+    found = ak.zeros_like(sub.m1) - 1
     for _ in range(max_depth):
         valid = (cur >= 0) & (cur < n)
         safe = ak.where(valid, cur, 0)
@@ -251,13 +267,13 @@ def gen_taus(gen: ak.Array, *, hadronic_only: bool = False, dr: float = 0.4,
     if veto == "geometric":
         # legacy: veto a τ with a τ-descended lepton within dr. Misses soft/wide-angle
         # daughters, so some leptonic τ are wrongly kept — kept only for comparison.
-        from_tau = gen[is_lep & prompt_mother_match(gen, (_GEN_TAU_PID,))]
+        from_tau = gen[is_lep][prompt_mother_match(gen, (_GEN_TAU_PID,), rows=is_lep)]
         return taus[~matched_to_any(taus, from_tau, dr)]
     if veto != "descent":
         raise ValueError(f"veto must be 'descent' or 'geometric' (got {veto!r})")
     # exact: a τ is leptonic iff some status-1 e/μ descends from *that* τ
-    anc = tau_ancestor_index(gen)
-    lep_anc = anc[is_lep & (anc >= 0)]
+    anc_lep = tau_ancestor_index(gen, rows=is_lep)      # walk only the status-1 e/μ
+    lep_anc = anc_lep[anc_lep >= 0]
     tau_idx = ak.local_index(gen)[np.abs(gen.pid) == _GEN_TAU_PID]
     if last_copy:
         tau_idx = tau_idx[~is_parent]
@@ -279,7 +295,7 @@ def gen_visible_taus(gen: ak.Array, *, dr: float = 0.4, veto: str = "descent") -
     """
     taus = gen_taus(gen, hadronic_only=True, dr=dr, veto=veto)
     is_nu = (np.abs(gen.pid) == 16) & (gen.status == 1)
-    nu = gen[is_nu & prompt_mother_match(gen, (_GEN_TAU_PID,))]
+    nu = gen[is_nu][prompt_mother_match(gen, (_GEN_TAU_PID,), rows=is_nu)]
     matched, v = nearest_target_fields(taus, nu, dr, ("pt", "eta", "phi"))
     tpt = ak.to_numpy(ak.flatten(taus.pt))
     teta = ak.to_numpy(ak.flatten(taus.eta))
@@ -422,10 +438,10 @@ def lepton_efficiency(events: DelphesEvents, quantity: str, *, bins=DEFAULT_PT_B
     pid = 11 if quantity == "electron_eff" else 13
     reco = events.electrons if pid == 11 else events.muons
     gen = events.gen
-    prompt = prompt_mother_match(gen, prompt_pids)   # walk past same-|PID| copies
     pt_min = float(np.asarray(bins, dtype=float)[0])
-    sel = (np.abs(gen.pid) == pid) & (gen.status == 1) & (np.abs(gen.eta) <= barrel) & (gen.pt > pt_min) & prompt
-    g = gen[sel]
+    # narrow FIRST, then walk only those rows — the walk is the dominant cost
+    sel = (np.abs(gen.pid) == pid) & (gen.status == 1) & (np.abs(gen.eta) <= barrel) & (gen.pt > pt_min)
+    g = gen[sel][prompt_mother_match(gen, prompt_pids, rows=sel)]
     matched = unique_match(g, reco, dr)
     prof = binned_efficiency(ak.to_numpy(ak.flatten(g.pt)), matched, bins, quantity=quantity, x="pt")
     prof.xlabel, prof.ylabel = "lepton pT [GeV]", quantity

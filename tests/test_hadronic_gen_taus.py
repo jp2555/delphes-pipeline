@@ -268,3 +268,43 @@ def test_two_real_taus_each_with_copies_still_give_two():
         "mass":   _f([1.777, 1.777, 0.0, 1.777, 1.777, 0.0]),
     })
     assert ak.to_list(ak.num(obs.gen_visible_taus(gen)))[0] == 2
+
+
+# --------------------------------------------------------------------------- #
+# The m1 walk is the dominant cost of the tuning derivation (measured: 830s of
+# 1112s at 200k events, in three walks). Every caller ANDs the result with a
+# narrow mask, so the walk is restricted to those rows. That is only legitimate
+# if the answer is UNCHANGED — ancestors are still looked up in the full record,
+# only the starting points shrink.
+# --------------------------------------------------------------------------- #
+def test_restricted_walk_matches_the_full_walk_exactly():
+    from delphes_pipeline.core import observables as O
+
+    gen = _gen()
+    for pids in ((15,), (15, 23, 24)):
+        for mask in (((np.abs(gen.pid) == 11) | (np.abs(gen.pid) == 13)) & (gen.status == 1),
+                     (np.abs(gen.pid) == 16) & (gen.status == 1),
+                     np.abs(gen.pid) == 15):
+            full = ak.to_numpy(ak.flatten(O.prompt_mother_match(gen, pids)[mask]))
+            sub = ak.to_numpy(ak.flatten(O.prompt_mother_match(gen, pids, rows=mask)))
+            assert full.tolist() == sub.tolist(), (pids, full, sub)
+
+
+def test_restricted_ancestor_index_matches_the_full_one():
+    from delphes_pipeline.core import observables as O
+
+    gen = _gen()
+    mask = ((np.abs(gen.pid) == 11) | (np.abs(gen.pid) == 13)) & (gen.status == 1)
+    full = ak.to_numpy(ak.flatten(O.tau_ancestor_index(gen)[mask]))
+    sub = ak.to_numpy(ak.flatten(O.tau_ancestor_index(gen, rows=mask)))
+    assert full.tolist() == sub.tolist()
+
+
+def test_rows_none_is_the_unrestricted_walk():
+    """The default must stay exactly what it was, for any caller outside this repo."""
+    from delphes_pipeline.core import observables as O
+
+    gen = _gen()
+    a = ak.to_numpy(ak.flatten(O.prompt_mother_match(gen, (15,))))
+    b = ak.to_numpy(ak.flatten(O.prompt_mother_match(gen, (15,), rows=None)))
+    assert a.tolist() == b.tolist()
