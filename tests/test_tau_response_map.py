@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from delphes_pipeline.tuning.anchor import _RESPONSE_LEVELS, _RESPONSE_QUANTILES  # noqa: E402
 from delphes_pipeline.tuning.maps import (  # noqa: E402
-    RetaggedEvents, TuningMaps, propagate_to_met, resample_tau_energy, retag_jets,
+    RetaggedEvents, TuningMaps, propagate_to_met, resample_real_tau_energy, retag_jets,
 )
 
 _N = 4000
@@ -369,3 +369,128 @@ def test_counts_centers_and_quantile_rows_stay_index_aligned():
             continue
         qv.append(np.quantile(vals[m], lv).tolist())
     assert len(qv) == len(prof.centers) == len(prof.counts)
+
+
+# --------------------------------------------------------------------------- #
+# The population bug: retag_tautag draws a FRESH Bernoulli over gen-matched jets,
+# independent of the incoming Delphes TauTag. Gating the resample on the incoming
+# bit therefore corrected one random half of the τ and left the other half raw —
+# which is why the first option-B overlay looked unchanged.
+# --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# SCOPE. Resampling REPLACES the pT rather than scaling it, so anything it reaches
+# loses both its reconstructed energy and its own escale. Nearly every jet has a
+# GenJet within dR<0.4, so an ungated fake branch rewrites the whole event: an
+# earlier version did exactly that and moved an m_bb proxy by -24%. Multi-jet
+# events on purpose — a one-jet fixture cannot see it.
+# --------------------------------------------------------------------------- #
+def _multijet():
+    """2 b-jets + 1 τ-jet + 1 light jet per event, every jet with a GenJet, no gen τ."""
+    n = 600
+    rows = [(100.0, 0.5, 0.0, 5, 0), (80.0, -0.6, 1.2, 5, 0),
+            (45.0, 0.2, 2.4, 15, 1), (60.0, 1.1, -2.0, 0, 0)]
+    col = lambda i: ak.Array([[r[i] for r in rows]] * n)
+    jets = ak.zip({"pt": col(0), "eta": col(1), "phi": col(2),
+                   "mass": ak.Array([[12.0, 10.0, 2.0, 8.0]] * n),
+                   "flavor": col(3), "tautag": col(4),
+                   "btag": ak.Array([[1, 1, 0, 0]] * n),
+                   "charge": ak.Array([[0.0] * 4] * n)})
+    genjets = ak.zip({"pt": col(0), "eta": col(1), "phi": col(2),
+                      "mass": ak.Array([[0.0] * 4] * n)})
+    gen = ak.zip({"pid": ak.Array([[21]] * n), "status": ak.Array([[1]] * n),
+                  "m1": ak.Array([[-1]] * n), "pt": ak.Array([[50.0]] * n),
+                  "eta": ak.Array([[6.0]] * n), "phi": ak.Array([[0.0]] * n),
+                  "mass": ak.Array([[0.0]] * n)})
+    return SimpleNamespace(jets=jets, gen=gen, genjets=genjets, n=n,
+                           met=ak.zip({"met": ak.Array(np.full(n, 30.0)),
+                                       "eta": ak.Array(np.zeros(n)),
+                                       "phi": ak.Array(np.zeros(n))}))
+
+
+def _flat(a):
+    return ak.to_numpy(ak.flatten(a))
+
+
+def _both_maps(real=1.0, fake=0.6):
+    row = lambda v: [v] * _RESPONSE_QUANTILES
+    mk = lambda v: {"x": "pt", "centers": [45.0, 100.0], "counts": [1000, 1000],
+                    "quantile_levels": _LEVELS.tolist(),
+                    "quantile_values": [row(v), row(v)]}
+    return TuningMaps({"tau_response": mk(real), "tau_fake_response": mk(fake)})
+
+
+def test_fake_resampling_never_touches_b_jets_or_light_jets():
+    ev = _multijet()
+    m = _both_maps().maps | _tag_maps(eff=1.0, mistag=0.0)   # only the tagged jet survives
+    jets, _, _ = retag_jets(ev, TuningMaps(m), np.random.default_rng(0))
+    pt = _flat(jets.pt).reshape(-1, 4)
+    assert pt[:, 0] == pytest.approx(100.0), "b-jet 1 must be untouched"
+    assert pt[:, 1] == pytest.approx(80.0), "b-jet 2 must be untouched"
+    assert pt[:, 3] == pytest.approx(60.0), "light jet must be untouched"
+
+
+def test_mbb_is_invariant_under_resampling():
+    """m_bb already agrees with CMS; resampling must not be able to move it."""
+    ev = _multijet()
+    m = _both_maps(fake=0.4).maps | _tag_maps(eff=1.0, mistag=0.0)
+    jets, _, _ = retag_jets(ev, TuningMaps(m), np.random.default_rng(0))
+    assert np.allclose(_flat(jets.pt).reshape(-1, 4)[:, :2], np.array([100.0, 80.0]))
+
+
+def test_bjet_escale_survives_resampling():
+    """An ungated resample overwrote the pT outright, silently discarding bjet_escale."""
+    ev = _multijet()
+    m = _both_maps().maps | _tag_maps(eff=1.0, mistag=0.0)
+    m["bjet_escale"] = {"x": "pt", "centers": [90.0], "values": [1.2]}
+    m["tau_escale"] = {"x": "pt", "centers": [45.0], "values": [1.0]}
+    jets, fields, _ = retag_jets(ev, TuningMaps(m), np.random.default_rng(0))
+    assert "escale" in fields
+    assert _flat(jets.pt).reshape(-1, 4)[:, 0] == pytest.approx(120.0, rel=1e-6)
+
+
+def _tag_maps(eff=1.0, mistag=0.0):
+    return {"tau_eff": {"x": "pt", "centers": [40.0], "values": [eff]},
+            "tau_mistag": {"x": "pt", "centers": [40.0], "values": [mistag]}}
+
+
+def test_genuine_tau_is_resampled_even_when_delphes_did_not_tag_it():
+    """The re-tag will accept this jet, so its energy must be corrected. Gating on the
+    incoming tag would leave it with a raw AK4 pT that then enters the selection."""
+    ev = _events(np.full(_N, 40.0))
+    ev.jets = ak.with_field(ev.jets, _jag(np.zeros(_N)), "tautag")   # Delphes missed it
+    m = _both_maps(real=1.0).maps | _tag_maps(eff=1.0)
+    jets, fields, _ = retag_jets(ev, TuningMaps(m), np.random.default_rng(0))
+    assert "tau_response" in fields and "tautag" in fields
+    assert ak.to_numpy(ak.flatten(jets.tautag)).all(), "the re-tag accepts it"
+    assert ak.to_numpy(ak.flatten(jets.pt)) == pytest.approx(40.0), \
+        "and its pT must have been redrawn onto the gen visible τ, not left at 56"
+
+
+def test_every_retagged_genuine_tau_has_a_resampled_pt():
+    """No τ entering the selection may keep a raw AK4 pT."""
+    ev = _events(np.full(_N, 40.0))
+    ev.jets = ak.with_field(ev.jets, _jag(np.zeros(_N)), "tautag")
+    m = _both_maps(real=1.0).maps | _tag_maps(eff=1.0)
+    jets, _, _ = retag_jets(ev, TuningMaps(m), np.random.default_rng(0))
+    tagged = ak.to_numpy(ak.flatten(jets.tautag)) == 1
+    pt = ak.to_numpy(ak.flatten(jets.pt))
+    assert tagged.any()
+    assert np.allclose(pt[tagged], 40.0), "a tagged τ still carrying 56 GeV was not resampled"
+
+
+def test_fake_resampling_uses_the_REDRAWN_tag_not_the_incoming_one():
+    """A fake is a stochastic outcome of the re-tag, so it can only be known afterwards."""
+    ev = _multijet()                      # no gen τ; light jet + b-jets + one tautag=1 jet
+    m = _both_maps(fake=0.5).maps | _tag_maps(eff=1.0, mistag=1.0)   # mistag everything
+    jets, _, _ = retag_jets(ev, TuningMaps(m), np.random.default_rng(0))
+    pt = _flat(jets.pt).reshape(-1, 4)
+    # every jet is now tagged by the mistag draw, so every jet is a fake -> all resampled
+    assert pt[:, 2] == pytest.approx(45.0 * 0.5)
+
+
+def test_fakes_are_left_alone_when_the_retag_rejects_them():
+    ev = _multijet()
+    m = _both_maps(fake=0.5).maps | _tag_maps(eff=0.0, mistag=0.0)   # nothing is tagged
+    jets, _, _ = retag_jets(ev, TuningMaps(m), np.random.default_rng(0))
+    pt = _flat(jets.pt).reshape(-1, 4)
+    assert np.allclose(pt, np.array([100.0, 80.0, 45.0, 60.0])), "no tag -> no fake resample"

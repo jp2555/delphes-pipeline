@@ -233,7 +233,7 @@ def escale_factor(events, jets: ak.Array, maps: TuningMaps, *, skip_tau=False) -
     esc = np.ones(pt.shape, dtype=float)
     is_b = flavour == 5
     esc[is_b] = _escale_lookup(maps, "bjet_escale", pt[is_b])
-    if not skip_tau:      # skipped when resample_tau_energy sets the τ pT outright
+    if not skip_tau:      # skipped when the τ pT is set outright by resampling
         esc[is_tau] = _escale_lookup(maps, "tau_escale", pt[is_tau])   # τ precedence
     return ak.unflatten(esc, counts)
 
@@ -303,64 +303,70 @@ def _has_quantiles(maps: TuningMaps, name: str) -> bool:
     return bool(m.get("quantile_values")) and bool(m.get("centers"))
 
 
-def resample_tau_energy(events, jets: ak.Array, maps: TuningMaps, rng: np.random.Generator):
-    """Option B: REDRAW each τ candidate's pT from the CMS response instead of scaling it.
+def _draw(m, ref_pt, sel, out, changed, rng):
+    """Write ``ref_pt * r`` onto the selected jets, r drawn from the map's quantiles."""
+    if sel.any():
+        out[sel] = ref_pt[sel] * _sample_quantile(m, ref_pt[sel], rng)
+        changed |= sel
+    return out, changed
 
-    ``tau_escale`` is a per-pT-bin MEDIAN ratio applied multiplicatively. It can align
+
+def resample_real_tau_energy(events, jets, maps, rng):
+    """Redraw the pT of every jet ``retag_tautag`` will treat as a GENUINE τ.
+
+    ``tau_escale`` is a per-pT-bin MEDIAN ratio applied multiplicatively: it can align
     medians and nothing else, and the Delphes response is one-sidedly broader at matched
     median (measured 3x at 20--30 GeV), so its excess survives into m_vis above the
-    kinematic limit — a scale factor cannot depopulate a forbidden region. Here instead:
+    kinematic limit. Here instead ``pT = pT_visible-gen-tau x r`` with r drawn from the
+    anchor quantiles, so the response *is* the CMS response by construction.
 
-        pT_reco = pT_ref x r,   r ~ the anchor's per-pT response quantiles
-
-    so the reconstructed response *is* the CMS response by construction, tail included.
-    Two populations, two references, because a fake has no gen τ:
-
-    * gen-matched τ candidates -> ``tau_response``      on the visible gen τ pT;
-    * fake τ candidates        -> ``tau_fake_response`` on the matched GenJet pT.
-
-    SCOPE. Only τ candidates are touched, and the gate is the incoming Delphes
-    ``TauTag`` plus the anchor's own acceptance. This is not a detail: unlike an escale
-    this *replaces* the pT outright, so letting it reach a b-jet would discard both the
-    b-jet's reconstructed energy and ``bjet_escale`` — nearly every jet has a GenJet
-    within ΔR<0.4, so an ungated fake branch rewrites the whole event. The gate is the
-    stock tag rather than the re-drawn one because the resample must precede
-    ``retag_tautag`` (the map is binned in gen pT, and the tag efficiency has to be
-    evaluated at a CMS-scale pT).
-
-    Because both maps are binned in the GEN quantity they are looked up at, this also
-    retires the reco-pT Newton step ``_escale_lookup`` needs. Returns ``(pt, changed)``.
+    SCOPE — this must be the same population ``retag_tautag`` calls genuine, i.e. jets
+    matched to a hadronic gen τ, and NOT the incoming Delphes ``TauTag``. The re-tag draws
+    a fresh Bernoulli that is independent of the incoming bit, so gating on the incoming
+    tag would resample one random half of the τ and leave the other half raw. It also has
+    to run BEFORE the re-tag, because ``tau_eff`` is evaluated at the jet pT and a steeply
+    rising efficiency read at a ~17%-too-hard pT is the error the application order exists
+    to avoid.
     """
     counts = ak.num(jets)
     pt = ak.to_numpy(ak.flatten(jets.pt)).astype(float)
-    out = pt.copy()
-    changed = np.zeros(pt.shape, dtype=bool)
+    out, changed = pt.copy(), np.zeros(pt.shape, dtype=bool)
     if not _has_quantiles(maps, "tau_response"):
         return ak.unflatten(out, counts), ak.unflatten(changed, counts)
-
-    # τ candidates only, at the acceptance the anchor measured the response on
-    tag = ak.to_numpy(ak.flatten(jets.tautag)) == 1
-    eta = np.abs(ak.to_numpy(ak.flatten(jets.eta)))
-    cand = tag & (pt > _TAU_PT_MIN) & (eta <= _TAU_ETA_MAX)
-
     vis = obs.gen_visible_taus(events.gen, dr=0.4)
     ok, ref = nearest_target_fields(jets, vis, 0.4, ("pt",))
     ref_pt = np.nan_to_num(ref["pt"], nan=0.0)
-    real = cand & ok & (ref_pt > 0)
-    if real.any():
-        out[real] = ref_pt[real] * _sample_quantile(maps.maps["tau_response"],
-                                                    ref_pt[real], rng)
-        changed |= real
+    eta = np.abs(ak.to_numpy(ak.flatten(jets.eta)))
+    sel = ok & (ref_pt > _TAU_PT_MIN) & (eta <= _TAU_ETA_MAX)   # the anchor's acceptance
+    out, changed = _draw(maps.maps["tau_response"], ref_pt, sel, out, changed, rng)
+    return ak.unflatten(out, counts), ak.unflatten(changed, counts)
 
-    # fakes: a τ candidate with NO gen τ, mirroring how the anchor defines the population
-    if _has_quantiles(maps, "tau_fake_response") and ak.fields(getattr(events, "genjets", [])):
-        ok_g, refg = nearest_target_fields(jets, events.genjets, 0.4, ("pt",))
-        gj_pt = np.nan_to_num(refg["pt"], nan=0.0)
-        fake = cand & ~ok & ok_g & (gj_pt > 0)      # ~ok = not gen-τ-matched, explicitly
-        if fake.any():
-            out[fake] = gj_pt[fake] * _sample_quantile(maps.maps["tau_fake_response"],
-                                                       gj_pt[fake], rng)
-            changed |= fake
+
+def resample_fake_tau_energy(events, jets, maps, rng):
+    """Redraw the pT of the FAKE τ that the re-tag actually accepted.
+
+    A fake has no gen τ, so its reference is the matched GenJet. Unlike the genuine case
+    this runs AFTER ``retag_tautag``: which jets became fakes is a stochastic outcome of
+    that draw, and it is the ONLY gate available — nearly every jet has a GenJet within
+    ΔR<0.4, so an ungated fake branch would rewrite b-jets and destroy m_bb.
+
+    Fakes are ~4% of the signal selection and harmless there, but ``TTto4Q`` selects them
+    exclusively, so at production scale this is the dominant background's energy scale.
+    """
+    counts = ak.num(jets)
+    pt = ak.to_numpy(ak.flatten(jets.pt)).astype(float)
+    out, changed = pt.copy(), np.zeros(pt.shape, dtype=bool)
+    if not _has_quantiles(maps, "tau_fake_response") or not ak.fields(
+            getattr(events, "genjets", [])):
+        return ak.unflatten(out, counts), ak.unflatten(changed, counts)
+    tag = ak.to_numpy(ak.flatten(jets.tautag)) == 1          # the RE-DRAWN tag
+    vis = obs.gen_visible_taus(events.gen, dr=0.4)
+    genuine = ak.to_numpy(ak.flatten(matched_to_any(jets, vis, 0.4)))
+    ok_g, refg = nearest_target_fields(jets, events.genjets, 0.4, ("pt",))
+    gj = np.nan_to_num(refg["pt"], nan=0.0)
+    eta = np.abs(ak.to_numpy(ak.flatten(jets.eta)))
+    sel = tag & ~genuine & ok_g & (gj > _TAU_PT_MIN) & (eta <= _TAU_ETA_MAX)
+    out, changed = _draw(maps.maps["tau_fake_response"], gj, sel, out, changed, rng)
     return ak.unflatten(out, counts), ak.unflatten(changed, counts)
 
 
@@ -443,19 +449,12 @@ def retag_jets(events, maps: TuningMaps, rng: np.random.Generator, *,
         jets = ak.with_field(jets, jets.pt * esc, "pt")
         jets = ak.with_field(jets, jets.mass * esc, "mass")
         fields.add("escale")
-    met = None
+    met, before, moved = None, jets, None
     if resample:
-        before = jets
-        new_pt, changed = resample_tau_energy(events, jets, maps, rng)
+        # GENUINE τ first: this is the population retag_tautag will call genuine, and
+        # tau_eff is read at the jet pT, so it must already be at CMS scale here.
+        new_pt, moved = resample_real_tau_energy(events, jets, maps, rng)
         jets = ak.with_field(jets, new_pt, "pt")
-        # only the resampled jets move the recoil; the b-escale deliberately does not
-        # propagate, which is pre-existing behaviour and out of scope here
-        # OFF by default: the AK4-vs-visible-τ gap is largely a cone DEFINITION offset,
-        # not mismeasured energy, so moving all of it into the recoil would fabricate
-        # missing energy and hand back part of the m_ττ correction. Enable only once
-        # met_residuals projected on the di-τ axis shows the excess really is missing.
-        if propagate_met:
-            met = propagate_to_met(events.met, before[changed], jets[changed])
         fields.add("tau_response")
     if all(q in maps.maps for q in BTAG_MAP_QUANTITIES):
         jets = ak.with_field(jets, retag_btag(events, maps, rng, jets), "btag")
@@ -463,6 +462,16 @@ def retag_jets(events, maps: TuningMaps, rng: np.random.Generator, *,
     if all(q in maps.maps for q in TAU_MAP_QUANTITIES):
         jets = ak.with_field(jets, retag_tautag(events, maps, rng, jets), "tautag")
         fields.add("tautag")
+    if resample:
+        # FAKES only now: which jets are fakes is an outcome of the draw above.
+        new_pt, mf = resample_fake_tau_energy(events, jets, maps, rng)
+        jets = ak.with_field(jets, new_pt, "pt")
+        moved = mf if moved is None else (moved | mf)
+        # propagation OFF by default: the AK4-vs-visible-τ gap is largely a cone
+        # DEFINITION offset, not mismeasured energy, so moving all of it into the recoil
+        # would fabricate missing energy and hand back part of the m_ττ correction.
+        if propagate_met:
+            met = propagate_to_met(events.met, before[moved], jets[moved])
     if "tau_mass" in maps.maps:
         jets = ak.with_field(jets, tau_visible_mass(jets, maps, rng), "mass")
         fields.add("tau_mass")
