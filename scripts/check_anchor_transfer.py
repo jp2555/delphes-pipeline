@@ -36,6 +36,8 @@ from delphes_pipeline.validation.run_validation import load_config
 
 _MED_TOL = 0.01      # scale: enters m_tautau linearly
 _SHAPE_TOL = 0.05    # tail: the thing a multiplicative map cannot fix
+_NSIGMA = 2.0        # ... but a bin only DIFFERS if it also exceeds this many sigma
+_BOOT = 400
 _REPORT_Q = (0.75, 0.90, 0.95, 0.99)
 
 
@@ -49,30 +51,71 @@ def _profile(path, cfg, *, max_events, fake):
     return nano.n, prof
 
 
-def _rows(prof):
-    """(center, median, {q: q/median}) per populated pT bin."""
+def _boot_sigma(lv, row, n, rng):
+    """Sampling spread of the median and of q/median at this bin's OWN statistics.
+
+    A quantile's uncertainty depends on the local density, which is not stored — but the
+    stored grid IS the quantile function, so drawing n values through it by inverse-CDF
+    and re-measuring reproduces the sampling distribution directly, correlations between
+    the median and the tail quantile included. That is what makes a "DIFFERS" meaningful:
+    fake τ are rare, so a 6% spread on q95 from a few hundred entries is noise, not a
+    process difference.
+    """
+    if n < 2:
+        return float("inf"), {q: float("inf") for q in _REPORT_Q}
+    u = rng.random((_BOOT, int(min(n, 20000))))
+    draws = np.interp(u, lv, row)
+    meds = np.median(draws, axis=1)
+    med_sigma = float(np.std(meds) / max(np.mean(meds), 1e-12))
+    ratios = {q: float(np.std(np.quantile(draws, q, axis=1) / meds)
+                       / max(np.mean(np.quantile(draws, q, axis=1) / meds), 1e-12))
+              for q in _REPORT_Q}
+    return med_sigma, ratios
+
+
+def _rows(prof, rng=None):
+    """(center, n, median, {q: q/median}, sigmas) per populated pT bin."""
     lv = np.asarray((prof.aux or {}).get("quantile_levels", []), dtype=float)
     qv = np.asarray((prof.aux or {}).get("quantile_values", []), dtype=float)
+    cnt = np.asarray(getattr(prof, "counts", []), dtype=float)
+    rng = rng or np.random.default_rng(0)
     out = []
-    for c, row in zip(np.asarray(prof.centers, dtype=float), qv):
+    for i, (c, row) in enumerate(zip(np.asarray(prof.centers, dtype=float), qv)):
         med = float(np.interp(0.5, lv, row))
         if med <= 0:
             continue
-        out.append((float(c), med, {q: float(np.interp(q, lv, row)) / med for q in _REPORT_Q}))
+        n = int(cnt[i]) if i < cnt.size else 0
+        ms, rs = _boot_sigma(lv, row, n, rng)
+        out.append((float(c), n, med,
+                    {q: float(np.interp(q, lv, row)) / med for q in _REPORT_Q}, (ms, rs)))
     return out
 
 
 def compare(a_rows, b_rows):
-    """Pair bins by nearest center; report the two deltas that decide transfer."""
+    """Pair bins by nearest center; a bin DIFFERS only if it beats BOTH gates.
+
+    The relative tolerance alone flags sparse bins whose tail quantiles are pure noise;
+    significance alone flags physically irrelevant differences once the samples are large.
+    A bin therefore passes if it is within tolerance OR within ``_NSIGMA`` — the same OR
+    convention the level-0 closure uses.
+    """
     verdicts = []
-    for ca, ma, qa in a_rows:
+    for ca, na, ma, qa, (msa, rsa) in a_rows:
         if not b_rows:
             continue
-        cb, mb, qb = min(b_rows, key=lambda r: abs(r[0] - ca))
+        cb, nb, mb, qb, (msb, rsb) = min(b_rows, key=lambda r: abs(r[0] - ca))
         d_med = abs(mb / ma - 1.0)
-        d_shape = max(abs(qb[q] / qa[q] - 1.0) for q in _REPORT_Q)
-        ok = d_med <= _MED_TOL and d_shape <= _SHAPE_TOL
-        verdicts.append((ca, ma, mb, d_med, d_shape, ok))
+        s_med = float(np.hypot(msa, msb)) or float("inf")
+        d_shape, s_shape = 0.0, float("inf")
+        for q in _REPORT_Q:
+            d = abs(qb[q] / qa[q] - 1.0)
+            if d > d_shape:
+                d_shape, s_shape = d, float(np.hypot(rsa[q], rsb[q]))
+        z_med = d_med / s_med if s_med else float("inf")
+        z_shape = d_shape / s_shape if s_shape else float("inf")
+        ok = ((d_med <= _MED_TOL or z_med <= _NSIGMA)
+              and (d_shape <= _SHAPE_TOL or z_shape <= _NSIGMA))
+        verdicts.append((ca, min(na, nb), ma, mb, d_med, z_med, d_shape, z_shape, ok))
     return verdicts
 
 
@@ -100,12 +143,12 @@ def main(argv=None):
         return 1
 
     v = compare(ra, rb)
-    print(f"\n{'pT':>7s} {la+' med':>10s} {lb+' med':>10s} {'d med':>8s} "
-          f"{'d shape':>9s}   verdict")
-    for c, ma, mb, dm, ds, ok in v:
-        print(f"{c:7.0f} {ma:10.4f} {mb:10.4f} {dm*100:7.2f}% {ds*100:8.2f}%   "
-              f"{'ok' if ok else 'DIFFERS'}")
-    bad = [x for x in v if not x[5]]
+    print(f"\n{'pT':>6s} {'n(min)':>7s} {la+' med':>9s} {lb+' med':>9s} "
+          f"{'d med':>7s} {'z':>5s} {'d shape':>8s} {'z':>5s}   verdict")
+    for c, n, ma, mb, dm, zm, ds, zs, ok in v:
+        print(f"{c:6.0f} {n:7d} {ma:9.4f} {mb:9.4f} {dm*100:6.2f}% {zm:5.1f} "
+              f"{ds*100:7.2f}% {zs:5.1f}   {'ok' if ok else 'DIFFERS'}")
+    bad = [x for x in v if not x[-1]]
     print(f"\n[transfer] {len(bad)}/{len(v)} bins exceed "
           f"({_MED_TOL*100:.0f}% median, {_SHAPE_TOL*100:.0f}% shape)")
     if bad:
@@ -117,8 +160,11 @@ def main(argv=None):
     os.makedirs(args.out, exist_ok=True)
     fig, axes = plt.subplots(1, 2, figsize=(11, 4))
     for lab, rows in ((la, ra), (lb, rb)):
-        axes[0].plot([r[0] for r in rows], [r[1] for r in rows], marker="o", label=lab)
-        axes[1].plot([r[0] for r in rows], [r[2][0.95] for r in rows], marker="o", label=lab)
+        axes[0].errorbar([r[0] for r in rows], [r[2] for r in rows],
+                         yerr=[r[2] * r[4][0] for r in rows], marker="o", capsize=2, label=lab)
+        axes[1].errorbar([r[0] for r in rows], [r[3][0.95] for r in rows],
+                         yerr=[r[3][0.95] * r[4][1][0.95] for r in rows],
+                         marker="o", capsize=2, label=lab)
     axes[0].set_xlabel("gen pT [GeV]"), axes[0].set_ylabel("median response")
     axes[1].set_xlabel("gen pT [GeV]"), axes[1].set_ylabel("q95 / median (shape)")
     for ax in axes:

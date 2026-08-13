@@ -52,6 +52,15 @@ def main(argv: list[str] | None = None) -> int:
         quant = m.get("quantile_values")
         extra = f"   + {len(m.get('quantile_levels', []))}-pt quantiles/bin" if quant else ""
         print(f"  {q:18s} {[round(x, 3) for x in v]}{extra}")
+        # counts, because a bin with too few entries produces a value that LOOKS like a
+        # measurement (a median tau mass of 0.14 = m_pi is a one-prong artefact, not a
+        # trend) and is then applied to every Delphes object in that pT range
+        cnt = m.get("counts") or []
+        if cnt:
+            thin = [i for i, n in enumerate(cnt) if n < M.MIN_QUANTILE_COUNT]
+            flag = (f"   <-- bins {thin} below {M.MIN_QUANTILE_COUNT}"
+                    if thin and quant else "")
+            print(f"  {'':18s} n = {list(cnt)}{flag}")
     return 0
 
 

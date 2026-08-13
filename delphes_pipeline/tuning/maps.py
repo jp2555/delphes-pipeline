@@ -34,6 +34,11 @@ _GEN_TAU_PID = 15
 # prior has no valid solution; cap just under it (CMS medians sit near 0.8-1.2).
 _MAX_TAU_VIS_MASS = 1.70
 _TAU_PT_MIN, _TAU_ETA_MAX = 20.0, 2.5   # the acceptance the anchor response is measured on
+# A quantile grid needs far more entries than a mean. min_bin_count=25 gates the level-0
+# closure VERDICT but never the derivation, so a near-empty bin is serialised and then
+# applied to every object in its pT range. Below this, fall back to the nearest bin that
+# does have the statistics rather than sampling noise.
+MIN_QUANTILE_COUNT = 200
 
 
 def _serialise(p) -> dict:
@@ -266,11 +271,31 @@ def _sample_quantile(m: dict, x: np.ndarray, rng: np.random.Generator) -> np.nda
     qvals = np.asarray(m["quantile_values"], dtype=float)
     centers = np.asarray(m["centers"], dtype=float)
     idx = np.abs(x[:, None] - centers[None, :]).argmin(axis=1)
+    idx = _redirect_thin_bins(idx, centers, m.get("counts"))
     pos = rng.random(x.shape) * (levels.size - 1)
     lo = np.floor(pos).astype(int)
     hi = np.minimum(lo + 1, levels.size - 1)
     frac = pos - lo
     return qvals[idx, lo] * (1.0 - frac) + qvals[idx, hi] * frac
+
+
+def _redirect_thin_bins(idx, centers, counts):
+    """Point draws from an under-populated bin at the nearest adequately-populated one.
+
+    Alignment note: ``counts``, ``centers`` and ``quantile_values`` are all produced by the
+    same per-bin loop, which skips only EMPTY bins, so they are index-aligned and ``counts``
+    can be used to judge a quantile row without storing anything new.
+    """
+    if counts is None:
+        return idx
+    n = np.asarray(counts, dtype=float)
+    if n.size != centers.size:
+        return idx                      # shapes disagree -> trust the map as written
+    good = np.flatnonzero(n >= MIN_QUANTILE_COUNT)
+    if good.size == 0 or good.size == centers.size:
+        return idx                      # nothing usable, or nothing to fix
+    nearest = good[np.abs(centers[:, None] - centers[None, good]).argmin(axis=1)]
+    return nearest[idx]
 
 
 def _has_quantiles(maps: TuningMaps, name: str) -> bool:

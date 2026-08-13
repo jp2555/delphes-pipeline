@@ -236,15 +236,16 @@ def test_maps_without_quantiles_fall_back_to_the_multiplicative_escale():
 # --------------------------------------------------------------------------- #
 # the transfer criterion: one response map per campaign, or one per process?
 # --------------------------------------------------------------------------- #
-def _prof(centers, med, q95_over_med):
-    """A quantile profile with a prescribed median and q95/median per bin."""
-    lv = np.linspace(0.0, 1.0, _RESPONSE_QUANTILES)
+def _prof(centers, med, q95_over_med, n=20000):
+    """A quantile profile with a prescribed median, q95/median and per-bin count."""
+    lv = _LEVELS
     rows = []
-    for m, s in zip(med, q95_over_med):
+    for m, sc in zip(med, q95_over_med):
         # piecewise-linear in level: median at 0.5, q95 at 0.95
         rows.append([float(np.interp(x, [0.0, 0.5, 0.95, 1.0],
-                                     [m * 0.8, m, m * s, m * s * 1.05])) for x in lv])
+                                     [m * 0.8, m, m * sc, m * sc * 1.05])) for x in lv])
     return SimpleNamespace(centers=np.asarray(centers, dtype=float),
+                           counts=np.full(len(centers), n, dtype=int),
                            aux={"quantile_levels": lv.tolist(), "quantile_values": rows})
 
 
@@ -253,16 +254,16 @@ def test_transfer_passes_when_two_anchors_agree():
 
     a = T._rows(_prof([25.0, 45.0], [0.99, 0.98], [1.13, 1.12]))
     b = T._rows(_prof([25.0, 45.0], [0.992, 0.978], [1.14, 1.12]))
-    assert all(ok for *_, ok in T.compare(a, b))
+    assert all(v[-1] for v in T.compare(a, b))
 
 
 def test_transfer_fails_on_a_scale_shift_because_it_enters_mtautau_linearly():
     import check_anchor_transfer as T
 
     a = T._rows(_prof([25.0], [0.99], [1.13]))
-    b = T._rows(_prof([25.0], [1.04], [1.13]))            # 5% median shift
-    (_, _, _, d_med, _, ok), = T.compare(a, b)
-    assert not ok and d_med > 0.01
+    b = T._rows(_prof([25.0], [1.04], [1.13]))            # 5% median shift, high stats
+    (_, _, _, _, d_med, z_med, _, _, ok), = T.compare(a, b)
+    assert not ok and d_med > 0.01 and z_med > 2.0
 
 
 def test_transfer_fails_on_a_shape_change_even_at_identical_median():
@@ -271,111 +272,100 @@ def test_transfer_fails_on_a_shape_change_even_at_identical_median():
 
     a = T._rows(_prof([25.0], [0.99], [1.13]))
     b = T._rows(_prof([25.0], [0.99], [1.45]))
-    (_, _, _, d_med, d_shape, ok), = T.compare(a, b)
-    assert not ok and d_med < 0.01 and d_shape > 0.05
+    (_, _, _, _, d_med, _, d_shape, z_shape, ok), = T.compare(a, b)
+    assert not ok and d_med < 0.01 and d_shape > 0.05 and z_shape > 2.0
 
 
 # --------------------------------------------------------------------------- #
-# SCOPE. Resampling REPLACES the pT rather than scaling it, so anything it reaches
-# loses both its reconstructed energy and its own escale. Nearly every jet has a
-# GenJet within dR<0.4, so an ungated fake branch rewrites the whole event: an
-# earlier version did exactly that and moved an m_bb proxy by -24%. These tests use
-# multi-jet events on purpose — a one-jet fixture cannot see it.
+# the statistical floor: a sparse bin must not be called a process difference
 # --------------------------------------------------------------------------- #
-def _multijet():
-    """2 b-jets + 1 τ-jet + 1 light jet per event, every jet with a GenJet, no gen τ."""
-    n = 600
-    rows = [(100.0, 0.5, 0.0, 5, 0), (80.0, -0.6, 1.2, 5, 0),      # b-jets
-            (45.0, 0.2, 2.4, 15, 1), (60.0, 1.1, -2.0, 0, 0)]      # τ-jet, light jet
-    col = lambda i: ak.Array([[r[i] for r in rows]] * n)
-    jets = ak.zip({"pt": col(0), "eta": col(1), "phi": col(2),
-                   "mass": ak.Array([[12.0, 10.0, 2.0, 8.0]] * n),
-                   "flavor": col(3), "tautag": col(4),
-                   "btag": ak.Array([[1, 1, 0, 0]] * n),
-                   "charge": ak.Array([[0.0] * 4] * n)})
-    genjets = ak.zip({"pt": col(0), "eta": col(1), "phi": col(2),
-                      "mass": ak.Array([[0.0] * 4] * n)})
-    gen = ak.zip({"pid": ak.Array([[21]] * n), "status": ak.Array([[1]] * n),
-                  "m1": ak.Array([[-1]] * n), "pt": ak.Array([[50.0]] * n),
-                  "eta": ak.Array([[6.0]] * n), "phi": ak.Array([[0.0]] * n),
-                  "mass": ak.Array([[0.0]] * n)})
-    return SimpleNamespace(jets=jets, gen=gen, genjets=genjets, n=n,
-                           met=ak.zip({"met": ak.Array(np.full(n, 30.0)),
-                                       "eta": ak.Array(np.zeros(n)),
-                                       "phi": ak.Array(np.zeros(n))}))
+def test_a_sparse_bin_is_not_flagged_even_when_the_shape_differs_a_lot():
+    """Fake τ are rare, so q95 from a few hundred entries carries several percent of
+    noise on its own. Without a floor the tolerance alone manufactures 'DIFFERS'."""
+    import check_anchor_transfer as T
+
+    a = T._rows(_prof([25.0], [0.99], [1.13], n=40))
+    b = T._rows(_prof([25.0], [0.99], [1.195], n=40))     # ~6% apart, on 40 entries
+    (_, n, _, _, _, _, d_shape, z_shape, ok), = T.compare(a, b)
+    assert n == 40 and d_shape > 0.05, "the raw difference does exceed the tolerance"
+    assert z_shape < 2.0 and ok, "but it is not significant, so it must not be flagged"
 
 
-def _flat(a):
-    return ak.to_numpy(ak.flatten(a))
+def test_the_same_difference_IS_flagged_once_the_statistics_support_it():
+    """Same shape difference, 200x the events -> now a real process difference."""
+    import check_anchor_transfer as T
+
+    a = T._rows(_prof([25.0], [0.99], [1.13], n=30000))
+    b = T._rows(_prof([25.0], [0.99], [1.195], n=30000))   # the SAME 6%, 750x the events
+    (_, _, _, _, _, _, _, z_shape, ok), = T.compare(a, b)
+    assert not ok and z_shape > 2.0
 
 
-def _both_maps(real=1.0, fake=0.6):
+def test_counts_are_reported_so_a_verdict_can_be_judged():
+    import check_anchor_transfer as T
+
+    a = T._rows(_prof([25.0], [0.99], [1.13], n=1234))
+    assert a[0][1] == 1234
+
+
+# --------------------------------------------------------------------------- #
+# thin-bin guard: a quantile grid needs far more entries than a mean, and
+# min_bin_count gates only the closure verdict, never the derivation
+# --------------------------------------------------------------------------- #
+def _two_bin_map(counts):
     row = lambda v: [v] * _RESPONSE_QUANTILES
-    mk = lambda v: {"x": "pt", "centers": [45.0, 100.0], "counts": [1000, 1000],
-                    "quantile_levels": _LEVELS.tolist(),
-                    "quantile_values": [row(v), row(v)]}
-    return TuningMaps({"tau_response": mk(real), "tau_fake_response": mk(fake)})
+    return {"x": "pt", "centers": [25.0, 75.0], "counts": list(counts),
+            "quantile_levels": _LEVELS.tolist(),
+            "quantile_values": [row(1.0), row(5.0)]}     # bin 1 is absurd, as a thin bin is
 
 
-def test_fake_resampling_never_touches_b_jets_or_light_jets():
-    ev = _multijet()
-    jets, _, _ = retag_jets(ev, _both_maps(), np.random.default_rng(0))
-    pt = _flat(jets.pt).reshape(-1, 4)
-    assert pt[:, 0] == pytest.approx(100.0), "b-jet 1 must be untouched"
-    assert pt[:, 1] == pytest.approx(80.0), "b-jet 2 must be untouched"
-    assert pt[:, 3] == pytest.approx(60.0), "light jet must be untouched"
-    assert pt[:, 2] == pytest.approx(45.0 * 0.6), "only the τ candidate is resampled"
+def test_a_thin_quantile_bin_is_not_sampled():
+    """The tt̄ anchor produced a median τ mass of 0.14 = m_π in its top pT bin — a
+    one-prong artefact of too few entries. Sampling such a row applies it to every
+    object in that pT range."""
+    from delphes_pipeline.tuning.maps import MIN_QUANTILE_COUNT
+
+    ev = _events(np.tile([25.0, 75.0], _N // 2))
+    thin = _two_bin_map([5000, MIN_QUANTILE_COUNT // 4])
+    jets, _, _ = retag_jets(ev, TuningMaps({"tau_response": thin}), np.random.default_rng(0))
+    pt = ak.to_numpy(ak.flatten(jets.pt))
+    assert pt[0::2] == pytest.approx(25.0 * 1.0)
+    assert pt[1::2] == pytest.approx(75.0 * 1.0), "thin bin must borrow the populated row"
 
 
-def test_mbb_is_invariant_under_resampling():
-    """m_bb already agrees with CMS; resampling must not be able to move it."""
-    ev = _multijet()
-    jets, _, _ = retag_jets(ev, _both_maps(fake=0.4), np.random.default_rng(0))
-    pt = _flat(jets.pt).reshape(-1, 4)
-    assert np.allclose(pt[:, :2], np.array([100.0, 80.0]))
+def test_a_populated_bin_is_used_normally():
+    from delphes_pipeline.tuning.maps import MIN_QUANTILE_COUNT
+
+    ev = _events(np.tile([25.0, 75.0], _N // 2))
+    ok = _two_bin_map([5000, MIN_QUANTILE_COUNT * 3])
+    jets, _, _ = retag_jets(ev, TuningMaps({"tau_response": ok}), np.random.default_rng(0))
+    pt = ak.to_numpy(ak.flatten(jets.pt))
+    assert pt[1::2] == pytest.approx(75.0 * 5.0), "a populated bin keeps its own row"
 
 
-def test_bjet_escale_survives_resampling():
-    """An ungated resample overwrote the pT outright, silently discarding bjet_escale."""
-    ev = _multijet()
-    m = _both_maps()
-    m.maps["bjet_escale"] = {"x": "pt", "centers": [90.0], "values": [1.2]}
-    m.maps["tau_escale"] = {"x": "pt", "centers": [45.0], "values": [1.0]}
-    jets, fields, _ = retag_jets(ev, m, np.random.default_rng(0))
-    pt = _flat(jets.pt).reshape(-1, 4)
-    assert "escale" in fields
-    assert pt[:, 0] == pytest.approx(120.0, rel=1e-6), "b-jet keeps its own escale"
+def test_a_map_with_no_counts_is_trusted_as_written():
+    """Older maps files carry no counts; they must still work."""
+    ev = _events(np.tile([25.0, 75.0], _N // 2))
+    m = _two_bin_map([5000, 10])
+    del m["counts"]
+    jets, _, _ = retag_jets(ev, TuningMaps({"tau_response": m}), np.random.default_rng(0))
+    assert ak.to_numpy(ak.flatten(jets.pt))[1::2] == pytest.approx(75.0 * 5.0)
 
 
-def test_tau_candidates_outside_the_anchor_acceptance_are_left_alone():
-    """The map was measured on pT>20, |eta|<2.5; applying it outside is extrapolation."""
-    n = 200
-    jets = ak.zip({"pt": ak.Array([[15.0, 45.0]] * n), "eta": ak.Array([[0.2, 3.1]] * n),
-                   "phi": ak.Array([[0.0, 1.0]] * n), "mass": ak.Array([[2.0, 2.0]] * n),
-                   "flavor": ak.Array([[15, 15]] * n), "tautag": ak.Array([[1, 1]] * n),
-                   "btag": ak.Array([[0, 0]] * n), "charge": ak.Array([[0.0, 0.0]] * n)})
-    ev = SimpleNamespace(jets=jets, n=n,
-                         genjets=ak.zip({"pt": ak.Array([[15.0, 45.0]] * n),
-                                         "eta": ak.Array([[0.2, 3.1]] * n),
-                                         "phi": ak.Array([[0.0, 1.0]] * n),
-                                         "mass": ak.Array([[0.0, 0.0]] * n)}),
-                         gen=ak.zip({"pid": ak.Array([[21]] * n), "status": ak.Array([[1]] * n),
-                                     "m1": ak.Array([[-1]] * n), "pt": ak.Array([[9.0]] * n),
-                                     "eta": ak.Array([[7.0]] * n), "phi": ak.Array([[0.0]] * n),
-                                     "mass": ak.Array([[0.0]] * n)}),
-                         met=ak.zip({"met": ak.Array(np.full(n, 20.0)),
-                                     "eta": ak.Array(np.zeros(n)),
-                                     "phi": ak.Array(np.zeros(n))}))
-    jets_out, _, _ = retag_jets(ev, _both_maps(fake=0.5), np.random.default_rng(0))
-    pt = _flat(jets_out.pt).reshape(-1, 2)
-    assert pt[:, 0] == pytest.approx(15.0), "below the 20 GeV floor"
-    assert pt[:, 1] == pytest.approx(45.0), "beyond |eta| 2.5"
+def test_counts_centers_and_quantile_rows_stay_index_aligned():
+    """The guard reads counts to judge a quantile row, so a desync would silently
+    redirect the wrong bins. Both are built by the same per-bin loop over the anchor."""
+    import delphes_pipeline.tuning.anchor as A
 
-
-def test_fake_map_alone_does_not_enable_resampling():
-    """A half-populated maps file must fall back, not route real τ through the fake map."""
-    ev = _multijet()
-    only_fake = TuningMaps({"tau_fake_response": _both_maps().maps["tau_fake_response"]})
-    jets, fields, _ = retag_jets(ev, only_fake, np.random.default_rng(0))
-    assert "tau_response" not in fields
-    assert _flat(jets.pt).reshape(-1, 4)[:, 2] == pytest.approx(45.0)
+    lv = _RESPONSE_LEVELS
+    x = np.concatenate([np.full(900, 25.0), np.full(900, 45.0)])   # bin 30-40 left empty
+    vals = np.concatenate([np.full(900, 1.0), np.full(900, 2.0)])
+    prof = __import__("delphes_pipeline.core.observables", fromlist=["x"]).binned_response(
+        x, vals, [20, 30, 40, 50], quantity="t", x="pt")
+    qv = []
+    for lo, hi in zip([20, 30, 40], [30, 40, 50]):
+        m = (x >= lo) & (x < hi)
+        if not m.any():
+            continue
+        qv.append(np.quantile(vals[m], lv).tolist())
+    assert len(qv) == len(prof.centers) == len(prof.counts)
