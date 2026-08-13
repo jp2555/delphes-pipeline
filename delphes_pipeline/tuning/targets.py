@@ -38,7 +38,8 @@ PROFILE_OBSERVABLES = {
     "muon_eff": lambda ev, bins: obs.lepton_efficiency(ev, "muon_eff", bins=bins),
     "tau_energy_response": lambda ev, bins: obs.tau_energy_response(ev, bins=bins),
     "bjet_energy_response": lambda ev, bins: obs.bjet_energy_response(ev, bins=bins),
-    "met_resolution": lambda ev, bins: obs.met_resolution(ev),
+    # vs jet-HT, matching the anchor: ScalarHT and sumEt are not the same variable
+    "met_resolution": lambda ev, bins: obs.met_resolution_vs_ht(ev),
 }
 
 

@@ -464,6 +464,62 @@ def met_residuals(events: DelphesEvents):
     return mx - gmx, my - gmy, sumet
 
 
+# Activity bins for the CROSS-TIER MET resolution. Coarser than DEFAULT_SUMET_BINS
+# because each bin has to support a width, not a mean.
+DEFAULT_HT_BINS = [0.0, 120.0, 180.0, 250.0, 350.0, 500.0, 900.0, 1e9]
+_HT_JET_PT_MIN, _HT_JET_ETA_MAX = 20.0, 4.7
+
+
+def jet_ht(events, *, pt_min=_HT_JET_PT_MIN, eta_max=_HT_JET_ETA_MAX) -> np.ndarray:
+    """Event HT from jets — ONE definition valid on both Delphes and NanoAOD.
+
+    Deliberately NOT ``ScalarHT`` / ``sumEt``: those are defined differently on the two
+    tiers, which is why the anchor MET resolution was a single bin ("ΣE_T definitions
+    differ"). Recomputing HT from jets makes the two comparable, so the resolution can be
+    binned in activity — measured: the CMS MET resolution rises +2.83 GeV per 100 GeV of
+    HT while a flat Delphes smearing gives +0.27, over-smearing quiet events by ~57% and
+    under-smearing busy ones.
+    """
+    j = events.jets
+    j = j[(j.pt > pt_min) & (np.abs(j.eta) <= eta_max)]
+    return ak.to_numpy(ak.sum(j.pt, axis=1))
+
+
+def met_resolution_vs_ht(events, *, bins=None, min_count=200) -> Profile:
+    """MET resolution vs jet-HT, measurable identically on either tier.
+
+    ``min_count`` is high because a width needs far more entries than a mean; a bin below
+    it is dropped rather than serialised, so the map cannot carry a noise-defined width.
+    """
+    bins = DEFAULT_HT_BINS if bins is None else bins
+    # the residual directly, NOT via met_residuals: that also returns ScalarHT, which this
+    # function discards but would then require — and ScalarHT is exactly the branch whose
+    # cross-tier incomparability made this measurement a single bin in the first place
+    def _xy(rec):
+        m = ak.to_numpy(ak.fill_none(rec.met, 0.0))
+        f = ak.to_numpy(ak.fill_none(rec.phi, 0.0))
+        return m * np.cos(f), m * np.sin(f)
+    mx, my = _xy(events.met)
+    gmx, gmy = _xy(events.genmet)
+    dx, dy = mx - gmx, my - gmy
+    ht = jet_ht(events)
+    edges = np.asarray(bins, dtype=float)
+    centers, values, errors, counts = [], [], [], []
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        m = (ht >= lo) & (ht < hi)
+        n = int(m.sum())
+        if n < min_count:
+            continue
+        res = float(np.sqrt(0.5 * (np.var(dx[m]) + np.var(dy[m]))))
+        centers.append(float(ht[m].mean()))
+        values.append(res)
+        errors.append(res / np.sqrt(2.0 * n))
+        counts.append(n)
+    return Profile("met_resolution", "ht", np.asarray(centers), np.asarray(values),
+                   np.asarray(errors), np.asarray(counts, dtype=int), kind="resolution",
+                   xlabel="jet HT [GeV]", ylabel="MET resolution [GeV]")
+
+
 def met_resolution(events: DelphesEvents, *, bins=DEFAULT_SUMET_BINS, min_count=25) -> Profile:
     """MET resolution vs sum E_T."""
     dx, dy, sumet = met_residuals(events)

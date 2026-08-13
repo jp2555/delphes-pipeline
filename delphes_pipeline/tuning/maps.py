@@ -120,14 +120,21 @@ def derive_maps(config: dict, *, bins=None, max_events=None) -> dict:
         # MET: the quadrature gap to the anchor resolution (pileup + detector noise the
         # no-pileup card cannot produce). Measured with the SAME estimator on both sides.
         if "met_resolution" in profiles:
-            dx, dy, _ = obs.met_residuals(ev)
-            d_res = float(np.sqrt(0.5 * (np.var(dx) + np.var(dy)))) if dx.size else 0.0
-            a_res = float(np.asarray(profiles["met_resolution"].values)[0])
-            sigma = float(np.sqrt(max(a_res ** 2 - d_res ** 2, 0.0)))
-            maps["met_smear"] = {"x": "overall", "centers": [0.0], "values": [sigma],
-                                 "counts": [int(dx.size)],
-                                 "anchor_resolution_gev": a_res,
-                                 "delphes_resolution_gev": d_res}
+            # Per-activity, not one flat number. The quadrature gap is solved in each
+            # jet-HT bin, on the anchor's own grid, so the smeared Delphes resolution
+            # tracks CMS's rise instead of matching it only on average.
+            a = profiles["met_resolution"]
+            d = obs.met_resolution_vs_ht(ev)
+            ac = np.asarray(a.centers, dtype=float)
+            av = np.asarray(a.values, dtype=float)
+            dv = (np.interp(ac, np.asarray(d.centers, dtype=float),
+                            np.asarray(d.values, dtype=float))
+                  if np.asarray(d.centers).size else np.zeros_like(av))
+            sig = np.sqrt(np.maximum(av ** 2 - dv ** 2, 0.0))
+            maps["met_smear"] = {"x": "ht", "centers": ac.tolist(), "values": sig.tolist(),
+                                 "counts": np.asarray(a.counts).tolist(),
+                                 "anchor_resolution_gev": av.tolist(),
+                                 "delphes_resolution_gev": dv.tolist()}
         for sf_name, eff in (("electron_sf", "electron_eff"), ("muon_sf", "muon_eff")):
             if eff in profiles:
                 maps[sf_name] = _scale_factor(profiles[eff], obs.lepton_efficiency(ev, eff, bins=bins))
@@ -493,16 +500,29 @@ def smear_met(events, maps: TuningMaps, rng: np.random.Generator):
 
     Gaussian noise of the stored σ is added per component; σ is the quadrature
     difference, so the smeared resolution lands on the anchor's by construction.
+
+    σ is looked up per event by jet-HT when the map carries a curve (``x == "ht"``). A
+    single flat width matches the anchor only ON AVERAGE: measured, CMS rises +2.83 GeV
+    per 100 GeV HT against a flat +0.27, so one number over-smears quiet events by ~57%
+    and under-smears busy ones. That matters beyond the width — m_ττ = m_vis/√(x₁x₂) is
+    nonlinear, so excess pT_miss noise drags the m_ττ mean up too. Older maps storing a
+    single value still work, at the old flat behaviour.
     """
-    vals = (maps.maps.get("met_smear") or {}).get("values") or []
-    sigma = float(vals[0]) if vals else 0.0
+    m = maps.maps.get("met_smear") or {}
+    vals = m.get("values") or []
     met = events.met
-    if sigma <= 0:
+    if not vals:
         return met
     x = ak.to_numpy(ak.fill_none(met.met * np.cos(met.phi), 0.0))
     y = ak.to_numpy(ak.fill_none(met.met * np.sin(met.phi), 0.0))
-    x = x + rng.normal(0.0, sigma, size=x.shape)
-    y = y + rng.normal(0.0, sigma, size=y.shape)
+    if m.get("x") == "ht" and len(vals) > 1:
+        sigma = maps.efficiency("met_smear", obs.jet_ht(events), default=0.0)
+    else:
+        sigma = np.full(x.shape, float(vals[0]))
+    if not np.any(sigma > 0):
+        return met
+    x = x + rng.normal(0.0, 1.0, size=x.shape) * sigma
+    y = y + rng.normal(0.0, 1.0, size=y.shape) * sigma
     return ak.zip({"met": np.hypot(x, y), "eta": np.zeros_like(x), "phi": np.arctan2(y, x)})
 
 
