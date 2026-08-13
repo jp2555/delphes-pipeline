@@ -107,3 +107,38 @@ def test_only_gen_matched_pairs_are_used():
     ev.gen = ak.zip({k: ev.gen[k][:, :0] for k in ak.fields(ev.gen)})   # no gen at all
     d, para, perp = measure(ev)
     assert d.size == 0 and para.size == 0 and perp.size == 0
+
+
+def _nano_sample(picture, seed=0, excess=0.18):
+    """The anchor's view of the same event: τ from the Tau collection, gen from GenVisTau."""
+    d = _sample(picture, seed, excess)
+    n2 = len(d.jets)
+    taus = ak.zip({"pt": d.jets.pt, "eta": d.jets.eta, "phi": d.jets.phi,
+                   "mass": d.jets.mass,
+                   "vsjet": ak.Array([[6, 6]] * n2)})
+    vis = obs_gen_visible(d.gen)
+    ev = SimpleNamespace(taus=taus, genvistau=vis, met=d.met, genmet=d.genmet, n=n2)
+    ev.deeptau_medium = lambda: 5
+    return ev
+
+
+def obs_gen_visible(gen):
+    from delphes_pipeline.core import observables as obs
+    return obs.gen_visible_taus(gen, dr=0.4)
+
+
+def test_anchor_mode_reproduces_the_delphes_answer_on_the_same_event():
+    """The two tiers must be measured identically, or comparing their offsets is
+    meaningless — that comparison is the whole point of the anchor mode."""
+    for picture, want in (("missing", -1.0), ("cone", 0.0)):
+        ev = _nano_sample(picture, seed=5)
+        d, para, _ = measure(ev, nano=True)
+        assert d.size > 200
+        assert float(np.polyfit(d, para, 1)[0]) == pytest.approx(want, abs=0.15), picture
+
+
+def test_anchor_mode_applies_the_deeptau_working_point():
+    ev = _nano_sample("cone", seed=6)
+    ev.taus = ak.with_field(ev.taus, ak.Array([[1, 1]] * ev.n), "vsjet")   # all fail Medium
+    d, _, _ = measure(ev, nano=True)
+    assert d.size == 0

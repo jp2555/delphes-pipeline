@@ -54,17 +54,32 @@ def _xy(pt, phi):
     return pt * np.cos(phi), pt * np.sin(phi)
 
 
-def measure(ev):
-    """(|D|, R·û(D), R·v̂(D)) per event with a gen-matched τ_hτ_h pair."""
+def measure(ev, *, nano=False):
+    """(|D|, R·û(D), R·v̂(D)) per event with a gen-matched τ_hτ_h pair.
+
+    ``nano=True`` runs the identical construction on the CMS anchor, where the τ come
+    from the ``Tau`` collection at Medium DeepTau and the gen reference is ``GenVisTau``.
+    That comparison is the one that matters: an offset present on BOTH tiers cancels in
+    the Delphes-vs-CMS comparison, while one present only on Delphes is a real response
+    bias feeding FastMTT — and ``met_smear``, being pure noise, cannot remove it.
+    """
+    if nano:
+        taus = ev.taus[ev.taus.vsjet >= ev.deeptau_medium()]
+        cand = taus[(taus.pt > _PT_MIN) & (np.abs(taus.eta) <= _ETA_MAX)]
+        cand = cand[ak.argsort(cand.pt, axis=1, ascending=False, stable=True)][:, :2]
+        keep = ak.to_numpy(ak.num(cand) >= 2)
+        return _project(cand[keep], ev.genvistau[keep], ev.met[keep], ev.genmet[keep])
     jets = ev.jets
     cand = jets[(jets.tautag == 1) & (jets.pt > _PT_MIN) & (np.abs(jets.eta) <= _ETA_MAX)]
     cand = cand[ak.argsort(cand.pt, axis=1, ascending=False, stable=True)][:, :2]
     keep = ak.to_numpy(ak.num(cand) >= 2)
-    cand = cand[keep]
-    vis = obs.gen_visible_taus(ev.gen, dr=_DR)[keep]
+    return _project(cand[keep], obs.gen_visible_taus(ev.gen, dr=_DR)[keep],
+                    ev.met[keep], ev.genmet[keep])
 
+
+def _project(cand, vis, met, gmet):
     ok, ref = nearest_target_fields(cand, vis, _DR, ("pt", "phi"))
-    n = int(ak.sum(keep))
+    n = len(cand)
     ok = ok.reshape(n, 2)
     gpt = np.nan_to_num(ref["pt"], nan=0.0).reshape(n, 2)
     gphi = np.nan_to_num(ref["phi"], nan=0.0).reshape(n, 2)
@@ -77,7 +92,6 @@ def measure(ev):
     dx = (rx - gx).sum(axis=1)[both]
     dy = (ry - gy).sum(axis=1)[both]
 
-    met, gmet = ev.met[keep], ev.genmet[keep]
     mx, my = _xy(ak.to_numpy(ak.fill_none(met.met, 0.0)),
                  ak.to_numpy(ak.fill_none(met.phi, 0.0)))
     gmx, gmy = _xy(ak.to_numpy(ak.fill_none(gmet.met, 0.0)),
@@ -104,16 +118,28 @@ def _profile(x, y, edges):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--config", required=True)
-    ap.add_argument("--delphes-root", required=True)
+    ap.add_argument("--delphes-root")
+    ap.add_argument("--nano-path", help="run on the CMS anchor instead, for comparison")
     ap.add_argument("--out", default="plots/met_propagation")
     ap.add_argument("--max-events", type=int, default=20000)
     args = ap.parse_args(argv)
 
     cfg = load_config(args.config)
-    ev = DelphesEvents(args.delphes_root, treename=cfg.get("input", {}).get("treename", "Delphes"),
-                       entry_stop=args.max_events)
-    d, para, perp = measure(ev)
-    print(f"[met] {d.size} gen-matched tau_h tau_h pairs on RAW Delphes")
+    if args.nano_path:
+        from delphes_pipeline.core.nanoaod import NanoAODEvents
+        from delphes_pipeline.tuning import anchor as A
+        ac = cfg.get("anchor", {})
+        ev = NanoAODEvents(args.nano_path, branches=ac.get("branches"),
+                           wp=A._resolve_wp(ac.get("wp", {})), entry_stop=args.max_events)
+        d, para, perp = measure(ev, nano=True)
+        tier = "CMS anchor"
+    else:
+        ev = DelphesEvents(args.delphes_root,
+                           treename=cfg.get("input", {}).get("treename", "Delphes"),
+                           entry_stop=args.max_events)
+        d, para, perp = measure(ev)
+        tier = "RAW Delphes"
+    print(f"[met] {d.size} gen-matched tau_h tau_h pairs on {tier}")
     print(f"[met] tau excess |D|      mean {d.mean():7.2f}  median {np.median(d):7.2f} GeV")
     print(f"[met] R parallel to D     mean {para.mean():7.2f} +- {para.std()/np.sqrt(d.size):.2f} GeV")
     print(f"[met] R perpendicular     mean {perp.mean():7.2f} +- {perp.std()/np.sqrt(d.size):.2f} GeV  (control)")
