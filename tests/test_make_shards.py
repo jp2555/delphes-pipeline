@@ -1,0 +1,123 @@
+"""The shard planner has to produce a plan that is COMPLETE and AUDITABLE.
+
+Sharding is forced by memory (the reader concatenates every file it is handed and caches
+the gen record, ~84 GB at 1.5M events), and it must be cut at FILE granularity: there is
+no ``entry_start`` in the readers, so two jobs differing only in ``--entry-stop`` would
+read overlapping heads rather than disjoint slices. These tests pin that the split covers
+every input exactly once, that each shard gets its own seed, and that the verifier
+actually catches a missing or duplicated shard — otherwise a silently incomplete merge
+looks identical to a complete one.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+import awkward as ak
+import numpy as np
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+import make_shards  # noqa: E402
+
+
+def _inputs(tmp_path, n=7):
+    d = tmp_path / "in"
+    d.mkdir(parents=True, exist_ok=True)
+    for i in range(n):
+        (d / f"f{i:02d}.root").write_text("")
+    return d
+
+
+def _plan(tmp_path, n=7, shard_events=2):
+    src, out = _inputs(tmp_path, n), tmp_path / "out"
+    make_shards.main(["--sample", "sig", str(src / "*.root"), str(tmp_path / "m.json"),
+                      "--out", str(out), "--shard-events", str(shard_events)])
+    return json.load(open(out / "_plan" / "manifest.json"))["shards"], src, out
+
+
+def test_every_input_file_appears_exactly_once():
+    """A file dropped or duplicated is a silently wrong cross-section."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        shards, src, _ = _plan(Path(td), n=7)
+        got = [f for s in shards for f in s["files"]]
+        assert sorted(got) == sorted(str(p) for p in sorted(src.glob("*.root")))
+        assert len(got) == len(set(got)), "a file was assigned to two shards"
+
+
+def test_each_shard_gets_its_own_seed_and_none_is_zero():
+    """A shared seed replays one uniform stream across shards, understating the variance
+    of aggregate yields. Seed 0 is reserved for the tuning-lens identity."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        shards, _, _ = _plan(Path(td), n=7)
+        seeds = [s["seed"] for s in shards]
+        assert len(set(seeds)) == len(seeds) and 0 not in seeds
+
+
+def test_two_samples_keep_their_own_maps():
+    """Per-process maps are the whole reason config.ttbar.yml exists; mixing them silently
+    applies signal-derived corrections to the background."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        a, b = _inputs(tmp / "A", 3), _inputs(tmp / "B", 3)
+        out = tmp / "out"
+        make_shards.main(["--sample", "sig", str(a / "*.root"), "/maps/sig.json",
+                          "--sample", "ttbar", str(b / "*.root"), "/maps/tt.json",
+                          "--out", str(out), "--shard-events", "2"])
+        sh = json.load(open(out / "_plan" / "manifest.json"))["shards"]
+        for s in sh:
+            assert s["maps"].endswith("sig.json" if s["sample"] == "sig" else "tt.json")
+
+
+def test_plan_emits_a_runnable_submit_and_executable():
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        _, _, out = _plan(Path(td), n=4)
+        sub = (out / "_plan" / "ntuplize.sub").read_text()
+        exe = out / "_plan" / "run_shard.sh"
+        assert "queue sample, shard, filelist, maps, outfile, seed from" in sub
+        assert os.access(exe, os.X_OK)
+        assert "--files-from" in exe.read_text() and "--seed" in exe.read_text()
+
+
+def _write(path, n, shard):
+    a = ak.zip({"MET_pt": np.zeros(n, dtype=np.float32),
+                "shard": np.full(n, shard, dtype=np.int32)})
+    ak.to_parquet(a, str(path))
+
+
+def test_verify_passes_on_a_complete_campaign(capsys):
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        shards, _, out = _plan(Path(td), n=4, shard_events=2)
+        for s in shards:
+            _write(s["out"], 5, s["shard"])
+        assert make_shards.verify(str(out)) == 0
+        assert "complete and unique" in capsys.readouterr().out
+
+
+def test_verify_catches_a_missing_shard(capsys):
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        shards, _, out = _plan(Path(td), n=4, shard_events=2)
+        for s in shards[:-1]:
+            _write(s["out"], 5, s["shard"])
+        assert make_shards.verify(str(out)) == 1
+        assert "MISSING" in capsys.readouterr().out
+
+
+def test_verify_catches_a_duplicated_shard_id(capsys):
+    """Two files carrying the same shard id means the merge double-counts those events."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        shards, _, out = _plan(Path(td), n=4, shard_events=2)
+        for s in shards:
+            _write(s["out"], 5, 0)          # every file stamped shard 0
+        assert make_shards.verify(str(out)) == 1
+        assert "DUPLICATED" in capsys.readouterr().out

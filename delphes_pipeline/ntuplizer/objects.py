@@ -78,7 +78,55 @@ def _lepton(coll: ak.Array, s: dict) -> ak.Array:
     )
 
 
-def build_genpart(ev: DelphesEvents) -> ak.Array:
+# Keep these and their full m1 ancestry when pruning: τ (the analysis object), ν_τ
+# (``gen_visible_taus`` reconstructs p_vis = p_τ − p_ν, so dropping it would make the
+# visible τ unrecoverable from the ntuple), and the H/Z/W/top a τ can come from.
+PRUNE_KEEP_PIDS = (15, 16, 23, 24, 25, 6)
+
+
+def prune_genpart(gen: ak.Array, keep_pids=PRUNE_KEEP_PIDS, max_depth: int = 24):
+    """Boolean mask over ``gen``: ``keep_pids`` plus every m1 ancestor of those.
+
+    The full Delphes ``Particle`` record is ~99.5% of the ntuple (measured 29.9 of
+    30.0 kB/event), i.e. ~9 TB over a 300M-event campaign, and almost none of it is used
+    downstream. Keeping the ancestry CLOSURE rather than a flat PID filter is what makes
+    ``genPartIdxMother`` still resolvable after pruning: every kept particle's mother is
+    kept too, so the chain terminates at a root instead of dangling.
+    """
+    counts = ak.to_numpy(ak.num(gen))
+    apid = np.abs(ak.to_numpy(ak.flatten(gen.pid)))
+    m1 = ak.to_numpy(ak.flatten(gen.m1))
+    keep = np.isin(apid, np.asarray(keep_pids))
+    base = np.repeat(np.concatenate([[0], np.cumsum(counts)[:-1]]), counts)
+    lim = np.repeat(counts, counts)
+    valid = (m1 >= 0) & (m1 < lim)
+    tgt = base + np.where(valid, m1, 0)
+    for _ in range(max_depth):
+        add = np.zeros_like(keep)
+        add[tgt[keep & valid]] = True
+        new = add & ~keep
+        if not new.any():
+            break
+        keep |= add
+    return ak.unflatten(keep, counts), keep, counts, m1, valid, base
+
+
+def _reindex_mothers(keep_flat, counts, m1, valid, base, kept_per_ev):
+    """``genPartIdxMother`` renumbered onto the pruned array (−1 where the mother is gone).
+
+    ``kept_per_ev`` is passed in from the jagged mask rather than recomputed with
+    ``np.add.reduceat``: reduceat returns ``a[i]`` instead of 0 for an empty slice, so an
+    event with no gen particles silently corrupts every offset after it.
+    """
+    starts = (np.concatenate([[0], np.cumsum(kept_per_ev)[:-1]]) if counts.size
+              else np.zeros(0, dtype=np.int64))
+    glob = np.cumsum(keep_flat) - 1
+    newidx = np.where(keep_flat, glob - np.repeat(starts, counts), -1)
+    mother_new = np.where(valid, newidx[base + np.where(valid, m1, 0)], -1)
+    return mother_new[keep_flat]
+
+
+def build_genpart(ev: DelphesEvents, *, prune: bool = False) -> ak.Array:
     """``GenPart`` collection: {pt,eta,phi,mass,pdgId,status,genPartIdxMother}.
 
     ``GenPart`` is the unpruned Delphes ``Particle`` collection, so
@@ -87,17 +135,25 @@ def build_genpart(ev: DelphesEvents) -> ak.Array:
     """
     g = ev.gen
     s = schema.FLAT_SCHEMA["GenPart"]
-    return ak.zip(
-        {
-            "pt": _cast(g.pt, s["pt"]),
-            "eta": _cast(g.eta, s["eta"]),
-            "phi": _cast(g.phi, s["phi"]),
-            "mass": _cast(g.mass, s["mass"]),
-            "pdgId": _cast(g.pid, s["pdgId"]),
-            "status": _cast(g.status, s["status"]),
+    if not prune:
+        return ak.zip({
+            "pt": _cast(g.pt, s["pt"]), "eta": _cast(g.eta, s["eta"]),
+            "phi": _cast(g.phi, s["phi"]), "mass": _cast(g.mass, s["mass"]),
+            "pdgId": _cast(g.pid, s["pdgId"]), "status": _cast(g.status, s["status"]),
             "genPartIdxMother": _cast(g.m1, s["genPartIdxMother"]),
-        }
-    )
+        })
+    mask, keep_flat, counts, m1, valid, base = prune_genpart(g)
+    kept_per_ev = ak.to_numpy(ak.sum(mask, axis=1)).astype(np.int64)
+    mother = _reindex_mothers(keep_flat, counts, m1, valid, base, kept_per_ev)
+    take = lambda f, t: _cast(ak.unflatten(ak.to_numpy(ak.flatten(f))[keep_flat],
+                                           kept_per_ev), t)
+    return ak.zip({
+        "pt": take(g.pt, s["pt"]), "eta": take(g.eta, s["eta"]),
+        "phi": take(g.phi, s["phi"]), "mass": take(g.mass, s["mass"]),
+        "pdgId": take(g.pid, s["pdgId"]), "status": take(g.status, s["status"]),
+        "genPartIdxMother": _cast(ak.unflatten(mother, kept_per_ev),
+                                  s["genPartIdxMother"]),
+    })
 
 
 def _lepton_sf(ev: DelphesEvents, tuning_maps) -> np.ndarray:
