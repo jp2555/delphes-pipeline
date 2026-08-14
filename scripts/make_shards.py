@@ -59,7 +59,15 @@ _EXE = """#!/usr/bin/env bash
 # one shard: $1=sample $2=shard $3=filelist $4=maps $5=outfile $6=seed
 set -euo pipefail
 cd {repo}
-exec pixi run -e {env} python -m delphes_pipeline.ntuplizer.convert \\
+# The env's interpreter DIRECTLY, not `pixi run`: pixi is on the submit node's PATH but
+# not on the workers', which fails every job with exit 127 six seconds in. The absolute
+# path is what runners/probe_worker.sh verified is importable on the batch nodes.
+PY="{repo}/.pixi/envs/{env}/bin/python"
+if [ ! -x "$PY" ]; then
+    echo "no interpreter at $PY (is /ceph mounted on $(hostname -f)?)" >&2
+    exit 127
+fi
+exec "$PY" -m delphes_pipeline.ntuplizer.convert \\
     --files-from "$3" --tuning-maps "$4" --seed "$6" --shard "$2" {prune} "" "$5"
 """
 

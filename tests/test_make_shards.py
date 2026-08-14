@@ -430,3 +430,32 @@ def test_nothing_is_transferred_back_through_the_sandbox():
     with tempfile.TemporaryDirectory() as td:
         sub = _sub_text(Path(td))
     assert 'transfer_output_files   = ""' in sub
+
+
+# --------------------------------------------------------------------------- #
+# Every job exited 127 within seconds: `pixi` is on the submit node's PATH but not
+# on the workers'. The probe verified the env's interpreter is importable at its
+# absolute path, so the wrapper must call that, not the launcher.
+# --------------------------------------------------------------------------- #
+def _exe_text(tmp):
+    _tree(tmp, "S_Delphes_v1", "61fd1c12")
+    out = tmp / "out"
+    make_shards.main(["--sample", "s", str(tmp / "*_Delphes_v1"), "/m.json",
+                      "--out", str(out), "--shard-gb", "1e-9"])
+    return (out / "_plan" / "run_shard.sh").read_text()
+
+
+def test_wrapper_calls_the_interpreter_not_the_pixi_launcher():
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        exe = _exe_text(Path(td))
+    assert "pixi run" not in exe, "pixi is not on the workers' PATH"
+    assert ".pixi/envs/" in exe and "/bin/python" in exe
+
+
+def test_wrapper_fails_loudly_when_the_environment_is_missing():
+    """Exit 127 with no message is what made this take a batch of 20 jobs to diagnose."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        exe = _exe_text(Path(td))
+    assert "no interpreter at" in exe and "exit 127" in exe
