@@ -384,3 +384,49 @@ def test_cached_listing_preserves_sizes():
         finally:
             sp.check_output = orig
     assert again[0][1] == 123456789
+
+
+# --------------------------------------------------------------------------- #
+# `should_transfer_files = NO` claims a shared filesystem, which makes Condor add
+# TARGET.FileSystemDomain == MY.FileSystemDomain. Every machine in this pool
+# advertises its own hostname as its domain, so that pinned 1394 jobs to the
+# submit node — 1 matching slot out of 47.
+# --------------------------------------------------------------------------- #
+def _sub_text(tmp, extra=()):
+    _tree(tmp, "S_Delphes_v1", "61fd1c12")
+    out = tmp / "out"
+    make_shards.main(["--sample", "s", str(tmp / "*_Delphes_v1"), "/m.json",
+                      "--out", str(out), "--shard-gb", "1e-9", *extra])
+    return (out / "_plan" / "ntuplize.sub").read_text()
+
+
+def test_submit_does_not_claim_a_shared_filesystem():
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        sub = _sub_text(Path(td))
+    assert "should_transfer_files   = NO" not in sub
+    assert "should_transfer_files   = YES" in sub
+
+
+def test_submit_pins_to_machines_verified_to_see_ceph():
+    """A job landing on an unverified node would fail on a missing pixi env."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        sub = _sub_text(Path(td))
+    assert "requirements" in sub and "etp" in sub and "TARGET.Machine" in sub
+
+
+def test_requirements_can_be_overridden():
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        sub = _sub_text(Path(td), extra=["--requirements", "TARGET.Memory > 40000"])
+    assert "TARGET.Memory > 40000" in sub
+
+
+def test_nothing_is_transferred_back_through_the_sandbox():
+    """The job writes its parquet to /ceph by absolute path; letting Condor also ship the
+    scratch dir back would duplicate ~85 GB through the schedd."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        sub = _sub_text(Path(td))
+    assert 'transfer_output_files   = ""' in sub
