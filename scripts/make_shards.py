@@ -58,8 +58,18 @@ exec pixi run -e {env} python -m delphes_pipeline.ntuplizer.convert \\
 _SUBTREE = re.compile(r"(delphes-tree-[0-9a-f]+)")
 
 
-def _xrd_files(pattern):
-    """List ``root://host//path/pattern`` recursively via xrdfs (glob cannot expand a URL)."""
+def _xrd_files(pattern, cache=None, refresh=False):
+    """List ``root://host//path/pattern`` recursively via xrdfs (glob cannot expand a URL).
+
+    The listing is CACHED: walking 72k files over XRootD costs minutes and the remote tree
+    does not change between planning runs, so re-listing on every invocation just to
+    re-cut the shards is wasted. ``refresh=True`` re-lists.
+    """
+    if cache and os.path.exists(cache) and not refresh:
+        with open(cache) as fh:
+            rows = [ln.rstrip("\n").split("\t") for ln in fh if ln.strip()]
+        print(f"[shards] listing from cache {cache} ({len(rows)} files; REFRESH=1 to re-list)")
+        return [(r[0], int(r[1])) for r in rows]
     m = re.match(r"^(root://[^/]+)/+(/.*)$", pattern)
     if not m:
         raise SystemExit(f"[shards] cannot parse XRootD URL: {pattern}")
@@ -84,13 +94,19 @@ def _xrd_files(pattern):
                 hits.append((f"root://{host}/{h}", int(parts[-2])))
             except ValueError:
                 hits.append((f"root://{host}/{h}", 0))
-    return sorted(hits)
+    hits = sorted(hits)
+    if cache:
+        os.makedirs(os.path.dirname(cache) or ".", exist_ok=True)
+        with open(cache, "w") as fh:
+            fh.write("\n".join(f"{f}\t{n}" for f, n in hits) + "\n")
+        print(f"[shards] cached listing -> {cache} ({len(hits)} files)")
+    return hits
 
 
-def _files(pattern, subtree=None):
+def _files(pattern, subtree=None, cache=None, refresh=False):
     """[(path, size_bytes)] — size is the shard axis, and it costs nothing to collect."""
     if pattern.startswith("root://"):
-        out = _xrd_files(pattern)
+        out = _xrd_files(pattern, cache=cache, refresh=refresh)
     else:
         paths = []
         for h in sorted(glob.glob(pattern)):
@@ -191,6 +207,8 @@ def main(argv=None):
     ap.add_argument("--env", default="nsbi-env-gpu")
     ap.add_argument("--memory", default="8 GB")
     ap.add_argument("--runtime", type=int, default=10800)
+    ap.add_argument("--refresh", action="store_true",
+                    help="re-list the remote tree instead of reusing the cached listing")
     ap.add_argument("--proxy", default=None,
                     help="grid proxy for the workers, needed only when reading root:// . "
                          "voms-proxy-init writes /tmp/x509up_u$(id -u), which worker nodes "
@@ -219,7 +237,8 @@ def main(argv=None):
             raise SystemExit(f"[shards] --sample takes NAME GLOB MAPS [SUBTREE], got {spec}")
         name, pattern, maps = spec[:3]
         sub = spec[3] if len(spec) == 4 else args.subtree
-        files = _files(pattern, subtree=sub)
+        files = _files(pattern, subtree=sub, refresh=args.refresh,
+                       cache=os.path.join(plandir, f"listing.{name}.tsv"))
         if files and not check_subtrees(name, files):
             raise SystemExit(2)
         if not files:

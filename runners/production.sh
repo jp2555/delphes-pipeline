@@ -45,19 +45,31 @@ PROXYARG=""; [ -n "${PROXY}" ] && PROXYARG="--proxy ${PROXY}"
 SHARD_GB="${SHARD_GB:-20}"
 MEMORY="${MEMORY:-$(python3 -c "print(f'{max(4, round(${SHARD_GB}*1.3+6))} GB')")}"
 
+# Maps are a CALIBRATION: they depend on the anchor and the code, NOT on how the
+# ntuplization is sharded. Re-deriving them just to re-plan the shards costs ~5 min each
+# for nothing, so they are skipped when present. FORCE_MAPS=1 re-derives (do that after
+# changing an anchor, a working point, or anything in delphes_pipeline/tuning).
+derive () {   # derive <config> <output>
+  if [ -s "$2" ] && [ -z "${FORCE_MAPS:-}" ]; then
+    echo "  $2 exists — skipping (FORCE_MAPS=1 to re-derive)"
+  else
+    $RUN -m delphes_pipeline.tuning.derive_maps --config "$1" --output "$2" \
+         --max-events "${CAP}"
+  fi
+}
+
 echo "=== 1/3  maps: signal ==="
-$RUN -m delphes_pipeline.tuning.derive_maps --config config.v1.yml \
-     --output cards/tuning/maps_v1.json --max-events "${CAP}"
+derive config.v1.yml cards/tuning/maps_v1.json
 
 echo "=== 2/3  maps: ttbar ==="
-$RUN -m delphes_pipeline.tuning.derive_maps --config config.ttbar.yml \
-     --output cards/tuning/maps_ttbar_v1.json --max-events "${CAP}"
+derive config.ttbar.yml cards/tuning/maps_ttbar_v1.json
 
 echo "=== 3/3  plan the shards ==="
 $RUN scripts/make_shards.py \
     --sample signal "${SRC}/*kl-*" cards/tuning/maps_v1.json      "${SUB_SIGNAL}" \
     --sample ttbar  "${SRC}/*TT*"   cards/tuning/maps_ttbar_v1.json "${SUB_TTBAR}" \
-    --out "${OUT}" --shard-gb "${SHARD_GB}" --memory "${MEMORY}" ${PROXYARG}
+    --out "${OUT}" --shard-gb "${SHARD_GB}" --memory "${MEMORY}" ${PROXYARG} \
+    ${REFRESH:+--refresh}
 
 cat <<EOF
 

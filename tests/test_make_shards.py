@@ -257,7 +257,7 @@ def test_remote_inputs_without_a_proxy_are_warned_about(capsys):
         out = tmp / "out"
         (tmp / "_plan").mkdir(parents=True, exist_ok=True)
         orig = make_shards._files
-        make_shards._files = lambda p, subtree=None: [
+        make_shards._files = lambda p, subtree=None, cache=None, refresh=False: [
             ("root://h//store/a_Delphes_v1/delphes-tree-61fd1c12/f.root", 1 << 30)]
         try:
             make_shards.main(["--sample", "sig", "root://h//store/*", "/m.json",
@@ -335,3 +335,52 @@ def test_xrdfs_listing_parses_sizes():
         sp.check_output = orig
     assert got == [("root://h//store/user/x/S_Delphes_v1/delphes-tree-61fd1c12/f.root",
                     1234567)]
+
+
+# --------------------------------------------------------------------------- #
+# Re-planning must be cheap. Walking 72k files over XRootD takes minutes and the
+# remote tree does not change between runs, so re-listing on every invocation
+# just to re-cut the shards is wasted time.
+# --------------------------------------------------------------------------- #
+def test_remote_listing_is_cached_and_reused(capsys):
+    import subprocess as sp
+    import tempfile
+
+    line = ("-r-- 2026-01-01 00:00:00 2200000000 "
+            "/store/x/S_Delphes_v1/delphes-tree-61fd1c12/f{}.root\n")
+    with tempfile.TemporaryDirectory() as td:
+        cache = os.path.join(td, "listing.tsv")
+        calls = {"n": 0}
+
+        def fake(*a, **k):
+            calls["n"] += 1
+            return "".join(line.format(i) for i in range(5))
+
+        orig, sp.check_output = sp.check_output, fake
+        try:
+            first = make_shards._xrd_files("root://h//store/x/*", cache=cache)
+            second = make_shards._xrd_files("root://h//store/x/*", cache=cache)
+            third = make_shards._xrd_files("root://h//store/x/*", cache=cache, refresh=True)
+        finally:
+            sp.check_output = orig
+    assert first == second == third
+    assert calls["n"] == 2, "the second call must come from cache, the third must re-list"
+    assert "from cache" in capsys.readouterr().out
+
+
+def test_cached_listing_preserves_sizes():
+    """Sizes are the shard axis; a cache that dropped them would silently fall back to
+    file-count sharding and blow the memory budget."""
+    import subprocess as sp
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        cache = os.path.join(td, "l.tsv")
+        orig, sp.check_output = sp.check_output, lambda *a, **k: (
+            "-r-- d t 123456789 /store/x/S_Delphes_v1/delphes-tree-1/f.root\n")
+        try:
+            make_shards._xrd_files("root://h//store/x/*", cache=cache)
+            again = make_shards._xrd_files("root://h//store/x/*", cache=cache)
+        finally:
+            sp.check_output = orig
+    assert again[0][1] == 123456789
