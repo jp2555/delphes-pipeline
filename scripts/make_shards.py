@@ -66,29 +66,42 @@ def _xrd_files(pattern):
     host, path = m.group(1)[len("root://"):], m.group(2)
     root = path.split("*")[0].rstrip("/") or "/"
     try:
-        out = subprocess.check_output(["xrdfs", host, "ls", "-R", root], text=True)
+        # -l gives the SIZE for free; that is what shards are cut on, and asking for it
+        # here avoids opening 60k remote files just to learn how big they are
+        out = subprocess.check_output(["xrdfs", host, "ls", "-l", "-R", root], text=True)
     except FileNotFoundError:
         raise SystemExit("[shards] xrdfs not on PATH — need the XRootD client to list dCache")
     except subprocess.CalledProcessError as e:
         raise SystemExit(f"[shards] xrdfs failed on {host}{root} (grid proxy?): {e}")
-    hits = [ln.strip() for ln in out.splitlines() if ln.strip().endswith(".root")]
-    return sorted(f"root://{host}/{h}" for h in hits if fnmatch.fnmatch(h, path + "*")
-                  or fnmatch.fnmatch(h, path))
+    hits = []
+    for ln in out.splitlines():                      # <perms> <date> <time> <size> <path>
+        parts = ln.split()
+        if len(parts) < 2 or not parts[-1].endswith(".root"):
+            continue
+        h = parts[-1]
+        if fnmatch.fnmatch(h, path + "*") or fnmatch.fnmatch(h, path):
+            try:
+                hits.append((f"root://{host}/{h}", int(parts[-2])))
+            except ValueError:
+                hits.append((f"root://{host}/{h}", 0))
+    return sorted(hits)
 
 
 def _files(pattern, subtree=None):
+    """[(path, size_bytes)] — size is the shard axis, and it costs nothing to collect."""
     if pattern.startswith("root://"):
         out = _xrd_files(pattern)
     else:
-        out = []
+        paths = []
         for h in sorted(glob.glob(pattern)):
             if os.path.isdir(h):
-                out += sorted(glob.glob(os.path.join(h, "**", "*.root"), recursive=True))
+                paths += sorted(glob.glob(os.path.join(h, "**", "*.root"), recursive=True))
             elif h.endswith(".root"):
-                out.append(h)
+                paths.append(h)
+        out = [(f, os.path.getsize(f) if os.path.exists(f) else 0) for f in paths]
     if subtree:
         rx = re.compile(subtree)
-        out = [f for f in out if rx.search(f)]
+        out = [(f, n) for f, n in out if rx.search(f)]
     return out
 
 
@@ -101,7 +114,7 @@ def check_subtrees(name, files):
     two of them silently DOUBLE-COUNTS every event — an error that survives all the way to
     a wrong cross-section with nothing anywhere flagging it.
     """
-    hashes = sorted({m.group(1) for f in files if (m := _SUBTREE.search(f))})
+    hashes = sorted({m.group(1) for f, _ in files if (m := _SUBTREE.search(f))})
     if len(hashes) > 1:
         print(f"[shards] ERROR {name}: files span {len(hashes)} production subtrees "
               f"holding the SAME events -> {', '.join(hashes)}")
@@ -164,8 +177,17 @@ def main(argv=None):
                          "portable key (6d2d1cb0 is the signal TEST and also the ttbar v0 "
                          "subtree), so always pair it with '_Delphes_v1/'.")
     ap.add_argument("--out", required=True, help="output directory for the parquet shards")
-    ap.add_argument("--shard-events", type=int, default=150000,
-                    help="target events per shard; memory, not speed, sets this")
+    ap.add_argument("--shard-files", type=int, default=400,
+                    help="fallback cap on files per shard, used when sizes are unavailable "
+                         "and as a hard ceiling otherwise — without it a listing that "
+                         "reports no sizes would put the entire sample in one job")
+    ap.add_argument("--shard-gb", type=float, default=12.0,
+                    help="target INPUT GB per shard. Memory sets this, not speed: the "
+                         "reader concatenates a shard and caches the gen record at ~28 B "
+                         "per gen particle, so a shard has to fit the slot.")
+    ap.add_argument("--shard-events", type=int, default=None,
+                    help="target EVENTS per shard instead; requires --count-events, which "
+                         "opens every file for its header")
     ap.add_argument("--env", default="nsbi-env-gpu")
     ap.add_argument("--memory", default="8 GB")
     ap.add_argument("--runtime", type=int, default=10800)
@@ -205,17 +227,26 @@ def main(argv=None):
             continue
         if not os.path.exists(maps):
             print(f"[shards] WARNING {name}: maps {maps} not found — derive them first")
-        counts = [_events(f) if args.count_events else None for f in files]
-        shards, cur, n = [], [], 0
-        for f, c in zip(files, counts):
+        by_events = args.count_events and args.shard_events
+        counts = [_events(f) for f, _ in files] if args.count_events else [None] * len(files)
+        target = args.shard_events if by_events else args.shard_gb * 1e9
+        shards, cur, acc = [], [], 0.0
+        for (f, size), c in zip(files, counts):
             cur.append(f)
-            n += c if c else args.shard_events // max(len(files) // 8, 1)
-            if n >= args.shard_events:
-                shards.append(cur); cur, n = [], 0
+            acc += (c or 0) if by_events else size
+            if acc >= target or len(cur) >= args.shard_files:
+                shards.append(cur); cur, acc = [], 0.0
         if cur:
             shards.append(cur)
-        print(f"[shards] {name}: {len(files)} files -> {len(shards)} shards"
-              + (f", {sum(c for c in counts if c):,} events" if args.count_events else ""))
+        tot_b = sum(n for _, n in files)
+        tot_e = sum(c for c in counts if c) if args.count_events else None
+        print(f"[shards] {name}: {len(files)} files, {tot_b/1e12:.2f} TB"
+              + (f", {tot_e:,} events" if tot_e else "")
+              + f" -> {len(shards)} shards"
+              + (f" (~{tot_b/1e9/max(len(shards),1):.1f} GB each)" if not by_events else ""))
+        if not by_events and tot_b == 0:
+            print(f"[shards] WARNING {name}: listing reported no file sizes — shards fell "
+                  f"back to {args.shard_files} files each; check they fit the slot")
         for i, chunk in enumerate(shards):
             fl = os.path.join(plandir, f"{name}.{i:04d}.txt")
             with open(fl, "w") as fh:

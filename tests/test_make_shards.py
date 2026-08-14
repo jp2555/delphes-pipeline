@@ -29,14 +29,14 @@ def _inputs(tmp_path, n=7):
     d = tmp_path / "in"
     d.mkdir(parents=True, exist_ok=True)
     for i in range(n):
-        (d / f"f{i:02d}.root").write_text("")
+        (d / f"f{i:02d}.root").write_bytes(b"x" * 4096)
     return d
 
 
 def _plan(tmp_path, n=7, shard_events=2):
     src, out = _inputs(tmp_path, n), tmp_path / "out"
     make_shards.main(["--sample", "sig", str(src / "*.root"), str(tmp_path / "m.json"),
-                      "--out", str(out), "--shard-events", str(shard_events)])
+                      "--out", str(out), "--shard-gb", "1e-9"])
     return json.load(open(out / "_plan" / "manifest.json"))["shards"], src, out
 
 
@@ -70,7 +70,7 @@ def test_two_samples_keep_their_own_maps():
         out = tmp / "out"
         make_shards.main(["--sample", "sig", str(a / "*.root"), "/maps/sig.json",
                           "--sample", "ttbar", str(b / "*.root"), "/maps/tt.json",
-                          "--out", str(out), "--shard-events", "2"])
+                          "--out", str(out), "--shard-gb", "1e-9"])
         sh = json.load(open(out / "_plan" / "manifest.json"))["shards"]
         for s in sh:
             assert s["maps"].endswith("sig.json" if s["sample"] == "sig" else "tt.json")
@@ -134,7 +134,7 @@ def _tree(tmp, dataset, h, n=3):
     d = tmp / dataset / f"delphes-tree-{h}"
     d.mkdir(parents=True, exist_ok=True)
     for i in range(n):
-        (d / f"f{i}.root").write_text("")
+        (d / f"f{i}.root").write_bytes(b"x" * 4096)
     return d
 
 
@@ -165,7 +165,7 @@ def test_subtree_filter_selects_one_of_several():
         _tree(tmp, "GluGluHH_Delphes_v1", "2ff38f65")
         _tree(tmp, "GluGluHH_Delphes_v1", "9abc1234")
         files = make_shards._files(str(tmp / "*_Delphes_v1"), subtree="delphes-tree-2ff38f65")
-        assert len(files) == 3 and all("2ff38f65" in f for f in files)
+        assert len(files) == 3 and all("2ff38f65" in f for f, _ in files)
         assert make_shards.check_subtrees("sig", files) is True
 
 
@@ -177,7 +177,7 @@ def test_planning_aborts_rather_than_emitting_a_double_counting_plan():
         _tree(tmp, "GluGluHH_Delphes_v1", "9abc1234")
         with pytest.raises(SystemExit):
             make_shards.main(["--sample", "sig", str(tmp / "*_Delphes_v1"), "/m.json",
-                              "--out", str(tmp / "out"), "--shard-events", "2"])
+                              "--out", str(tmp / "out"), "--shard-gb", "1e-9"])
 
 
 def test_xrootd_urls_are_not_passed_to_glob():
@@ -207,7 +207,7 @@ def test_each_sample_selects_its_own_subtree():
             "_Delphes_v1/delphes-tree-61fd1c12",
             "--sample", "ttbar", str(tmp / "*TT*"), "/m2.json",
             "_Delphes_v1/delphes-tree-2ff38f65",
-            "--out", str(out), "--shard-events", "2"])
+            "--out", str(out), "--shard-gb", "1e-9"])
         sh = json.load(open(out / "_plan" / "manifest.json"))["shards"]
         for e in sh:
             want = "61fd1c12" if e["sample"] == "signal" else "2ff38f65"
@@ -226,6 +226,7 @@ def test_a_bare_hash_shared_between_roles_is_not_enough():
         paired = make_shards._files(str(tmp / "*kl-*"),
                                     subtree="_Delphes_v1/delphes-tree-6d2d1cb0")
         assert len(bare) == 6 and len(paired) == 3
+        assert all("_Delphes_v1/" in f for f, _ in paired)
 
 
 def test_a_bad_sample_arity_is_rejected():
@@ -242,7 +243,7 @@ def test_proxy_is_written_into_the_submit_when_given():
         proxy.write_text("")
         out = tmp / "out"
         make_shards.main(["--sample", "sig", str(tmp / "*_Delphes_v1"), "/m.json",
-                          "--out", str(out), "--shard-events", "2", "--proxy", str(proxy)])
+                          "--out", str(out), "--shard-gb", "1e-9", "--proxy", str(proxy)])
         sub = (out / "_plan" / "ntuplize.sub").read_text()
         assert "x509userproxy" in sub and "use_x509userproxy       = true" in sub
 
@@ -257,10 +258,80 @@ def test_remote_inputs_without_a_proxy_are_warned_about(capsys):
         (tmp / "_plan").mkdir(parents=True, exist_ok=True)
         orig = make_shards._files
         make_shards._files = lambda p, subtree=None: [
-            "root://h//store/a_Delphes_v1/delphes-tree-61fd1c12/f.root"]
+            ("root://h//store/a_Delphes_v1/delphes-tree-61fd1c12/f.root", 1 << 30)]
         try:
             make_shards.main(["--sample", "sig", "root://h//store/*", "/m.json",
-                              "--out", str(out), "--shard-events", "2"])
+                              "--out", str(out), "--shard-gb", "1e-9"])
         finally:
             make_shards._files = orig
         assert "no --proxy given" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- #
+# Shards are cut on BYTES. The first version used a placeholder that divided any
+# input into ~8 shards regardless of size — so a 392 GB signal sample and a 8 TB
+# ttbar sample both came out at 8, which would have put ~1 TB in an 8 GB slot.
+# --------------------------------------------------------------------------- #
+def _sized(tmp, dataset, h, sizes):
+    d = tmp / dataset / f"delphes-tree-{h}"
+    d.mkdir(parents=True, exist_ok=True)
+    for i, n in enumerate(sizes):
+        (d / f"f{i:03d}.root").write_bytes(b"x" * n)
+    return d
+
+
+def _shards_for(tmp, sizes, gb):
+    _sized(tmp, "S_Delphes_v1", "61fd1c12", sizes)
+    out = tmp / "out"
+    make_shards.main(["--sample", "s", str(tmp / "*_Delphes_v1"), "/m.json",
+                      "--out", str(out), "--shard-gb", str(gb)])
+    return json.load(open(out / "_plan" / "manifest.json"))["shards"]
+
+
+def test_shard_count_scales_with_total_size():
+    """Twice the data must give about twice the shards — the property the placeholder
+    did not have."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        small = _shards_for(Path(td) / "a", [10_000] * 20, 50e-6)   # 200 kB total
+        big = _shards_for(Path(td) / "b", [10_000] * 40, 50e-6)     # 400 kB total
+        assert len(big) >= 1.8 * len(small), (len(small), len(big))
+
+
+def test_each_shard_respects_the_byte_target():
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        sizes = [10_000] * 30
+        shards = _shards_for(tmp, sizes, 50e-6)     # 50 kB per shard -> ~5 files each
+        for s in shards[:-1]:
+            assert len(s["files"]) <= 7, s["files"]
+
+
+def test_file_count_ceiling_applies_when_sizes_are_zero():
+    """A listing with no sizes must not put the whole sample in one job."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        _sized(tmp, "S_Delphes_v1", "61fd1c12", [0] * 25)
+        out = tmp / "out"
+        make_shards.main(["--sample", "s", str(tmp / "*_Delphes_v1"), "/m.json",
+                          "--out", str(out), "--shard-gb", "1000", "--shard-files", "10"])
+        sh = json.load(open(out / "_plan" / "manifest.json"))["shards"]
+        assert len(sh) == 3 and all(len(s["files"]) <= 10 for s in sh)
+
+
+def test_xrdfs_listing_parses_sizes():
+    """xrdfs ls -l gives '<perms> <date> <time> <size> <path>'; the size is the shard axis
+    and taking it from the listing avoids opening 60k remote files for their headers."""
+    import subprocess as sp
+    line = ("-r-- 2026-01-01 00:00:00 1234567 "
+            "/store/user/x/S_Delphes_v1/delphes-tree-61fd1c12/f.root\n")
+    orig = sp.check_output
+    sp.check_output = lambda *a, **k: line
+    try:
+        got = make_shards._xrd_files("root://h//store/user/x/*")
+    finally:
+        sp.check_output = orig
+    assert got == [("root://h//store/user/x/S_Delphes_v1/delphes-tree-61fd1c12/f.root",
+                    1234567)]

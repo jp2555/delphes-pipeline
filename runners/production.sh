@@ -50,7 +50,7 @@ echo "=== 3/3  plan the shards ==="
 $RUN scripts/make_shards.py \
     --sample signal "${SRC}/*kl-*" cards/tuning/maps_v1.json      "${SUB_SIGNAL}" \
     --sample ttbar  "${SRC}/*TT*"   cards/tuning/maps_ttbar_v1.json "${SUB_TTBAR}" \
-    --out "${OUT}" --shard-events "${SHARD_EVENTS:-150000}" ${PROXYARG}
+    --out "${OUT}" --shard-gb "${SHARD_GB:-12}" ${PROXYARG}
 
 cat <<EOF
 
