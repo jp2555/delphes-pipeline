@@ -449,8 +449,13 @@ def test_wrapper_calls_the_interpreter_not_the_pixi_launcher():
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         exe = _exe_text(Path(td))
-    assert "pixi run" not in exe, "pixi is not on the workers' PATH"
-    assert ".pixi/envs/" in exe and "/bin/python" in exe
+    # check what is EXECUTED, not what is mentioned — the wrapper's own comment
+    # explains why pixi is avoided, so a substring test on "pixi run" self-triggers
+    execs = [ln for ln in exe.splitlines() if ln.strip().startswith("exec ")]
+    assert execs, exe
+    assert not any("pixi" in ln for ln in execs), execs
+    assert any('"$PY"' in ln for ln in execs), execs
+    assert '.pixi/envs/' in exe and '/bin/python"' in exe
 
 
 def test_wrapper_fails_loudly_when_the_environment_is_missing():
