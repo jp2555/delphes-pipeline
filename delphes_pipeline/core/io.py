@@ -99,7 +99,9 @@ def open_with_retry(path, *, tries: int = OPEN_TRIES, backoff: float = OPEN_BACK
             if not remote or attempt == tries - 1 or not _is_retryable(exc):
                 raise
             wait = backoff * (2 ** attempt)
-            print(f"[io] open failed ({exc.__class__.__name__}: {exc}); "
+            # name the file: a shard opens many, and without it a persistent
+            # failure cannot be traced to the one file that has to be replaced.
+            print(f"[io] open failed for {path} ({exc.__class__.__name__}: {exc}); "
                   f"retry {attempt + 1}/{tries - 1} in {wait:.0f}s", flush=True)
             _sleep(wait)
     raise last  # pragma: no cover - loop either returns or raises

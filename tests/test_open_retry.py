@@ -75,3 +75,10 @@ def test_a_first_attempt_success_costs_nothing(monkeypatch):
     flaky = _Flaky(0)
     got, slept = _run(monkeypatch, flaky)
     assert (flaky.calls, slept) == (1, [])
+
+
+def test_the_retry_log_names_the_failing_file(monkeypatch, capsys):
+    """A shard opens 11 files; "open failed" alone cannot identify which one."""
+    monkeypatch.setattr(io.uproot, "open", _Flaky(1))
+    io.open_with_retry("root://x.example//store/bad.root", _sleep=lambda s: None)
+    assert "root://x.example//store/bad.root" in capsys.readouterr().out
