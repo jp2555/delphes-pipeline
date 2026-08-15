@@ -153,7 +153,16 @@ class NanoAODEvents:
         Configure via ``anchor.branches.{electron,muon}.{id,iso}`` and
         ``anchor.wp.{electron,muon}_iso_max``. Unset leaves the raw collection.
         """
-        lep = self._zip(self.b[name])
+        spec = self.b[name]
+        # _zip drops branches absent from the file, so a misspelled or era-wrong ID
+        # branch would silently disable the selection and quietly restore the loose
+        # collection. Configuring a cut and not applying it is worse than not asking.
+        for key in ("id", "iso"):
+            if key in spec and spec[key] not in self._keys:
+                raise KeyError(
+                    f"{name} {key} branch {spec[key]!r} is not in this NanoAOD; "
+                    f"fix anchor.branches.{name}.{key} or remove it")
+        lep = self._zip(spec)
         fields = ak.fields(lep)
         if "id" in fields:
             lep = lep[lep.id != 0]

@@ -64,3 +64,18 @@ def test_an_unconfigured_reader_keeps_the_raw_collection():
     ev.b = nanoaod.BRANCHES
     assert ak.to_list(ev.electrons.pt) == [[30.0, 25.0]]
     assert np.isfinite(1.0)
+
+
+def test_a_missing_id_branch_raises_instead_of_silently_disabling_the_cut():
+    """_zip drops absent branches; a configured-but-unapplied cut must not pass."""
+    cols = _cols()
+    del cols["Electron_mvaIso_WP80"]
+    with pytest.raises(KeyError, match="not in this NanoAOD"):
+        _ = _Fake(cols).electrons
+
+
+def test_a_missing_iso_branch_also_raises():
+    cols = _cols()
+    del cols["Muon_pfRelIso04_all"]
+    with pytest.raises(KeyError, match="not in this NanoAOD"):
+        _ = _Fake(cols, wp={"muon_iso_max": 0.15}).muons
