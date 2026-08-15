@@ -252,7 +252,7 @@ def _resubmit(outdir, missing, force=False):
     return sub
 
 
-def verify(outdir, write_missing=False, force=False, report=None):
+def verify(outdir, write_missing=False, force=False, report=None, samples=None):
     """Check a finished campaign against its plan: every shard present, exactly once.
 
     Reads only the parquet FOOTER for the row count and only the ``shard`` COLUMN for the
@@ -265,6 +265,10 @@ def verify(outdir, write_missing=False, force=False, report=None):
     """
     import pyarrow.parquet as pq
     plan = json.load(open(os.path.join(outdir, "_plan", "manifest.json")))["shards"]
+    if samples is not None:
+        # Auditing 1244 ttbar shards to merge 150 signal ones costs minutes of pure
+        # metadata reads over /ceph for no benefit.
+        plan = [e for e in plan if e["sample"] in set(samples)]
     missing, empty, total, seen = [], [], 0, {}
     for e in plan:
         if not os.path.exists(e["out"]):

@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import time
 import sys
 from concurrent.futures import ProcessPoolExecutor
 
@@ -132,7 +133,10 @@ def main(argv=None):
     # no reason to block a finished signal merge, but it must still block ttbar's. A
     # duplicated shard id is just as disqualifying as a missing one -- it double-counts.
     report = {}
-    make_shards.verify(outdir, report=report)
+    t0 = time.perf_counter()
+    make_shards.verify(outdir, report=report,
+                       samples=list(by_sample) if args.sample else None)
+    print(f"[merge] audit took {time.perf_counter() - t0:.0f}s")
     bad = {s for s, _ in report["missing"]} | {s for s, _ in report["dup"]}
     blocked = sorted(bad & set(by_sample))
     if blocked and not args.force:
@@ -145,14 +149,17 @@ def main(argv=None):
         entries = [e for e in sorted(entries, key=lambda x: x["shard"])
                    if os.path.exists(e["out"])]
         jobs = args.jobs or (os.cpu_count() or 1)
+        t1 = time.perf_counter()
         try:
             files, rows = merge_sample(name, entries, dest, args.target_gb * 1e9, jobs=jobs)
         except ValueError as exc:
             # raised in a worker; surface it as a clean abort rather than a traceback
             raise SystemExit(f"[merge] {exc}")
         size = sum(os.path.getsize(f) for f in files)
+        dt = max(time.perf_counter() - t1, 1e-9)
         print(f"[merge] {name}: {len(entries)} shards -> {len(files)} files, "
-              f"{rows:,} events, {size/1e9:.1f} GB")
+              f"{rows:,} events, {size/1e9:.1f} GB in {dt:.0f}s "
+              f"({size/1e6/dt:.0f} MB/s out, {min(jobs, len(files))} workers)")
         summary[name] = {"shards": len(entries), "files": files, "events": rows,
                          "bytes": size,
                          "maps": sorted({e["maps"] for e in entries}),

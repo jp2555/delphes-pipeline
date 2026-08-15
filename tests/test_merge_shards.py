@@ -218,3 +218,13 @@ def test_an_unknown_sample_name_is_rejected(tmp_path):
     out = _campaign(tmp_path)
     with pytest.raises(SystemExit, match="no such sample"):
         merge_shards.main(["--out", str(out), "--sample", "signl"])
+
+
+def test_the_audit_is_scoped_to_the_selected_samples(tmp_path, capsys):
+    """Auditing 1244 ttbar shards to merge 150 signal ones is minutes of wasted I/O."""
+    out = _campaign(tmp_path, drop={("ttbar", 2)})
+    assert merge_shards.main(["--out", str(out), "--sample", "sig",
+                              "--target-gb", "1e-9"]) == 0
+    said = capsys.readouterr().out
+    assert "3/3 shards present" in said, "the audit must cover only sig"
+    assert "ttbar" not in said.split("[merge] audit")[0]
