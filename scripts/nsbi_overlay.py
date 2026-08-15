@@ -40,6 +40,13 @@ from delphes_pipeline.extensions.mtautau import _leg, fastmtt_mass
 from delphes_pipeline.validation.run_validation import load_config
 
 _KL = re.compile(r"kl-(m?\d+p\d+)")
+
+
+def _kl_value(tag: str) -> float:
+    """'0p00' -> 0.0, 'm2p50' -> -2.5. The merged ntuple stores kl as a number."""
+    neg = tag.startswith("m")
+    v = float(tag.lstrip("m").replace("p", "."))
+    return -v if neg else v
 _FEATURES = ["mHH", "cosThetaStar", "pHH_T", "mbb", "dR_bb", "mtautau", "dR_tautau",
              "dphi_HH", "pH1_T", "pH2_T"]
 # diagnostic (not NSBI) observables: the FastMTT *inputs*. m_ττ = m_vis/√(x₁x₂) with the
@@ -320,7 +327,11 @@ def _split_figure(kl, df, dm, nf, nm, args, tuning):
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="NSBI 10-feature overlay: tuned Delphes vs CMS NanoAOD")
     ap.add_argument("--config", required=True)
-    ap.add_argument("--delphes-dir", required=True)
+    ap.add_argument("--delphes-dir")
+    ap.add_argument("--ntuple", metavar="DIR_OR_GLOB",
+                    help="overlay the MERGED ntuples instead of raw Delphes. The tuning "
+                         "is already baked into them, so --tuned/--no-tuned does not "
+                         "apply and the kl point is read from the 'kl' column.")
     ap.add_argument("--nano-dir", required=True)
     ap.add_argument("--out", default="plots/nsbi_overlay")
     ap.add_argument("--max-events", type=int, default=20000)
@@ -346,6 +357,13 @@ def main(argv=None) -> int:
                     help="split each side into gen-matched vs fake τ pairs (diagnostic)")
     args = ap.parse_args(argv)
 
+    if not (args.ntuple or args.delphes_dir):
+        ap.error("one of --delphes-dir or --ntuple is required")
+    if args.ntuple and not args.tuned:
+        # the merged ntuple was written through the maps; there is no untuned view of
+        # it, and silently ignoring --no-tuned would misreport what was plotted
+        ap.error("--no-tuned cannot apply to --ntuple: the tuning is baked in")
+
     cfg = load_config(args.config)
     from delphes_pipeline.tuning.anchor import _resolve_wp
     wp = _resolve_wp(cfg.get("anchor", {}).get("wp", {}))
@@ -367,13 +385,25 @@ def main(argv=None) -> int:
 
     nano_by_kl = {_kl(d): d for d in glob.glob(os.path.join(args.nano_dir, "*kl-*")) if _kl(d) and "NanoAOD" in d}
 
-    for d in sorted(glob.glob(os.path.join(args.delphes_dir, "*kl-*"))):
-        kl = _kl(d)
+    # Raw Delphes is one directory per kl; the merged ntuple is one file set with a kl
+    # column, so drive the loop from the CMS side, which has a directory either way.
+    if args.ntuple:
+        sources = [(kl, None) for kl in sorted(nano_by_kl)]
+    else:
+        sources = [(_kl(d), d) for d in sorted(glob.glob(os.path.join(args.delphes_dir, "*kl-*")))]
+
+    for kl, d in sources:
         if kl is None or kl not in nano_by_kl:
             continue
         print(f"[kl {kl}] reconstructing features ...", flush=True)
-        dev = DelphesEvents(d, entry_stop=args.max_events)
-        if tuning is not None:
+        if args.ntuple:
+            from delphes_pipeline.core.io import NtupleEvents
+            dev = NtupleEvents(args.ntuple, kl=_kl_value(kl), entry_stop=args.max_events)
+            print(f"[overlay] merged ntuple: {dev.n:,} events at kl={_kl_value(kl)} "
+                  f"(tuning already applied at ntuplization)")
+        else:
+            dev = DelphesEvents(d, entry_stop=args.max_events)
+        if not args.ntuple and tuning is not None:
             from delphes_pipeline.tuning.maps import RetaggedEvents
             dev = RetaggedEvents(dev, tuning, np.random.default_rng(0))
             # Say WHICH corrections actually fired. The maps file drives this, and a file

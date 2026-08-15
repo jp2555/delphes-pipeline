@@ -27,6 +27,7 @@ import awkward as ak
 import numpy as np
 import time
 
+import pyarrow.parquet as pq
 import uproot
 
 PathLike = Union[str, Sequence[str]]
@@ -282,3 +283,115 @@ class DelphesEvents:
 def load_ntuple(path: str) -> ak.Array:
     """Load a flat NanoAOD-compatible ntuple written by the ntuplizer (parquet)."""
     return ak.from_parquet(path)
+
+
+def resolve_ntuple_paths(path: PathLike) -> list[str]:
+    """Expand ``path`` (file / glob / directory / list) into a sorted parquet list."""
+    if isinstance(path, (list, tuple)):
+        files = [f for p in path for f in resolve_ntuple_paths(p)]
+    elif os.path.isdir(path):
+        files = sorted(glob.glob(os.path.join(path, "*.parquet")))
+    elif any(ch in str(path) for ch in "*?["):
+        files = sorted(glob.glob(str(path)))
+    else:
+        files = [str(path)]
+    if not files:
+        raise FileNotFoundError(f"no parquet files matched {path!r}")
+    return files
+
+
+def _kl_column_index(pf):
+    """Index of the flat ``kl`` column in the parquet schema, or None.
+
+    Looked up by ``path_in_schema`` rather than by position: the jagged collections
+    expand to leaf columns (``Jet.list.item.pt``), so a name-to-index lookup on the
+    arrow schema does not line up with the parquet column order.
+    """
+    names = pf.metadata.schema.names
+    return names.index("kl") if "kl" in names else None
+
+
+class NtupleEvents:
+    """A merged ntuple presented under the ``DelphesEvents`` attribute names.
+
+    The overlay defines its features once, against the Delphes names. Reading the
+    merged ntuple back through those same names means an ntuple-vs-CMS overlay runs
+    the SAME feature code as a Delphes-vs-CMS one — so a disagreement between the two
+    is a difference in the data, not a second implementation of m_HH.
+
+    ``kl`` selects one κ_λ point. Row groups whose parquet statistics exclude that
+    value are skipped without being read, which matters because the κ_λ points sit in
+    contiguous blocks: reading the first N events of a 5 GB file would otherwise
+    return only κ_λ = 0 and silently produce an empty selection for the others.
+    """
+
+    def __init__(self, path: PathLike, *, kl: Optional[float] = None,
+                 entry_stop: Optional[int] = None):
+        self.paths = resolve_ntuple_paths(path)
+        self.kl = kl
+        parts, have = [], 0
+        for p in self.paths:
+            if entry_stop is not None and have >= entry_stop:
+                break
+            pf = pq.ParquetFile(p)
+            jkl = _kl_column_index(pf) if kl is not None else None
+            for i in range(pf.num_row_groups):
+                if entry_stop is not None and have >= entry_stop:
+                    break
+                if jkl is not None:
+                    st = pf.metadata.row_group(i).column(jkl).statistics
+                    if st is not None and st.has_min_max and not (st.min <= kl <= st.max):
+                        continue
+                a = ak.from_parquet(p, row_groups=[i])
+                if kl is not None:
+                    a = a[np.isclose(ak.to_numpy(a["kl"]), kl)]
+                if entry_stop is not None:
+                    a = a[: entry_stop - have]
+                if len(a):
+                    parts.append(a)
+                    have += len(a)
+        if not parts:
+            raise ValueError(f"no events in {path!r}" + (f" at kl={kl}" if kl else ""))
+        self.array = ak.concatenate(parts) if len(parts) > 1 else parts[0]
+
+    @property
+    def n(self) -> int:
+        return len(self.array)
+
+    @cached_property
+    def jets(self) -> ak.Array:
+        j = self.array["Jet"]
+        # The ntuple drops jet charge (nothing downstream reads it), but the shared
+        # τ-candidate builder zips it, so supply zeros rather than fork that code.
+        return ak.zip({"pt": j.pt, "eta": j.eta, "phi": j.phi, "mass": j.mass,
+                       "btag": j.btag, "tautag": j.tautag, "flavor": j.hadronFlavour,
+                       "charge": ak.zeros_like(j.pt)})
+
+    @cached_property
+    def taus(self) -> ak.Array:
+        return self.array["Tau"]
+
+    def _leptons(self, name) -> ak.Array:
+        c = self.array[name]
+        return ak.zip({"pt": c.pt, "eta": c.eta, "phi": c.phi, "charge": c.charge})
+
+    @cached_property
+    def electrons(self) -> ak.Array:
+        return self._leptons("Electron")
+
+    @cached_property
+    def muons(self) -> ak.Array:
+        return self._leptons("Muon")
+
+    @cached_property
+    def met(self) -> ak.Array:
+        a = self.array
+        return ak.zip({"met": a["MET_pt"], "phi": a["MET_phi"],
+                       "eta": ak.zeros_like(a["MET_pt"])})
+
+    @cached_property
+    def gen(self) -> ak.Array:
+        """``GenPart`` under the Delphes gen names (pid/m1), for gen-matching."""
+        g = self.array["GenPart"]
+        return ak.zip({"pid": g.pdgId, "status": g.status, "pt": g.pt, "eta": g.eta,
+                       "phi": g.phi, "mass": g.mass, "m1": g.genPartIdxMother})
