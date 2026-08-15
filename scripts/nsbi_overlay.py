@@ -77,7 +77,8 @@ CMS_DNN_NOT_OVERLAID = [
     ("pair type", "we run the tau_h tau_h channel only; e-tau and mu-tau are not yet built."),
 ]
 _RANGES = {"mHH": (200, 900), "cosThetaStar": (0, 1), "pHH_T": (0, 300), "mbb": (0, 250),
-           "dR_bb": (0, 5), "mtautau": (0, 250), "dR_tautau": (0, 5), "dphi_HH": (0, 3.2),
+           "dR_bb": (0, 5), "mtautau": (0, 250), "dR_tautau": (0, 5),
+           "dphi_HH": (0, np.pi),
            "pH1_T": (0, 400), "pH2_T": (0, 400),
            "mvis": (0, 200), "tau1_pt": (0, 200), "tau2_pt": (0, 150), "met": (0, 200)}
 
@@ -316,6 +317,7 @@ def _split_figure(kl, df, dm, nf, nm, args, tuning):
                 h = h / (n_tot * (b[1] - b[0]))
                 ax.step(centres, h, where="mid", lw=1.8, ls=style, color=colour,
                         label=f"{lab} {tag} ({d.size})")
+        ax.set_ylim(bottom=0)
         ax.set_xlabel(feat); ax.legend(fontsize=6)
     fig.suptitle(f"$\\kappa_\\lambda$ = {kl}  ·  gen-matched (solid) vs fake (dashed)"
                  + ("  · tuned" if tuning is not None else "  · stock"))
@@ -451,6 +453,10 @@ def main(argv=None) -> int:
                 if d.size:
                     h, _ = np.histogram(d, bins=b, density=True)
                     ax.step(centres, h, where="mid", lw=2, label=f"{lab} ({d.size})")
+            # A near-flat density (cosThetaStar sits at ~1.0 everywhere) autoscales to a
+            # sliver of y-range, which turns ordinary Poisson noise into an alarming
+            # sawtooth. Anchoring at 0 puts every panel on the same footing.
+            ax.set_ylim(bottom=0)
             ax.set_xlabel(feat); ax.legend(fontsize=8)
         fig.suptitle(f"$\\kappa_\\lambda$ = {kl}" + ("  (tuned)" if tuning is not None else "  (stock)")
                      + ("  · symmetric cleaning" if args.clean else "  · legacy selection"))
