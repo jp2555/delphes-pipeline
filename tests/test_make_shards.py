@@ -517,7 +517,7 @@ def test_resubmit_lists_only_the_missing_shards_with_their_original_seeds():
         for s in shards:
             if s["shard"] not in (2, 5):
                 _write(s["out"], 5, s["shard"])
-        assert make_shards.main(["--verify", str(out), "--write-missing"]) == 1
+        assert make_shards.main(["--verify", str(out), "--write-missing", "--force"]) == 1
         lines = (out / "_plan" / "shards.missing.txt").read_text().strip().splitlines()
         assert len(lines) == 2
         got = {int(ln.split(",")[1]): int(ln.split(",")[-1]) for ln in lines}
@@ -532,5 +532,96 @@ def test_resubmit_is_not_written_when_the_campaign_is_complete():
         shards, _, out = _plan(Path(td), n=4, shard_events=2)
         for s in shards:
             _write(s["out"], 5, s["shard"])
-        assert make_shards.main(["--verify", str(out), "--write-missing"]) == 0
+        assert make_shards.main(["--verify", str(out), "--write-missing", "--force"]) == 0
         assert not (out / "_plan" / "shards.missing.txt").exists()
+
+
+# --------------------------------------------------------------------------- #
+# Resubmitting a shard whose first job is still running makes two processes write
+# the same parquet path. The queue check is the only thing standing between a
+# routine --verify and a corrupted output file, so it must fail closed.
+# --------------------------------------------------------------------------- #
+def _missing_run(tmp, present, monkeypatch, live=None, force=False, boom=None):
+    shards, _, out = _plan(Path(tmp), n=8, shard_events=2)
+    for s in shards:
+        if s["shard"] in present:
+            _write(s["out"], 5, s["shard"])
+
+    def fake():
+        if boom is not None:
+            raise boom
+        return live or set()
+
+    monkeypatch.setattr(make_shards, "_condor_q_args", fake)
+    argv = ["--verify", str(out), "--write-missing"] + (["--force"] if force else [])
+    make_shards.main(argv)
+    q = out / "_plan" / "shards.missing.txt"
+    if not q.exists():
+        return None
+    return {int(ln.split(",")[1]) for ln in q.read_text().strip().splitlines()}
+
+
+def test_running_shards_are_excluded_from_the_resubmit(tmp_path, monkeypatch):
+    got = _missing_run(tmp_path, present={0, 1, 2}, monkeypatch=monkeypatch,
+                       live={("sig", 5), ("sig", 6), ("sig", 7)})
+    assert got == {3, 4}, "only shards nothing is working on may be resubmitted"
+
+
+def test_resubmit_is_withheld_when_every_gap_is_still_running(tmp_path, monkeypatch):
+    got = _missing_run(tmp_path, present={0, 1, 2, 3, 4},
+                       monkeypatch=monkeypatch,
+                       live={("sig", i) for i in (5, 6, 7)})
+    assert got is None
+
+
+def test_unreachable_schedd_withholds_the_resubmit(tmp_path, monkeypatch):
+    got = _missing_run(tmp_path, present={0, 1}, monkeypatch=monkeypatch,
+                       boom=OSError("condor_q: not found"))
+    assert got is None, "an unreachable schedd must not be read as 'nothing running'"
+
+
+def test_force_writes_the_resubmit_without_consulting_the_queue(tmp_path, monkeypatch):
+    got = _missing_run(tmp_path, present={0, 1}, monkeypatch=monkeypatch,
+                       boom=OSError("condor_q: not found"), force=True)
+    assert got == {2, 3, 4, 5, 6, 7}
+
+
+def _fake_condor(monkeypatch, by_attr):
+    import subprocess as sp
+
+    def run(cmd, **k):
+        return sp.CompletedProcess(cmd, 0, stdout=by_attr.get(cmd[-1], ""), stderr="")
+
+    monkeypatch.setattr(make_shards.subprocess, "run", run)
+
+
+_ROWS = ("ttbar 974 /p/ttbar.0974.txt /m.json /o/ttbar.0974.parquet 12345\n"
+         "signal 3 /p/signal.0003.txt /m.json /o/signal.0003.parquet 7\n")
+
+
+def test_the_submit_template_still_puts_sample_and_shard_first(monkeypatch):
+    """The parser reads _SUB's `arguments` line positionally; pin that it can."""
+    assert '"$(sample) $(shard)' in make_shards._SUB
+
+
+def test_new_syntax_arguments_classad_is_parsed(monkeypatch):
+    _fake_condor(monkeypatch, {"Arguments": _ROWS, "Args": "undefined\nundefined\n"})
+    assert make_shards._condor_q_args() == {("ttbar", 974), ("signal", 3)}
+
+
+def test_old_syntax_args_classad_is_parsed(monkeypatch):
+    """Double-quoted `arguments =` is new syntax, but do not bet the guard on it."""
+    _fake_condor(monkeypatch, {"Arguments": "undefined\nundefined\n", "Args": _ROWS})
+    assert make_shards._condor_q_args() == {("ttbar", 974), ("signal", 3)}
+
+
+def test_an_empty_queue_is_not_confused_with_a_broken_parse(monkeypatch):
+    _fake_condor(monkeypatch, {"Arguments": "", "Args": ""})
+    assert make_shards._condor_q_args() == set()
+
+
+def test_unparseable_rows_raise_instead_of_reading_as_an_empty_queue(monkeypatch):
+    _fake_condor(monkeypatch, {"Arguments": "undefined\nundefined\n",
+                               "Args": "undefined\nundefined\n"})
+    with pytest.raises(RuntimeError, match="refusing to guess"):
+        make_shards._condor_q_args()

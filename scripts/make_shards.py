@@ -169,7 +169,37 @@ def _events(path):
         return None
 
 
-def _resubmit(outdir, missing):
+def _condor_q_args():
+    """(sample, shard) for every job of this user still in the queue.
+
+    Read from the job arguments, whose first two tokens are $(sample) $(shard) — see
+    _SUB. The double-quoted `arguments =` form is HTCondor's new syntax, so the value
+    lands in the Arguments ClassAd; Args is the old-syntax spelling. Try both rather
+    than betting on one, and raise if the queue is non-empty yet nothing parses: a
+    parsing assumption that has quietly broken must not read as "nothing running".
+    """
+    seen_rows = False
+    for attr in ("Arguments", "Args"):
+        out = subprocess.run(["condor_q", "-af", attr], capture_output=True, text=True)
+        if out.returncode != 0:
+            raise RuntimeError(f"condor_q failed: {out.stderr.strip()}")
+        live = set()
+        for line in out.stdout.splitlines():
+            if not line.strip():
+                continue
+            seen_rows = True
+            tok = line.split()
+            if len(tok) >= 2 and tok[1].isdigit():
+                live.add((tok[0], int(tok[1])))
+        if live:
+            return live
+    if seen_rows:
+        raise RuntimeError("condor_q returned jobs but no (sample, shard) could be "
+                           "parsed from Arguments/Args — refusing to guess")
+    return set()
+
+
+def _resubmit(outdir, missing, force=False):
     """Emit a queue file + submit for exactly the missing shards.
 
     Re-running the whole campaign to recover a handful of shards wastes hundreds of
@@ -179,6 +209,27 @@ def _resubmit(outdir, missing):
     """
     plan = json.load(open(os.path.join(outdir, "_plan", "manifest.json")))["shards"]
     want = set(missing)
+    # A shard that is missing only because its job has not finished yet must NOT be
+    # resubmitted: the second job writes the same output path as the first, so the two
+    # race and can leave a truncated parquet. Only shards nothing is working on.
+    if force:
+        print("[verify] --force: not checking the queue, may duplicate running jobs")
+    else:
+        try:
+            live = _condor_q_args()
+        except (OSError, RuntimeError) as exc:
+            print(f"[verify] cannot check the queue ({exc}); refusing to write a "
+                  f"resubmit file. Re-run with --force if nothing is running.")
+            return None
+        held = want & live
+        if held:
+            want -= held
+            print(f"[verify] {len(held)} missing shards are still queued/running — "
+                  f"excluded from the resubmit")
+        if not want:
+            print("[verify] nothing to resubmit; wait for the queue to drain, then "
+                  "re-run --verify")
+            return None
     rows = [e for e in plan if (e["sample"], e["shard"]) in want]
     if not rows:
         return None
@@ -201,7 +252,7 @@ def _resubmit(outdir, missing):
     return sub
 
 
-def verify(outdir, write_missing=False):
+def verify(outdir, write_missing=False, force=False):
     """Check a finished campaign against its plan: every shard present, exactly once.
 
     Reads only the parquet FOOTER for the row count and only the ``shard`` COLUMN for the
@@ -237,7 +288,7 @@ def verify(outdir, write_missing=False):
     ok = not (missing or dup)
     print("[verify] " + ("complete and unique" if ok else "INCOMPLETE — do not merge"))
     if missing and write_missing:
-        _resubmit(outdir, missing)
+        _resubmit(outdir, missing, force=force)
     return 0 if ok else 1
 
 
@@ -248,6 +299,8 @@ def main(argv=None):
     ap.add_argument("--write-missing", action="store_true",
                     help="with --verify: also emit a submit file for just the missing "
                          "shards, using their original seeds")
+    ap.add_argument("--force", action="store_true",
+                    help="with --write-missing: skip the condor_q safety check")
     ap.add_argument("--sample", nargs="+", action="append",
                     metavar="NAME GLOB MAPS [SUBTREE]",
                     help="repeatable: a sample, its files, its OWN maps, and optionally the "
@@ -292,7 +345,8 @@ def main(argv=None):
                     help="open each file for its entry count (accurate but slower)")
     args = ap.parse_args(argv)
     if args.verify:
-        return verify(os.path.abspath(args.verify), write_missing=args.write_missing)
+        return verify(os.path.abspath(args.verify), write_missing=args.write_missing,
+                      force=args.force)
     # argparse cannot express "required unless --verify", so enforce it here
     if not args.sample or not args.out:
         ap.error("--sample and --out are required unless --verify is given")
