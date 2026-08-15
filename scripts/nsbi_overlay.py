@@ -431,6 +431,18 @@ def main(argv=None) -> int:
                       tau_pt_min=args.tau_pt_min, tau_eta_max=args.tau_eta_max,
                       cms_dnn=args.cms_dnn)
         nev = NanoAODEvents(nano_by_kl[kl], branches=branches, wp=wp, entry_stop=args.max_events)
+        # Say WHAT was read on each side. resolve_paths recurses, so a stray dataset
+        # nested under a kl directory is silently read as signal -- and it only shows up
+        # once max-events is large enough to reach those files, which makes it look like
+        # a physics disagreement that "appeared at full statistics".
+        for lab, ev_ in (("Delphes", dev), ("CMS", nev)):
+            used = getattr(ev_, "_used", None) or getattr(ev_, "paths", [])
+            trees = sorted({os.path.basename(os.path.dirname(f)) for f in used})
+            print(f"[overlay]   {lab:8s} {len(used)} file(s) from {len(trees)} dir(s)"
+                  + (f": {', '.join(trees[:4])}" if len(trees) > 1 else ""))
+            if len(trees) > 1:
+                print(f"[overlay]   WARNING: {lab} input spans several directories — "
+                      f"check for a stray dataset under the kl tree")
         if args.split_gen_matched:
             df, dm = features(dev, nano=False, with_match=True, **sel_kw)
             nf, nm = features(nev, nano=True, with_match=True, **sel_kw)
