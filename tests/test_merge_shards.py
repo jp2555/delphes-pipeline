@@ -174,3 +174,47 @@ def test_schema_mismatch_aborts_even_in_a_worker():
                       str(out / "sig.0003.parquet"))
         with pytest.raises(SystemExit):
             merge_shards.main(["--out", str(out), "--target-gb", "100", "--jobs", "4"])
+
+
+# --------------------------------------------------------------------------- #
+# A gap in one sample must not hold a finished sample hostage -- but it must
+# still block its own merge, or the campaign silently loses events.
+# --------------------------------------------------------------------------- #
+def test_a_finished_sample_merges_while_another_is_incomplete(tmp_path):
+    """This is the production case: ttbar lost 4 shards to dCache, signal is done."""
+    out = _campaign(tmp_path, drop={("ttbar", 2)})
+    assert merge_shards.main(["--out", str(out), "--sample", "sig",
+                              "--target-gb", "1e-9"]) == 0
+    names = [f.name for f in (out / "merged").iterdir()]
+    assert any(n.startswith("sig.") for n in names)
+    assert not any(n.startswith("ttbar.") for n in names)
+
+
+def test_an_incomplete_sample_still_refuses_to_merge(tmp_path, capsys):
+    out = _campaign(tmp_path, drop={("ttbar", 2)})
+    assert merge_shards.main(["--out", str(out), "--sample", "ttbar",
+                              "--target-gb", "1e-9"]) == 1
+    assert "incomplete" in capsys.readouterr().out
+
+
+def test_a_duplicate_in_the_selected_sample_still_blocks(tmp_path):
+    """--sample must not become a way to skip the double-counting check."""
+    out = _campaign(tmp_path, dup=0)
+    assert merge_shards.main(["--out", str(out), "--sample", "sig",
+                              "--target-gb", "1e-9"]) == 1
+
+
+def test_merging_the_second_sample_keeps_the_first_in_the_manifest(tmp_path):
+    """The ttbar merge must not erase sig's provenance from manifest.json."""
+    out = _campaign(tmp_path)
+    merge_shards.main(["--out", str(out), "--sample", "sig", "--target-gb", "1e-9"])
+    merge_shards.main(["--out", str(out), "--sample", "ttbar", "--target-gb", "1e-9"])
+    man = json.load(open(out / "merged" / "manifest.json"))
+    assert set(man) == {"sig", "ttbar"}
+    assert man["sig"]["shards"] == 3 and man["ttbar"]["events"] == 200
+
+
+def test_an_unknown_sample_name_is_rejected(tmp_path):
+    out = _campaign(tmp_path)
+    with pytest.raises(SystemExit, match="no such sample"):
+        merge_shards.main(["--out", str(out), "--sample", "signl"])

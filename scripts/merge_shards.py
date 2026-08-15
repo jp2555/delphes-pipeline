@@ -105,6 +105,9 @@ def main(argv=None):
                     help="processes; one per output file. 0 = min(cpu_count, files). The "
                          "work is codec-bound (zstd decompress+recompress of ~82 GB), so "
                          "this scales close to linearly until the filesystem saturates.")
+    ap.add_argument("--sample", action="append", metavar="NAME",
+                    help="merge only this sample (repeatable). Lets a finished sample "
+                         "be merged for real while another is still being recovered.")
     ap.add_argument("--force", action="store_true",
                     help="merge even when shards are missing or duplicated — the merged "
                          "sample will then be silently short")
@@ -114,14 +117,28 @@ def main(argv=None):
     dest = os.path.abspath(args.dest or os.path.join(outdir, "merged"))
     os.makedirs(dest, exist_ok=True)
 
-    if make_shards.verify(outdir) != 0 and not args.force:
-        print("[merge] refusing to merge an incomplete set (--force to override)")
-        return 1
-
     plan = _plan(outdir)
     by_sample = {}
     for e in plan:
         by_sample.setdefault(e["sample"], []).append(e)
+
+    if args.sample:
+        unknown = set(args.sample) - set(by_sample)
+        if unknown:
+            raise SystemExit(f"[merge] no such sample: {', '.join(sorted(unknown))}")
+        by_sample = {k: v for k, v in by_sample.items() if k in args.sample}
+
+    # Completeness is judged over the samples actually being merged: a gap in ttbar is
+    # no reason to block a finished signal merge, but it must still block ttbar's. A
+    # duplicated shard id is just as disqualifying as a missing one -- it double-counts.
+    report = {}
+    make_shards.verify(outdir, report=report)
+    bad = {s for s, _ in report["missing"]} | {s for s, _ in report["dup"]}
+    blocked = sorted(bad & set(by_sample))
+    if blocked and not args.force:
+        print(f"[merge] refusing to merge an incomplete sample: {', '.join(blocked)} "
+              f"(--force to override, or --sample to merge only the finished ones)")
+        return 1
 
     summary = {}
     for name, entries in by_sample.items():
@@ -141,7 +158,13 @@ def main(argv=None):
                          "maps": sorted({e["maps"] for e in entries}),
                          "subtree": sorted({e.get("subtree") for e in entries})}
 
-    with open(os.path.join(dest, "manifest.json"), "w") as fh:
+    mpath = os.path.join(dest, "manifest.json")
+    if os.path.exists(mpath):
+        with open(mpath) as fh:
+            prior = json.load(fh)
+        prior.update(summary)
+        summary = prior
+    with open(mpath, "w") as fh:
         json.dump(summary, fh, indent=2)
     total = sum(v["events"] for v in summary.values())
     print(f"[merge] {total:,} events total -> {dest}/manifest.json")

@@ -252,12 +252,16 @@ def _resubmit(outdir, missing, force=False):
     return sub
 
 
-def verify(outdir, write_missing=False, force=False):
+def verify(outdir, write_missing=False, force=False, report=None):
     """Check a finished campaign against its plan: every shard present, exactly once.
 
     Reads only the parquet FOOTER for the row count and only the ``shard`` COLUMN for the
     identity check — never the payload. Loading each file whole would mean reading the
     whole ~82 GB campaign just to count it, and then again to merge it.
+
+    Pass a dict as ``report`` to receive the per-shard detail (missing/empty/dup), so a
+    caller can decide which SAMPLES a problem actually affects rather than only seeing
+    a campaign-wide pass/fail.
     """
     import pyarrow.parquet as pq
     plan = json.load(open(os.path.join(outdir, "_plan", "manifest.json")))["shards"]
@@ -279,6 +283,9 @@ def verify(outdir, write_missing=False, force=False):
             for sh in set(col.to_pylist()):
                 seen.setdefault((e["sample"], int(sh)), []).append(e["out"])
     dup = {k: v for k, v in seen.items() if len(v) > 1}
+    if report is not None:
+        report.update(missing=missing, empty=empty, dup=dup, events=total,
+                      planned=len(plan))
     print(f"[verify] {len(plan) - len(missing)}/{len(plan)} shards present, {total:,} events")
     for lbl, items in (("MISSING", missing), ("EMPTY", empty)):
         if items:
