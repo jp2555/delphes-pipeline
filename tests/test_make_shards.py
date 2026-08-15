@@ -504,3 +504,33 @@ def test_verify_does_not_read_the_payload():
     assert "metadata.num_rows" in body
     assert 'columns=["shard"]' in body
     assert "from_parquet" not in body, "loading the payload defeats the point"
+
+
+# --------------------------------------------------------------------------- #
+# Recovering a handful of failed shards must not mean re-running the campaign,
+# and must not mean hand-editing the queue file — that is how shards get skipped.
+# --------------------------------------------------------------------------- #
+def test_resubmit_lists_only_the_missing_shards_with_their_original_seeds():
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        shards, _, out = _plan(Path(td), n=8, shard_events=2)
+        for s in shards:
+            if s["shard"] not in (2, 5):
+                _write(s["out"], 5, s["shard"])
+        assert make_shards.main(["--verify", str(out), "--write-missing"]) == 1
+        lines = (out / "_plan" / "shards.missing.txt").read_text().strip().splitlines()
+        assert len(lines) == 2
+        got = {int(ln.split(",")[1]): int(ln.split(",")[-1]) for ln in lines}
+        orig = {s["shard"]: s["seed"] for s in shards}
+        assert set(got) == {2, 5}
+        assert all(got[k] == orig[k] for k in got), "a recovered shard must reuse its seed"
+
+
+def test_resubmit_is_not_written_when_the_campaign_is_complete():
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        shards, _, out = _plan(Path(td), n=4, shard_events=2)
+        for s in shards:
+            _write(s["out"], 5, s["shard"])
+        assert make_shards.main(["--verify", str(out), "--write-missing"]) == 0
+        assert not (out / "_plan" / "shards.missing.txt").exists()

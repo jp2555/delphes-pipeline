@@ -169,7 +169,39 @@ def _events(path):
         return None
 
 
-def verify(outdir):
+def _resubmit(outdir, missing):
+    """Emit a queue file + submit for exactly the missing shards.
+
+    Re-running the whole campaign to recover a handful of shards wastes hundreds of
+    core-hours, and hand-editing the queue file is how shards get skipped in the first
+    place. Seeds come from the ORIGINAL plan, so a recovered shard is identical to what
+    the first attempt would have produced.
+    """
+    plan = json.load(open(os.path.join(outdir, "_plan", "manifest.json")))["shards"]
+    want = set(missing)
+    rows = [e for e in plan if (e["sample"], e["shard"]) in want]
+    if not rows:
+        return None
+    plandir = os.path.join(outdir, "_plan")
+    q = os.path.join(plandir, "shards.missing.txt")
+    with open(q, "w") as fh:
+        for e in rows:
+            fl = os.path.join(plandir, f"{e['sample']}.{e['shard']:04d}.txt")
+            fh.write(f"{e['sample']}, {e['shard']}, {fl}, {e['maps']}, {e['out']}, "
+                     f"{e['seed']}\n")
+    src = os.path.join(plandir, "ntuplize.sub")
+    sub = os.path.join(plandir, "ntuplize.missing.sub")
+    if os.path.exists(src):
+        with open(src) as fh:
+            text = fh.read()
+        with open(sub, "w") as fh:
+            fh.write(text.replace(os.path.basename(q).replace(".missing", ""),
+                                  os.path.basename(q)))
+        print(f"[verify] resubmit {len(rows)} missing shards:  condor_submit {sub}")
+    return sub
+
+
+def verify(outdir, write_missing=False):
     """Check a finished campaign against its plan: every shard present, exactly once.
 
     Reads only the parquet FOOTER for the row count and only the ``shard`` COLUMN for the
@@ -204,6 +236,8 @@ def verify(outdir):
         print(f"[verify] DUPLICATED shard ids: {sorted(dup)}")
     ok = not (missing or dup)
     print("[verify] " + ("complete and unique" if ok else "INCOMPLETE — do not merge"))
+    if missing and write_missing:
+        _resubmit(outdir, missing)
     return 0 if ok else 1
 
 
@@ -211,6 +245,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--verify", metavar="OUTDIR",
                     help="audit a finished campaign against its manifest and exit")
+    ap.add_argument("--write-missing", action="store_true",
+                    help="with --verify: also emit a submit file for just the missing "
+                         "shards, using their original seeds")
     ap.add_argument("--sample", nargs="+", action="append",
                     metavar="NAME GLOB MAPS [SUBTREE]",
                     help="repeatable: a sample, its files, its OWN maps, and optionally the "
@@ -255,7 +292,7 @@ def main(argv=None):
                     help="open each file for its entry count (accurate but slower)")
     args = ap.parse_args(argv)
     if args.verify:
-        return verify(os.path.abspath(args.verify))
+        return verify(os.path.abspath(args.verify), write_missing=args.write_missing)
     # argparse cannot express "required unless --verify", so enforce it here
     if not args.sample or not args.out:
         ap.error("--sample and --out are required unless --verify is given")
