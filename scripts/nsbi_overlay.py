@@ -100,7 +100,7 @@ def _cms_range(name):
 _EXT = re.compile(r"_ext\d+$")
 
 
-def _nano_by_kl(nano_dir, select=None, combine=False):
+def _nano_by_kl(nano_dir, select=None):
     """{kl tag: [directories]} — every extension of ONE production, per kl point."""
     dirs = [d for d in glob.glob(os.path.join(nano_dir, "*kl-*"))
             if _kl(d) and "NanoAOD" in d]
@@ -111,11 +111,6 @@ def _nano_by_kl(nano_dir, select=None, combine=False):
         out.setdefault(_kl(d), []).append(d)
     for kl, ds in sorted(out.items()):
         prods = sorted({_EXT.sub("", os.path.basename(x)) for x in ds})
-        if len(prods) > 1 and combine:
-            print(f"[overlay] kl={kl}: combining {len(prods)} productions "
-                  f"({len(ds)} dirs) — assumed same config, more statistics")
-            out[kl] = sorted(ds)
-            continue
         if len(prods) > 1:
             raise SystemExit(
                 f"[overlay] kl={kl} matches {len(prods)} different CMS productions:\n  "
@@ -383,9 +378,6 @@ def main(argv=None) -> int:
     ap.add_argument("--nano-select", metavar="SUBSTRING",
                     help="pick the CMS production when several match one kl "
                          "(e.g. 'PowhegBugFix' or '150X-kit-private')")
-    ap.add_argument("--nano-combine", action="store_true",
-                    help="read ALL CMS productions matching a kl point, not one. Only "
-                         "correct when they are the same config differing in statistics")
     ap.add_argument("--out", default="plots/nsbi_overlay")
     ap.add_argument("--max-events", type=int, default=20000)
     ap.add_argument("--tuned", dest="tuned", action="store_true", default=True)
@@ -436,7 +428,7 @@ def main(argv=None) -> int:
         print(f"\n[cms-dnn] overlaying the {len(_CMS)} inputs it can, in the rotated frame\n",
               flush=True)
 
-    nano_by_kl = _nano_by_kl(args.nano_dir, args.nano_select, args.nano_combine)
+    nano_by_kl = _nano_by_kl(args.nano_dir, args.nano_select)
 
     # Raw Delphes is one directory per kl; the merged ntuple is one file set with a kl
     # column, so drive the loop from the CMS side, which has a directory either way.
