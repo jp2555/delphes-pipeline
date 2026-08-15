@@ -25,6 +25,8 @@ from typing import Optional, Sequence, Union
 
 import awkward as ak
 import numpy as np
+import time
+
 import uproot
 
 PathLike = Union[str, Sequence[str]]
@@ -59,6 +61,48 @@ _GEN_FIELDS = {
 }
 _MET_FIELDS = {"met": "MET", "eta": "Eta", "phi": "Phi"}
 _SCALARHT_FIELDS = {"ht": "HT"}
+
+
+# A campaign of ~1400 shards streaming from dCache sees transient XRootD failures at
+# well under 1% per open -- a redirector handing out a data server whose certificate
+# does not cover the address, a door briefly refusing. Without a retry each one costs a
+# whole ~22 min shard, so bounded retries are far cheaper than the reruns they avoid.
+OPEN_TRIES = 4
+OPEN_BACKOFF_S = 5.0
+
+# Errors worth retrying: a bad door, a TLS/redirect failure, a dropped connection. A
+# genuinely absent or corrupt file raises the same OSError, so retrying costs a few
+# wasted seconds in that case -- an acceptable price for not losing good shards.
+_RETRYABLE = ("did not open properly", "tls", "connection", "timeout", "redirect",
+              "operation expired", "socket", "no servers")
+
+
+def _is_retryable(exc: BaseException) -> bool:
+    m = str(exc).lower()
+    return any(k in m for k in _RETRYABLE)
+
+
+def open_with_retry(path, *, tries: int = OPEN_TRIES, backoff: float = OPEN_BACKOFF_S,
+                    _sleep=time.sleep):
+    """``uproot.open`` that survives a transient remote failure.
+
+    Local paths fail fast on the first attempt, so a typo does not cost 15 s of
+    pointless backoff; only remote (``root://``) opens are retried.
+    """
+    remote = isinstance(path, str) and "://" in path
+    last = None
+    for attempt in range(tries):
+        try:
+            return uproot.open(path)
+        except Exception as exc:  # noqa: BLE001 - uproot wraps many transport errors
+            last = exc
+            if not remote or attempt == tries - 1 or not _is_retryable(exc):
+                raise
+            wait = backoff * (2 ** attempt)
+            print(f"[io] open failed ({exc.__class__.__name__}: {exc}); "
+                  f"retry {attempt + 1}/{tries - 1} in {wait:.0f}s", flush=True)
+            _sleep(wait)
+    raise last  # pragma: no cover - loop either returns or raises
 
 
 def resolve_paths(path: PathLike) -> list[str]:
@@ -108,7 +152,7 @@ class DelphesEvents:
         for p in self.paths:
             if entry_stop is not None and remaining <= 0:
                 break
-            f = uproot.open(p)
+            f = open_with_retry(p)
             t = f[treename]
             count = t.num_entries
             stop = count if entry_stop is None else min(count, remaining)

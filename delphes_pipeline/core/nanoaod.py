@@ -23,7 +23,7 @@ from typing import Optional
 import awkward as ak
 import numpy as np
 
-from .io import PathLike, resolve_paths
+from .io import PathLike, open_with_retry, resolve_paths
 import uproot
 
 # Default NanoAOD branch names (2024 NanoAODv14/15 conventions). Override via the
@@ -74,7 +74,7 @@ class NanoAODEvents:
         for p in self.paths:
             if entry_stop is not None and remaining <= 0:
                 break
-            f = uproot.open(p)
+            f = open_with_retry(p)
             t = f[self.treename]
             count = t.num_entries
             stop = count if entry_stop is None else min(count, remaining)
