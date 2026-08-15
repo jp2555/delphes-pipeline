@@ -44,9 +44,18 @@ anchor:
       tagger: UParT            # -> UParTAK4_wp_values, Medium = 0.1272
       wp: M
     deeptau_vsjet_medium: 5     # DeepTau v2p5 VSjet Medium WP level (NanoAODv15: 0..8)
+    muon_iso_max: 0.15          # Muon_pfRelIso04_all, tight-isolation WP
   branches:
     jet: { btag_disc: Jet_btagUParTAK4B }
     tau: { vsjet: Tau_idDeepTau2018v2p5VSjet }
+    # NanoAOD Electron/Muon are loose enough to contain jet fakes, while a Delphes
+    # lepton has already passed the card efficiency. Without an ID here the two pools
+    # are not comparable: the semi-leptonic channel picks up CMS-only fake candidates,
+    # and a fake paired with a real tau is back-to-back (it lands on dR_tautau). The
+    # reader applies these to BOTH the tuning anchor and the overlay.
+    # CHECK these WPs against the CMS bbtautau baseline (AN-25-103) before quoting.
+    electron: { id: Electron_mvaIso_WP80 }
+    muon: { id: Muon_tightId, iso: Muon_pfRelIso04_all }
 
 # Downstream tuning maps. NOT committed to the repo — derive once (step 0 above)
 # before running the tuning lens / overlay / ntuplizer level. v1 changed only the

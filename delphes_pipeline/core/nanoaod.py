@@ -130,11 +130,37 @@ class NanoAODEvents:
 
     @cached_property
     def electrons(self) -> ak.Array:
-        return self._zip(self.b["electron"])
+        return self._selected_leptons("electron")
 
     @cached_property
     def muons(self) -> ak.Array:
-        return self._zip(self.b["muon"])
+        return self._selected_leptons("muon")
+
+    def _selected_leptons(self, name: str) -> ak.Array:
+        """Leptons passing the configured ID / isolation, or the raw collection.
+
+        NanoAOD ``Electron``/``Muon`` are very loose — they include jet fakes that no
+        analysis would use. A Delphes lepton, by contrast, has already survived the
+        card's efficiency parameterisation, which stands in for an ID. Comparing the two
+        raw is therefore not like-for-like: the CMS side acquires fake candidates that
+        Delphes cannot produce, and a fake paired with a real τ is back-to-back, landing
+        on ΔR_ττ.
+
+        This is applied in the READER so the tuning anchor (``lepton_efficiency``) and
+        the validation overlay cannot drift apart — they were derived and compared
+        against different lepton definitions before, with nothing to flag it.
+
+        Configure via ``anchor.branches.{electron,muon}.{id,iso}`` and
+        ``anchor.wp.{electron,muon}_iso_max``. Unset leaves the raw collection.
+        """
+        lep = self._zip(self.b[name])
+        fields = ak.fields(lep)
+        if "id" in fields:
+            lep = lep[lep.id != 0]
+        iso_max = self.wp.get(f"{name}_iso_max")
+        if "iso" in fields and iso_max is not None:
+            lep = lep[lep.iso <= iso_max]
+        return lep
 
     @cached_property
     def gen(self) -> ak.Array:
