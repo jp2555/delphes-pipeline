@@ -100,7 +100,7 @@ def _cms_range(name):
 _EXT = re.compile(r"_ext\d+$")
 
 
-def _nano_by_kl(nano_dir, select=None):
+def _nano_by_kl(nano_dir, select=None, combine=False):
     """{kl tag: [directories]} — every extension of ONE production, per kl point."""
     dirs = [d for d in glob.glob(os.path.join(nano_dir, "*kl-*"))
             if _kl(d) and "NanoAOD" in d]
@@ -111,6 +111,11 @@ def _nano_by_kl(nano_dir, select=None):
         out.setdefault(_kl(d), []).append(d)
     for kl, ds in sorted(out.items()):
         prods = sorted({_EXT.sub("", os.path.basename(x)) for x in ds})
+        if len(prods) > 1 and combine:
+            print(f"[overlay] kl={kl}: combining {len(prods)} productions "
+                  f"({len(ds)} dirs) — assumed same config, more statistics")
+            out[kl] = sorted(ds)
+            continue
         if len(prods) > 1:
             raise SystemExit(
                 f"[overlay] kl={kl} matches {len(prods)} different CMS productions:\n  "
@@ -210,6 +215,9 @@ def _rot(p, cos_a, sin_a):
             "pz": p["pz"], "e": p["e"]}
 
 
+_REPORT_CANDS = True
+
+
 def features(ev, *, nano, tautau_only=False, mtautau_min=20.0, clean=True,
              jet_pt_min=20.0, jet_eta_max=2.4, clean_dr=0.4, with_match=False,
              tau_pt_min=20.0, tau_eta_max=2.3, cms_dnn=False):
@@ -239,6 +247,12 @@ def features(ev, *, nano, tautau_only=False, mtautau_min=20.0, clean=True,
     if tautau_only:
         cand = cand[cand.is_tauh == 1]        # τ_hτ_h channel: pick the 2 leading τ_h, not 2 of all
     cand = cand[ak.argsort(cand.pt, axis=1, ascending=False, stable=True)]
+    if _REPORT_CANDS:
+        n_h = int(ak.sum(cand.is_tauh == 1))
+        n_l = int(ak.sum(cand.is_tauh == 0))
+        tot = max(n_h + n_l, 1)
+        print(f"[overlay]   {'CMS' if nano else 'Delphes':8s} tau candidates: "
+              f"{n_h:,} tau_h + {n_l:,} light lepton ({100 * n_l / tot:.0f}% leptons)")
 
     jets = ev.jets
     if clean:
@@ -369,6 +383,9 @@ def main(argv=None) -> int:
     ap.add_argument("--nano-select", metavar="SUBSTRING",
                     help="pick the CMS production when several match one kl "
                          "(e.g. 'PowhegBugFix' or '150X-kit-private')")
+    ap.add_argument("--nano-combine", action="store_true",
+                    help="read ALL CMS productions matching a kl point, not one. Only "
+                         "correct when they are the same config differing in statistics")
     ap.add_argument("--out", default="plots/nsbi_overlay")
     ap.add_argument("--max-events", type=int, default=20000)
     ap.add_argument("--tuned", dest="tuned", action="store_true", default=True)
@@ -419,7 +436,7 @@ def main(argv=None) -> int:
         print(f"\n[cms-dnn] overlaying the {len(_CMS)} inputs it can, in the rotated frame\n",
               flush=True)
 
-    nano_by_kl = _nano_by_kl(args.nano_dir, args.nano_select)
+    nano_by_kl = _nano_by_kl(args.nano_dir, args.nano_select, args.nano_combine)
 
     # Raw Delphes is one directory per kl; the merged ntuple is one file set with a kl
     # column, so drive the loop from the CMS side, which has a directory either way.

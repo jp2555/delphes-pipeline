@@ -188,3 +188,13 @@ def test_nano_select_disambiguates_between_productions(tmp_path):
     assert len(got["1p00"]) == 2
     assert all("kit-private" not in x for x in got["1p00"])
     assert len(nsbi_overlay._nano_by_kl(str(d), select="150X-kit-private")["1p00"]) == 1
+
+
+def test_nano_combine_merges_productions_when_asked(tmp_path):
+    """kit-private is the same config with more statistics, per the producer."""
+    d = _nano_tree(tmp_path, [_BASE.format("5p00") + "-PowhegBugFix",
+                              _BASE.format("5p00") + "-PowhegBugFix_ext1",
+                              _BASE.format("5p00") + "-150X-kit-private"])
+    assert len(nsbi_overlay._nano_by_kl(str(d), combine=True)["5p00"]) == 3
+    with pytest.raises(SystemExit):
+        nsbi_overlay._nano_by_kl(str(d))          # still explicit by default
