@@ -119,3 +119,13 @@ def test_no_tuned_is_rejected_for_a_merged_ntuple():
     with pytest.raises(SystemExit):
         nsbi_overlay.main(["--config", "x.yml", "--nano-dir", "/n",
                            "--ntuple", "/m", "--no-tuned"])
+
+
+def test_a_sample_without_a_kl_column_is_skipped_not_fatal(tmp_path):
+    """ttbar shares the merged directory with signal and has no kl column."""
+    d = tmp_path / "merged"
+    d.mkdir()
+    _write(d / "signal.0000.parquet", 20, kl=1.0)
+    _write(d / "ttbar.0000.parquet", 20)          # no kl
+    ev = NtupleEvents(d, kl=1.0)
+    assert ev.n == 20

@@ -335,6 +335,11 @@ class NtupleEvents:
                 break
             pf = pq.ParquetFile(p)
             jkl = _kl_column_index(pf) if kl is not None else None
+            if kl is not None and jkl is None:
+                # no kl column at all: a sample that was never generated per kl (ttbar
+                # sits in the same merged directory). It cannot hold this point, and
+                # reading it would fail on the missing field.
+                continue
             for i in range(pf.num_row_groups):
                 if entry_stop is not None and have >= entry_stop:
                     break
