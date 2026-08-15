@@ -92,6 +92,37 @@ def _cms_range(name):
     return (-250, 250)          # px, py (including met_px/met_py)
 
 
+# "..._PowhegBugFix" and "..._PowhegBugFix_ext1" are the SAME production, split for
+# statistics, and both must be read. "..._150X-kit-private" is a DIFFERENT production
+# and must not be mixed with either. Keying a dict on the kl tag alone silently kept
+# whichever directory glob happened to return last -- so the CMS reference could change
+# between runs with nothing in the log to say so.
+_EXT = re.compile(r"_ext\d+$")
+
+
+def _nano_by_kl(nano_dir, select=None):
+    """{kl tag: [directories]} — every extension of ONE production, per kl point."""
+    dirs = [d for d in glob.glob(os.path.join(nano_dir, "*kl-*"))
+            if _kl(d) and "NanoAOD" in d]
+    if select:
+        dirs = [d for d in dirs if select in os.path.basename(d)]
+    out = {}
+    for d in dirs:
+        out.setdefault(_kl(d), []).append(d)
+    for kl, ds in sorted(out.items()):
+        prods = sorted({_EXT.sub("", os.path.basename(x)) for x in ds})
+        if len(prods) > 1:
+            raise SystemExit(
+                f"[overlay] kl={kl} matches {len(prods)} different CMS productions:\n  "
+                + "\n  ".join(prods)
+                + "\n[overlay] these are not extensions of each other and must not be "
+                  "mixed; pick one with --nano-select")
+        out[kl] = sorted(ds)
+        print(f"[overlay] kl={kl}: CMS {prods[0]}"
+              + (f" (+{len(ds) - 1} extension)" if len(ds) > 1 else ""))
+    return out
+
+
 def _kl(path):
     m = _KL.search(os.path.basename(os.path.normpath(path)))
     return m.group(1) if m else None
@@ -335,6 +366,9 @@ def main(argv=None) -> int:
                          "is already baked into them, so --tuned/--no-tuned does not "
                          "apply and the kl point is read from the 'kl' column.")
     ap.add_argument("--nano-dir", required=True)
+    ap.add_argument("--nano-select", metavar="SUBSTRING",
+                    help="pick the CMS production when several match one kl "
+                         "(e.g. 'PowhegBugFix' or '150X-kit-private')")
     ap.add_argument("--out", default="plots/nsbi_overlay")
     ap.add_argument("--max-events", type=int, default=20000)
     ap.add_argument("--tuned", dest="tuned", action="store_true", default=True)
@@ -385,7 +419,7 @@ def main(argv=None) -> int:
         print(f"\n[cms-dnn] overlaying the {len(_CMS)} inputs it can, in the rotated frame\n",
               flush=True)
 
-    nano_by_kl = {_kl(d): d for d in glob.glob(os.path.join(args.nano_dir, "*kl-*")) if _kl(d) and "NanoAOD" in d}
+    nano_by_kl = _nano_by_kl(args.nano_dir, args.nano_select)
 
     # Raw Delphes is one directory per kl; the merged ntuple is one file set with a kl
     # column, so drive the loop from the CMS side, which has a directory either way.

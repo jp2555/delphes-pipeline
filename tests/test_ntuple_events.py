@@ -150,3 +150,41 @@ def test_a_kl_point_cms_has_but_delphes_lacks_is_skipped_not_fatal(tmp_path, cap
     have = available_kl(d)
     assert not any(abs(v - nsbi_overlay._kl_value("3p00")) < 1e-6 for v in have)
     assert any(abs(v - nsbi_overlay._kl_value("1p00")) < 1e-6 for v in have)
+
+
+# --------------------------------------------------------------------------- #
+# The CMS side ships several directories per kl: statistics extensions (_ext1)
+# that must be COMBINED, and separate productions (PowhegBugFix vs kit-private)
+# that must NOT be mixed. Keying a dict on the kl tag silently kept one of them.
+# --------------------------------------------------------------------------- #
+_BASE = "GluGluHHto2B2Tau_Par-c2-0p00-kl-{}-kt-1p00_TuneCP5_powheg-pythia8_NanoAODv15"
+
+
+def _nano_tree(tmp, names):
+    for n in names:
+        (tmp / n).mkdir(parents=True)
+    return tmp
+
+
+def test_statistics_extensions_are_combined_not_chosen_between(tmp_path):
+    d = _nano_tree(tmp_path, [_BASE.format("0p00") + "-PowhegBugFix",
+                              _BASE.format("0p00") + "-PowhegBugFix_ext1"])
+    got = nsbi_overlay._nano_by_kl(str(d))
+    assert len(got["0p00"]) == 2, "both the base sample and its _ext1 must be read"
+
+
+def test_two_different_productions_abort_rather_than_pick_one(tmp_path):
+    d = _nano_tree(tmp_path, [_BASE.format("1p00") + "-PowhegBugFix",
+                              _BASE.format("1p00") + "-150X-kit-private"])
+    with pytest.raises(SystemExit, match="different CMS productions"):
+        nsbi_overlay._nano_by_kl(str(d))
+
+
+def test_nano_select_disambiguates_between_productions(tmp_path):
+    d = _nano_tree(tmp_path, [_BASE.format("1p00") + "-PowhegBugFix",
+                              _BASE.format("1p00") + "-PowhegBugFix_ext1",
+                              _BASE.format("1p00") + "-150X-kit-private"])
+    got = nsbi_overlay._nano_by_kl(str(d), select="PowhegBugFix")
+    assert len(got["1p00"]) == 2
+    assert all("kit-private" not in x for x in got["1p00"])
+    assert len(nsbi_overlay._nano_by_kl(str(d), select="150X-kit-private")["1p00"]) == 1
