@@ -13,6 +13,12 @@ shards looks exactly like a finished one on disk, and the resulting sample is qu
 
 Streaming, not loading: the campaign is ~82 GB, so shards are appended row-group by
 row-group through a ParquetWriter and only one shard is resident at a time.
+
+Parallel by OUTPUT FILE. The work is dominated by codec — every shard is decompressed and
+recompressed with zstd, which runs at a few hundred MB/s on one core — so the groups are
+planned up front from the shards' own sizes and each output file is written by its own
+process. That needs the boundaries decided BEFORE writing, which is why the grouping uses
+input sizes rather than watching the output grow.
 """
 
 from __future__ import annotations
@@ -21,6 +27,7 @@ import argparse
 import json
 import os
 import sys
+from concurrent.futures import ProcessPoolExecutor
 
 import pyarrow.parquet as pq
 
@@ -33,36 +40,60 @@ def _plan(outdir):
         return json.load(fh)["shards"]
 
 
-def merge_sample(name, entries, dest, target_bytes):
-    """Stream ``entries`` into ``dest/name.NNNN.parquet`` files of ~target size."""
-    written, part, rows, writer, schema = [], 0, 0, None, None
-    out_path = None
+def _group(entries, target_bytes):
+    """Partition shards into output groups by their INPUT size.
+
+    Boundaries have to be fixed before any writing starts, otherwise the groups cannot be
+    handed to separate processes. Input size is a good proxy: the output carries the same
+    data through the same codec.
+    """
+    groups, cur, acc = [], [], 0
+    for e in entries:
+        cur.append(e)
+        acc += os.path.getsize(e["out"])
+        if acc >= target_bytes:
+            groups.append(cur); cur, acc = [], 0
+    if cur:
+        groups.append(cur)
+    return groups
+
+
+def write_group(job):
+    """Write ONE output file from a group of shards. Module level, so it can be pickled
+    to a worker process."""
+    name, part, entries, dest = job
+    out_path = os.path.join(dest, f"{name}.{part:04d}.parquet")
+    writer, schema, rows = None, None, 0
     try:
         for e in entries:
             t = pq.read_table(e["out"])
             if schema is None:
                 schema = t.schema
+                writer = pq.ParquetWriter(out_path, schema, compression="zstd")
             elif not t.schema.equals(schema):
                 # coercing here would silently drop or reorder columns; a schema change
                 # means the shards were made by different code and must not be mixed
-                raise SystemExit(
-                    f"[merge] {name}: schema mismatch at {e['out']}\n"
+                raise ValueError(
+                    f"{name}: schema mismatch at {e['out']}\n"
                     f"        expected {schema.names}\n        got      {t.schema.names}")
-            if writer is None:
-                out_path = os.path.join(dest, f"{name}.{part:04d}.parquet")
-                writer = pq.ParquetWriter(out_path, schema, compression="zstd")
             writer.write_table(t)
             rows += t.num_rows
-            if os.path.getsize(out_path) >= target_bytes:
-                writer.close(); writer = None
-                written.append(out_path); part += 1
-        if writer is not None:
-            writer.close()
-            written.append(out_path)
     finally:
         if writer is not None:
             writer.close()
-    return written, rows
+    return out_path, rows
+
+
+def merge_sample(name, entries, dest, target_bytes, jobs=1):
+    """Stream ``entries`` into ``dest/name.NNNN.parquet`` files of ~target size."""
+    groups = _group(entries, target_bytes)
+    todo = [(name, i, g, dest) for i, g in enumerate(groups)]
+    if jobs <= 1 or len(todo) <= 1:
+        results = [write_group(j) for j in todo]
+    else:
+        with ProcessPoolExecutor(max_workers=min(jobs, len(todo))) as ex:
+            results = list(ex.map(write_group, todo))
+    return [r[0] for r in results], sum(r[1] for r in results)
 
 
 def main(argv=None):
@@ -70,6 +101,10 @@ def main(argv=None):
     ap.add_argument("--out", required=True, help="the campaign directory holding the shards")
     ap.add_argument("--dest", default=None, help="where to write (default <out>/merged)")
     ap.add_argument("--target-gb", type=float, default=5.0)
+    ap.add_argument("--jobs", type=int, default=0,
+                    help="processes; one per output file. 0 = min(cpu_count, files). The "
+                         "work is codec-bound (zstd decompress+recompress of ~82 GB), so "
+                         "this scales close to linearly until the filesystem saturates.")
     ap.add_argument("--force", action="store_true",
                     help="merge even when shards are missing or duplicated — the merged "
                          "sample will then be silently short")
@@ -92,7 +127,12 @@ def main(argv=None):
     for name, entries in by_sample.items():
         entries = [e for e in sorted(entries, key=lambda x: x["shard"])
                    if os.path.exists(e["out"])]
-        files, rows = merge_sample(name, entries, dest, args.target_gb * 1e9)
+        jobs = args.jobs or (os.cpu_count() or 1)
+        try:
+            files, rows = merge_sample(name, entries, dest, args.target_gb * 1e9, jobs=jobs)
+        except ValueError as exc:
+            # raised in a worker; surface it as a clean abort rather than a traceback
+            raise SystemExit(f"[merge] {exc}")
         size = sum(os.path.getsize(f) for f in files)
         print(f"[merge] {name}: {len(entries)} shards -> {len(files)} files, "
               f"{rows:,} events, {size/1e9:.1f} GB")

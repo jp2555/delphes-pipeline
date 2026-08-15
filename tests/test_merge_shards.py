@@ -126,3 +126,51 @@ def test_schema_mismatch_is_refused_not_coerced():
         ak.to_parquet(odd, str(out / "sig.0002.parquet"))
         with pytest.raises(SystemExit):
             merge_shards.main(["--out", str(out), "--target-gb", "100"])
+
+
+# --------------------------------------------------------------------------- #
+# The merge is codec-bound — every shard is decompressed and recompressed with
+# zstd at a few hundred MB/s on one core — so output files are written in
+# parallel. That requires the group boundaries to be fixed BEFORE writing.
+# --------------------------------------------------------------------------- #
+def test_parallel_and_serial_merges_agree_exactly():
+    """Parallelism must not change a single event, or the ntuple depends on --jobs."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        out = _campaign(tmp / "a", samples=(("sig", 6),), rows=100)
+        merge_shards.main(["--out", str(out), "--target-gb", "1e-9", "--jobs", "1"])
+        serial = [ak.from_parquet(f) for f in
+                  json.load(open(out / "merged" / "manifest.json"))["sig"]["files"]]
+
+        out2 = _campaign(tmp / "b", samples=(("sig", 6),), rows=100)
+        merge_shards.main(["--out", str(out2), "--target-gb", "1e-9", "--jobs", "4"])
+        par = [ak.from_parquet(f) for f in
+               json.load(open(out2 / "merged" / "manifest.json"))["sig"]["files"]]
+
+    assert len(serial) == len(par)
+    cat = lambda xs: ak.to_numpy(ak.concatenate([x["MET_pt"] for x in xs])).tolist()
+    assert cat(serial) == cat(par)
+
+
+def test_grouping_is_decided_before_writing():
+    """Boundaries come from the shards' own sizes; deciding them by watching the output
+    grow would make the groups un-parallelisable."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        out = _campaign(Path(td), samples=(("sig", 6),), rows=100)
+        plan = json.load(open(out / "_plan" / "manifest.json"))["shards"]
+        groups = merge_shards._group(plan, 1)          # 1 byte -> one group per shard
+        assert len(groups) == 6 and all(len(g) == 1 for g in groups)
+        big = merge_shards._group(plan, 1e12)          # huge -> a single group
+        assert len(big) == 1 and len(big[0]) == 6
+
+
+def test_schema_mismatch_aborts_even_in_a_worker():
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        out = _campaign(Path(td), samples=(("sig", 4),), rows=10)
+        ak.to_parquet(ak.zip({"MET_pt": np.zeros(10, dtype=np.float32)}),
+                      str(out / "sig.0003.parquet"))
+        with pytest.raises(SystemExit):
+            merge_shards.main(["--out", str(out), "--target-gb", "100", "--jobs", "4"])
