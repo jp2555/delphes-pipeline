@@ -26,10 +26,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import time
 import sys
 from concurrent.futures import ProcessPoolExecutor
 
+import awkward as ak
+import numpy as np
 import pyarrow.parquet as pq
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -39,6 +42,31 @@ import make_shards  # noqa: E402
 def _plan(outdir):
     with open(os.path.join(outdir, "_plan", "manifest.json")) as fh:
         return json.load(fh)["shards"]
+
+
+# kl-1p00, kl-0p00, kl-m2p50 ... the generated kappa_lambda is encoded ONLY in the
+# input path. The ntuplizer does not carry it (schema.SCALARS has no kl field), so a
+# merged signal sample with every kl point in it would be unusable for NSBI -- the
+# method is entirely about ratios BETWEEN kl hypotheses. Recover it here, from the
+# plan, and write it as a column so the merged file is self-describing.
+_KL_RE = re.compile(r"kl-(m?)(\d+)p(\d+)")
+
+
+def _kl_of(entry):
+    """The kappa_lambda a shard was generated at, or None for samples without one.
+
+    Raises if one shard spans two kl points: the events would then be unlabelable,
+    and silently picking one would poison the training targets.
+    """
+    vals = set()
+    for f in entry.get("files", ()):
+        m = _KL_RE.search(f)
+        if m:
+            vals.add((-1.0 if m.group(1) else 1.0) * float(f"{m.group(2)}.{m.group(3)}"))
+    if len(vals) > 1:
+        raise ValueError(f"shard {entry['sample']}.{entry['shard']:04d} spans multiple "
+                         f"kl points {sorted(vals)} — cannot label its events")
+    return vals.pop() if vals else None
 
 
 def _group(entries, target_bytes):
@@ -67,7 +95,17 @@ def write_group(job):
     writer, schema, rows = None, None, 0
     try:
         for e in entries:
-            t = pq.read_table(e["out"])
+            kl = _kl_of(e)
+            if kl is None:
+                t = pq.read_table(e["out"])          # fast path: straight arrow
+            else:
+                # Appending through raw arrow leaves the file's awkward metadata not
+                # mentioning kl, and ak.from_parquet then refuses to read it at all.
+                # Adding the field through awkward keeps the metadata consistent. Only
+                # signal pays this; ttbar (the 145 GB one) stays on the fast path.
+                a = ak.from_parquet(e["out"])
+                a = ak.with_field(a, np.full(len(a), kl, dtype="float32"), "kl")
+                t = ak.to_arrow_table(a)
             if schema is None:
                 schema = t.schema
                 writer = pq.ParquetWriter(out_path, schema, compression="zstd")

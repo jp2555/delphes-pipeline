@@ -228,3 +228,53 @@ def test_the_audit_is_scoped_to_the_selected_samples(tmp_path, capsys):
     said = capsys.readouterr().out
     assert "3/3 shards present" in said, "the audit must cover only sig"
     assert "ttbar" not in said.split("[merge] audit")[0]
+
+
+# --------------------------------------------------------------------------- #
+# kappa_lambda lives only in the input path -- the ntuple schema has no field for
+# it. A merged signal sample without it is unusable for NSBI, which is entirely
+# about ratios between kl hypotheses.
+# --------------------------------------------------------------------------- #
+def _kl_campaign(tmp, per_kl=2, rows=10):
+    out = tmp / "out"
+    (out / "_plan").mkdir(parents=True)
+    shards, i = [], 0
+    for kl in ("0p00", "1p00", "m2p50"):
+        for _ in range(per_kl):
+            shards.append({"sample": "signal", "shard": i, "seed": i, "maps": "/m.json",
+                           "files": [f"/in/GluGluToHH_kl-{kl}_x{j}.root" for j in (0, 1)],
+                           "out": str(out / f"signal.{i:04d}.parquet")})
+            i += 1
+    (out / "_plan" / "manifest.json").write_text(json.dumps({"shards": shards}))
+    for e in shards:
+        ak.to_parquet(ak.zip({"MET_pt": np.ones(rows, dtype=np.float32),
+                              "shard": np.full(rows, e["shard"], dtype=np.int32)}),
+                      e["out"])
+    return out
+
+
+def test_the_generated_kl_is_recovered_onto_every_event(tmp_path):
+    out = _kl_campaign(tmp_path)
+    assert merge_shards.main(["--out", str(out), "--target-gb", "1e-9"]) == 0
+    t = ak.from_parquet(str(out / "merged" / "signal.*.parquet"))
+    by_shard = {int(s): float(k) for s, k in zip(t.shard, t.kl)}
+    assert by_shard == {0: 0.0, 1: 0.0, 2: 1.0, 3: 1.0, 4: -2.5, 5: -2.5}
+
+
+def test_a_negative_kl_keeps_its_sign():
+    assert merge_shards._kl_of({"files": ["/in/kl-m2p50/x.root"]}) == -2.5
+    assert merge_shards._kl_of({"files": ["/in/kl-5p00/x.root"]}) == 5.0
+
+
+def test_a_sample_with_no_kl_in_its_paths_gets_no_column(tmp_path):
+    """ttbar has no kl; it must not acquire a meaningless one."""
+    out = _campaign(tmp_path, samples=(("ttbar", 2),))
+    assert merge_shards.main(["--out", str(out), "--target-gb", "1e-9"]) == 0
+    t = ak.from_parquet(str(out / "merged" / "ttbar.0000.parquet"))
+    assert "kl" not in ak.fields(t)
+
+
+def test_a_shard_spanning_two_kl_points_aborts_rather_than_guessing():
+    with pytest.raises(ValueError, match="spans multiple"):
+        merge_shards._kl_of({"sample": "signal", "shard": 3,
+                             "files": ["/in/kl-1p00/a.root", "/in/kl-5p00/b.root"]})
