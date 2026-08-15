@@ -388,7 +388,19 @@ def main(argv=None) -> int:
     # Raw Delphes is one directory per kl; the merged ntuple is one file set with a kl
     # column, so drive the loop from the CMS side, which has a directory either way.
     if args.ntuple:
-        sources = [(kl, None) for kl in sorted(nano_by_kl)]
+        # The CMS side has kl points the Delphes production has not generated yet
+        # (0, 1, 5 so far). Report and skip those rather than dying part-way through.
+        from delphes_pipeline.core.io import available_kl
+        have = available_kl(args.ntuple)
+        sources = []
+        for kl in sorted(nano_by_kl):
+            if any(abs(v - _kl_value(kl)) < 1e-6 for v in have):
+                sources.append((kl, None))
+            else:
+                print(f"[overlay] skipping kl={kl}: not in the merged ntuple "
+                      f"(it has {', '.join(f'{v:g}' for v in have)})")
+        if not sources:
+            raise SystemExit("[overlay] no kl point is in BOTH the ntuple and --nano-dir")
     else:
         sources = [(_kl(d), d) for d in sorted(glob.glob(os.path.join(args.delphes_dir, "*kl-*")))]
 

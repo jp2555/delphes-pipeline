@@ -129,3 +129,24 @@ def test_a_sample_without_a_kl_column_is_skipped_not_fatal(tmp_path):
     _write(d / "ttbar.0000.parquet", 20)          # no kl
     ev = NtupleEvents(d, kl=1.0)
     assert ev.n == 20
+
+
+def test_available_kl_lists_only_what_the_ntuple_holds(tmp_path):
+    d = tmp_path / "merged"
+    d.mkdir()
+    _write(d / "signal.0000.parquet", 10, kl=0.0)
+    _write(d / "signal.0001.parquet", 10, kl=5.0)
+    _write(d / "ttbar.0000.parquet", 10)          # no kl column
+    from delphes_pipeline.core.io import available_kl
+    assert available_kl(d) == [0.0, 5.0]
+
+
+def test_a_kl_point_cms_has_but_delphes_lacks_is_skipped_not_fatal(tmp_path, capsys):
+    """CMS ships kl=3; the Delphes production has 0, 1, 5. Do not die at kl=3."""
+    d = tmp_path / "merged"
+    d.mkdir()
+    _write(d / "signal.0000.parquet", 10, kl=1.0)
+    from delphes_pipeline.core.io import available_kl
+    have = available_kl(d)
+    assert not any(abs(v - nsbi_overlay._kl_value("3p00")) < 1e-6 for v in have)
+    assert any(abs(v - nsbi_overlay._kl_value("1p00")) < 1e-6 for v in have)

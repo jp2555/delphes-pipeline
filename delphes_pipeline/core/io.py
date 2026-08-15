@@ -400,3 +400,21 @@ class NtupleEvents:
         g = self.array["GenPart"]
         return ak.zip({"pid": g.pdgId, "status": g.status, "pt": g.pt, "eta": g.eta,
                        "phi": g.phi, "mass": g.mass, "m1": g.genPartIdxMother})
+
+
+def available_kl(path: PathLike) -> list[float]:
+    """The κ_λ points actually present in a merged ntuple, sorted.
+
+    Reads only the ``kl`` column, so this is one narrow scan rather than a full read.
+    Lets a caller intersect with what it wants to plot: the CMS side carries κ_λ points
+    (3.0, …) the Delphes production has not generated, and those should be reported and
+    skipped, not treated as an error.
+    """
+    vals: set[float] = set()
+    for p in resolve_ntuple_paths(path):
+        pf = pq.ParquetFile(p)
+        if _kl_column_index(pf) is None:
+            continue
+        col = pq.read_table(p, columns=["kl"])["kl"].to_numpy()
+        vals.update(float(v) for v in np.unique(col))
+    return sorted(vals)
