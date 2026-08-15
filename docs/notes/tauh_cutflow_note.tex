@@ -174,8 +174,20 @@ Delphes/CMS: $30\,491/28\,181$ ($\kl=0$), $32\,783/31\,442$ ($\kl=1$), $24\,218/
 \label{sec:drtautau}
 
 The one physics residual. Delphes has an excess at $\dR_{\tau\tau}\simeq2.5$--$3.2$, and
-because a wider opening angle means a larger visible mass, the $\mtautau$ and $\mvis$ high
-tails are the same effect seen twice. This matters for the feature set: dropping
+the $\mtautau$ and $\mvis$ high tails are probably the same events counted twice --- but
+that is an inference, not a demonstration, so the argument is worth stating. For legs whose
+masses are negligible against their energies,
+$\mvis^{2}=2\,p_{T1}p_{T2}\,(\cosh\Delta\eta-\cos\Delta\phi)$ exactly, and both
+angular terms grow monotonically as the pair separates; $\mtautau=\mvis/\sqrt{x_{1}x_{2}}$
+inherits it. A wide pair is therefore a heavy pair --- though $\mvis$ is monotonic in
+$\Delta\eta$ and $\Delta\phi$ separately and is \emph{not} a function of $\dR$ alone, so
+``wide-angle'' rather than ``back-to-back'' is what $\dR$ measures. The converse does not
+follow by itself: a heavy tail could equally come from harder $\tau$, since $\mvis$ also
+grows with $p_{T1}p_{T2}$. What excludes that here is that $\tau_{1}\,p_{T}$ and
+$\tau_{2}\,p_{T}$ both overlay CMS, leaving the angular term as the only place the excess
+mass can come from. The direct test --- cutting $\dR_{\tau\tau}<2.5$ and asking whether the
+$\mvis$ and $\mtautau$ tails go with it --- has not been run; if the tails survive, these
+are two problems and not one. This matters for the feature set: dropping
 $\dR_{\tau\tau}$ from the NSBI inputs would remove the most visible symptom while leaving
 the identical artefact in $\mtautau$ and $\mvis$, which we certainly keep. The cause has to
 be found rather than worked around.
