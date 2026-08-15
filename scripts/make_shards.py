@@ -209,7 +209,8 @@ def main(argv=None):
                          "delphes-tree-2ff38f65 for ttbar/DY, and a bare hash is not a "
                          "portable key (6d2d1cb0 is the signal TEST and also the ttbar v0 "
                          "subtree), so always pair it with '_Delphes_v1/'.")
-    ap.add_argument("--out", required=True, help="output directory for the parquet shards")
+    ap.add_argument("--out", help="output directory for the parquet shards "
+                                  "(not needed with --verify)")
     ap.add_argument("--shard-files", type=int, default=400,
                     help="fallback cap on files per shard, used when sizes are unavailable "
                          "and as a hard ceiling otherwise — without it a listing that "
@@ -245,8 +246,9 @@ def main(argv=None):
     args = ap.parse_args(argv)
     if args.verify:
         return verify(os.path.abspath(args.verify))
-    if not args.sample:
-        ap.error("--sample is required unless --verify is given")
+    # argparse cannot express "required unless --verify", so enforce it here
+    if not args.sample or not args.out:
+        ap.error("--sample and --out are required unless --verify is given")
 
     repo = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
     outdir = os.path.abspath(args.out)

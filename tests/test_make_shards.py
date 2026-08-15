@@ -464,3 +464,21 @@ def test_wrapper_fails_loudly_when_the_environment_is_missing():
     with tempfile.TemporaryDirectory() as td:
         exe = _exe_text(Path(td))
     assert "no interpreter at" in exe and "exit 127" in exe
+
+
+def test_verify_does_not_require_the_planning_arguments():
+    """--verify audits a finished campaign; demanding --out/--sample for it made the
+    documented command fail at argparse before ever reaching the check."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        shards, _, out = _plan(Path(td), n=4)
+        for s in shards:
+            _write(s["out"], 5, s["shard"])
+        assert make_shards.main(["--verify", str(out)]) == 0
+
+
+def test_planning_still_requires_out_and_sample():
+    with pytest.raises(SystemExit):
+        make_shards.main(["--sample", "s", "/g", "/m.json"])       # no --out
+    with pytest.raises(SystemExit):
+        make_shards.main(["--out", "/tmp/x"])                       # no --sample
