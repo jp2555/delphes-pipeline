@@ -170,20 +170,30 @@ def _events(path):
 
 
 def verify(outdir):
-    """Check a finished campaign against its plan: every shard present, exactly once."""
-    import awkward as ak
+    """Check a finished campaign against its plan: every shard present, exactly once.
+
+    Reads only the parquet FOOTER for the row count and only the ``shard`` COLUMN for the
+    identity check — never the payload. Loading each file whole would mean reading the
+    whole ~82 GB campaign just to count it, and then again to merge it.
+    """
+    import pyarrow.parquet as pq
     plan = json.load(open(os.path.join(outdir, "_plan", "manifest.json")))["shards"]
     missing, empty, total, seen = [], [], 0, {}
     for e in plan:
         if not os.path.exists(e["out"]):
             missing.append((e["sample"], e["shard"])); continue
-        a = ak.from_parquet(e["out"])
-        n = len(a)
+        try:
+            pf = pq.ParquetFile(e["out"])
+            n = pf.metadata.num_rows                      # from the footer, no payload
+        except Exception as exc:                          # truncated / half-written file
+            print(f"[verify] UNREADABLE {e['out']}: {exc}")
+            missing.append((e["sample"], e["shard"])); continue
         total += n
         if n == 0:
             empty.append((e["sample"], e["shard"]))
-        if "shard" in ak.fields(a):
-            for sh in set(ak.to_numpy(a["shard"]).tolist()):
+        if "shard" in pf.schema_arrow.names:
+            col = pq.read_table(e["out"], columns=["shard"])["shard"]
+            for sh in set(col.to_pylist()):
                 seen.setdefault((e["sample"], int(sh)), []).append(e["out"])
     dup = {k: v for k, v in seen.items() if len(v) > 1}
     print(f"[verify] {len(plan) - len(missing)}/{len(plan)} shards present, {total:,} events")

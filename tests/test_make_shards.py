@@ -482,3 +482,25 @@ def test_planning_still_requires_out_and_sample():
         make_shards.main(["--sample", "s", "/g", "/m.json"])       # no --out
     with pytest.raises(SystemExit):
         make_shards.main(["--out", "/tmp/x"])                       # no --sample
+
+
+def test_verify_catches_a_truncated_shard_instead_of_crashing():
+    """A job killed mid-write leaves an unreadable parquet. Treating that as MISSING is
+    what makes the merge gate meaningful — an exception here would just abort the audit."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        shards, _, out = _plan(Path(td), n=4, shard_events=2)
+        for s in shards:
+            _write(s["out"], 5, s["shard"])
+        Path(shards[1]["out"]).write_bytes(b"not a parquet file")
+        assert make_shards.verify(str(out)) == 1
+
+
+def test_verify_does_not_read_the_payload():
+    """It must count from the parquet footer, not by loading each file: reading the whole
+    ~82 GB campaign to count it, then again to merge it, doubles the I/O for nothing."""
+    src = Path(make_shards.__file__).read_text()
+    body = src[src.index("def verify("):src.index("def main(")]
+    assert "metadata.num_rows" in body
+    assert 'columns=["shard"]' in body
+    assert "from_parquet" not in body, "loading the payload defeats the point"
