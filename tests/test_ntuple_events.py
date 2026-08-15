@@ -188,3 +188,21 @@ def test_nano_select_disambiguates_between_productions(tmp_path):
     assert len(got["1p00"]) == 2
     assert all("kit-private" not in x for x in got["1p00"])
     assert len(nsbi_overlay._nano_by_kl(str(d), select="150X-kit-private")["1p00"]) == 1
+
+
+# --------------------------------------------------------------------------- #
+# "Is this feature discriminative for kl?" is a kl-vs-kl question. The default
+# overlay compares Delphes to CMS at FIXED kl and cannot answer it.
+# --------------------------------------------------------------------------- #
+def test_tvd_is_zero_for_identical_shapes_and_large_for_separated_ones():
+    rng = np.random.default_rng(0)
+    same = nsbi_overlay._tvd(rng.normal(0, 1, 100000), rng.normal(0, 1, 100000), -5, 5)
+    shifted = nsbi_overlay._tvd(rng.normal(0, 1, 100000), rng.normal(3, 1, 100000), -5, 5)
+    assert same < 0.03 and shifted > 0.8
+
+
+def test_tvd_ignores_events_outside_the_plotted_range():
+    """The panels normalise inside the range; the metric must match what is drawn."""
+    a = np.concatenate([np.zeros(1000), np.full(1000, 999.0)])
+    b = np.zeros(1000)
+    assert nsbi_overlay._tvd(a, b, -1, 1) < 1e-9

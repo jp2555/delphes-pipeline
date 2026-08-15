@@ -366,6 +366,66 @@ def _split_figure(kl, df, dm, nf, nm, args, tuning):
     print(f"[kl {kl}] -> {out}", flush=True)
 
 
+def sel_kw_of(args):
+    return dict(tautau_only=args.tautau_only, mtautau_min=args.mtautau_min,
+                clean=args.clean, jet_pt_min=args.jet_pt_min,
+                jet_eta_max=args.jet_eta_max, clean_dr=args.clean_dr,
+                tau_pt_min=args.tau_pt_min, tau_eta_max=args.tau_eta_max,
+                cms_dnn=args.cms_dnn)
+
+
+def _tvd(a, b, lo, hi, nbins=40):
+    """Total-variation distance between two shapes: 0 identical, 1 disjoint.
+
+    A single interpretable number for "how much does this feature separate two kl
+    points". It is a MARGINAL measure — NSBI learns the joint ratio, so a feature with
+    small TVD can still matter in correlation with others. Read it as a floor on a
+    feature's usefulness, never as permission to drop one.
+    """
+    b_ = np.linspace(lo, hi, nbins + 1)
+    pa, _ = np.histogram(a[(a >= lo) & (a <= hi)], bins=b_, density=True)
+    pb, _ = np.histogram(b[(b >= lo) & (b <= hi)], bins=b_, density=True)
+    w = b_[1] - b_[0]
+    return 0.5 * float(np.sum(np.abs(pa - pb))) * w
+
+
+def _kl_compare_figure(per_kl, args):
+    """One panel per feature, one curve per kl point, ranked by kl separation."""
+    kls = sorted(per_kl, key=_kl_value)
+    feats = _FEATURES + (_DIAG if args.diagnostics else [])
+    ref, alt = kls[0], (kls[1] if len(kls) > 1 else kls[0])
+    sep = {f: _tvd(per_kl[ref][f], per_kl[alt][f], *_RANGES[f]) for f in feats}
+    print(f"\n[kl-compare] {args.kl_compare}: separation (total-variation distance) "
+          f"between kl={ref} and kl={alt}")
+    for f in sorted(feats, key=lambda x: -sep[x]):
+        print(f"    {f:14s} {sep[f]:.4f}")
+    print("[kl-compare] marginal only — a small value does not license dropping a "
+          "feature, since NSBI uses the JOINT ratio\n", flush=True)
+
+    nrow = (len(feats) + 4) // 5
+    fig, axes = plt.subplots(nrow, 5, figsize=(20, 3.6 * nrow))
+    for ax in axes.flat[len(feats):]:
+        ax.axis("off")
+    for ax, feat in zip(axes.flat, feats):
+        lo, hi = _RANGES[feat]
+        b = np.linspace(lo, hi, 41)
+        centres = 0.5 * (b[:-1] + b[1:])
+        for kl in kls:
+            d = per_kl[kl][feat]
+            d = d[(d >= lo) & (d <= hi)]
+            if d.size:
+                h, _ = np.histogram(d, bins=b, density=True)
+                ax.step(centres, h, where="mid", lw=2, label=f"$\\kappa_\\lambda$={kl}")
+        ax.set_ylim(bottom=0)
+        ax.set_xlabel(f"{feat}   (TVD {sep[feat]:.3f})")
+        ax.legend(fontsize=8)
+    fig.suptitle(f"{args.kl_compare} — $\\kappa_\\lambda$ points overlaid "
+                 f"(TVD vs $\\kappa_\\lambda$={ref})")
+    out = os.path.join(args.out, f"klcompare_{args.kl_compare}.png")
+    fig.tight_layout(); fig.savefig(out, dpi=110); plt.close(fig)
+    print(f"[kl-compare] -> {out}", flush=True)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="NSBI 10-feature overlay: tuned Delphes vs CMS NanoAOD")
     ap.add_argument("--config", required=True)
@@ -396,6 +456,11 @@ def main(argv=None) -> int:
     ap.add_argument("--cms-dnn", action="store_true",
                     help="overlay the CMS Run-3 DNN input set (rotated frame) instead of "
                          "the 10 NSBI features, and print which inputs Delphes cannot supply")
+    ap.add_argument("--kl-compare", choices=("delphes", "cms"),
+                    help="overlay the kl POINTS against each other for ONE side, and "
+                         "rank features by how much they separate kl. This is the "
+                         "question 'is this feature discriminative?' — the default mode "
+                         "compares Delphes to CMS at FIXED kl and cannot answer it.")
     ap.add_argument("--diagnostics", action="store_true",
                     help="also plot the FastMTT inputs (τ pT, MET) alongside the NSBI features")
     ap.add_argument("--split-gen-matched", action="store_true",
@@ -449,6 +514,25 @@ def main(argv=None) -> int:
     else:
         sources = [(_kl(d), d) for d in sorted(glob.glob(os.path.join(args.delphes_dir, "*kl-*")))]
 
+    if args.kl_compare:
+        per_kl = {}
+        for kl, d in sources:
+            if kl is None or kl not in nano_by_kl:
+                continue
+            print(f"[kl {kl}] reconstructing features ...", flush=True)
+            if args.kl_compare == "cms":
+                ev = NanoAODEvents(nano_by_kl[kl], branches=branches, wp=wp,
+                                   entry_stop=args.max_events)
+            elif args.ntuple:
+                from delphes_pipeline.core.io import NtupleEvents
+                ev = NtupleEvents(args.ntuple, kl=_kl_value(kl),
+                                  entry_stop=args.max_events)
+            else:
+                ev = DelphesEvents(d, entry_stop=args.max_events)
+            per_kl[kl] = features(ev, nano=(args.kl_compare == "cms"), **sel_kw_of(args))
+        _kl_compare_figure(per_kl, args)
+        return 0
+
     for kl, d in sources:
         if kl is None or kl not in nano_by_kl:
             continue
@@ -469,10 +553,7 @@ def main(argv=None) -> int:
             # identical to an untuned run, with nothing in the log to say so.
             print(f"[overlay] corrections applied: "
                   f"{', '.join(sorted(dev.retagged_fields)) or '(none)'}")
-        sel_kw = dict(tautau_only=args.tautau_only, mtautau_min=args.mtautau_min, clean=args.clean,
-                      jet_pt_min=args.jet_pt_min, jet_eta_max=args.jet_eta_max, clean_dr=args.clean_dr,
-                      tau_pt_min=args.tau_pt_min, tau_eta_max=args.tau_eta_max,
-                      cms_dnn=args.cms_dnn)
+        sel_kw = sel_kw_of(args)
         nev = NanoAODEvents(nano_by_kl[kl], branches=branches, wp=wp, entry_stop=args.max_events)
         # Say WHAT was read on each side. resolve_paths recurses, so a stray dataset
         # nested under a kl directory is silently read as signal -- and it only shows up
