@@ -47,9 +47,15 @@ anchor:
       tagger: UParT
       wp: M
     deeptau_vsjet_medium: 5
+    muon_iso_max: 0.15          # must match config.v1.yml
   branches:
     jet: { btag_disc: Jet_btagUParTAK4B }
     tau: { vsjet: Tau_idDeepTau2018v2p5VSjet }
+    # MUST match config.v1.yml. The lepton SFs are compared across processes to test
+    # whether one universal map suffices; deriving them against a loose collection here
+    # and an ID'd one there would make that comparison meaningless.
+    electron: { id: Electron_mvaIso_WP80 }
+    muon: { id: Muon_tightId, iso: Muon_pfRelIso04_all }
 
 tuning_maps: cards/tuning/maps_ttbar_v1.json
 
