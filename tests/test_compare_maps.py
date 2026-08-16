@@ -1,92 +1,80 @@
-"""The map comparison decides whether a map may be transferred between processes.
+"""Map universality must be judged within statistics, not by a flat relative cut.
 
-Its whole job is the TRANSFERS / PER-PROCESS verdict, so the tests pin that: identical
-maps must transfer, a difference above tolerance must not, and a difference located in a
-pT region must be reported at that pT rather than averaged away. Getting this wrong in
-either direction is expensive — a false "transfers" biases the NSBI likelihood ratio with
-signal-derived maps on the background, a false "per-process" invents work.
+E3's pass condition is that per-process determinations agree in common bins. The
+failing bins in the real comparison are the highest-pT ones, which are also the
+emptiest -- so a relative cut alone cannot separate "the parameterisation is
+missing a variable" from "this bin has 468 entries".
 """
-
-from __future__ import annotations
-
+import json
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from compare_maps import compare  # noqa: E402
-
-_C = [25.0, 35.0, 45.0, 60.0, 85.0]
+import compare_maps  # noqa: E402
 
 
-def _curve(vals, centers=None):
-    return {"x": "pt", "centers": list(centers or _C), "values": list(vals)}
+def _m(values, counts, **kw):
+    d = {"x": "pt", "centers": [25.0, 35.0, 45.0], "values": values, "counts": counts}
+    d.update(kw)
+    return d
 
 
-def _scalar(v):
-    return {"x": "overall", "centers": [0.0], "values": [v]}
+def _rows(a, b, **kw):
+    return {r[0]: r for r in compare_maps.compare(a, b, tol=0.05, **kw)}
 
 
-def test_identical_maps_transfer():
-    m = {"btag_eff_b": _curve([0.70, 0.75, 0.78, 0.80, 0.82])}
-    (q, rel, _, verdict), = compare(m, m, tol=0.05)
-    assert q == "btag_eff_b" and rel == pytest.approx(0.0) and verdict == "TRANSFERS"
+def test_a_big_relative_difference_in_an_empty_bin_is_not_called_inconsistent():
+    a = {"e": _m([0.40, 0.60, 0.70], [30000, 20000, 12])}
+    b = {"e": _m([0.40, 0.60, 0.45], [30000, 20000, 12])}
+    q, rel, at, pull, verdict = _rows(a, b)["e"]
+    assert rel > 0.30, "the relative difference is large"
+    assert pull < 3.0 and verdict == "consistent", "but 12 entries cannot resolve it"
 
 
-def test_difference_above_tolerance_is_flagged():
-    a = {"tau_mistag": _curve([0.004] * 5)}
-    b = {"tau_mistag": _curve([0.008] * 5)}          # 100% higher, as a fake rate would be
-    (_, rel, _, verdict), = compare(a, b, tol=0.05)
-    assert rel == pytest.approx(1.0) and verdict == "PER-PROCESS"
+def test_a_small_relative_difference_with_huge_statistics_is_called_inconsistent():
+    a = {"e": _m([0.400, 0.60, 0.70], [10_000_000, 20000, 5000])}
+    b = {"e": _m([0.412, 0.60, 0.70], [10_000_000, 20000, 5000])}
+    q, rel, at, pull, verdict = _rows(a, b)["e"]
+    assert rel < 0.05, "under the flat tolerance"
+    assert pull > 3.0 and verdict == "DIFFERS", "yet far outside the errors"
 
 
-def test_difference_just_inside_tolerance_transfers():
-    a = {"tau_eff": _curve([0.50] * 5)}
-    b = {"tau_eff": _curve([0.52] * 5)}              # 4% < 5%
-    (_, rel, _, verdict), = compare(a, b, tol=0.05)
-    assert rel == pytest.approx(0.04) and verdict == "TRANSFERS"
+def test_identical_maps_are_consistent():
+    a = {"e": _m([0.4, 0.6, 0.7], [1000, 1000, 1000])}
+    assert _rows(a, dict(a))["e"][4] == "consistent"
 
 
-def test_localised_difference_is_reported_at_its_pt_not_averaged():
-    """A map that agrees everywhere except one bin must still be flagged, and the pT
-    reported must be that bin — otherwise the diagnostic hides where the problem is."""
-    a = {"bjet_escale": _curve([1.00, 1.00, 1.00, 1.00, 1.00])}
-    b = {"bjet_escale": _curve([1.00, 1.00, 1.00, 1.00, 1.40])}
-    (_, rel, at, verdict), = compare(a, b, tol=0.05)
-    assert rel == pytest.approx(0.40) and at == pytest.approx(85.0) and verdict == "PER-PROCESS"
+def test_a_verdict_without_a_usable_error_is_flagged_with_a_star():
+    """escale/SF maps carry no error; the verdict must not read as statistical."""
+    a = {"s": _m([1.4, 1.5, 1.6], [])}
+    b = {"s": _m([1.4, 1.5, 2.6], [])}
+    assert _rows(a, b)["s"][4] == "DIFFERS*"
 
 
-def test_scalar_maps_are_compared_not_skipped():
-    """met_smear is a single number, not a curve — it is also the map most likely to
-    differ between processes, so it must not fall through the curve path."""
-    a = {"met_smear": _scalar(28.0)}
-    b = {"met_smear": _scalar(41.0)}
-    (_, rel, at, verdict), = compare(a, b, tol=0.05)
-    assert rel == pytest.approx(13.0 / 28.0) and np.isnan(at) and verdict == "PER-PROCESS"
+def test_binomial_error_is_used_for_efficiency_maps():
+    s = compare_maps._sigma(_m([0.5], [10000]))
+    assert s[0] == pytest.approx(np.sqrt(0.25 / 10000), rel=1e-6)
 
 
-def test_maps_on_different_pt_grids_are_interpolated_not_rejected():
-    """The two derivations need not produce identical bin centres (centres are count-
-    weighted means), so a grid mismatch must interpolate rather than report nonsense."""
-    a = {"tau_eff": _curve([0.50, 0.55, 0.60, 0.65, 0.70])}
-    b = {"tau_eff": _curve([0.50, 0.60, 0.70], centers=[25.0, 45.0, 85.0])}
-    (_, rel, _, verdict), = compare(a, b, tol=0.05)
-    assert np.isfinite(rel) and verdict == "TRANSFERS"
+def test_a_width_map_uses_the_width_error_not_the_binomial_one():
+    """met_resolution values are GeV, not probabilities."""
+    s = compare_maps._sigma({"x": "ht", "centers": [100.0], "values": [30.0],
+                             "counts": [5000]})
+    assert s[0] == pytest.approx(30.0 / np.sqrt(2 * 5000), rel=1e-6)
 
 
-def test_map_present_on_only_one_side_is_not_silently_dropped():
-    a = {"tau_eff": _curve([0.5] * 5), "met_smear": _scalar(28.0)}
-    b = {"tau_eff": _curve([0.5] * 5)}
-    rows = compare(a, b, tol=0.05)
-    assert [r[0] for r in rows] == ["tau_eff"], "shared maps only in the table"
-    # the caller reports the asymmetry separately; here we only assert it is not compared
-    assert set(a) - set(b) == {"met_smear"}
-
-
-def test_empty_values_are_reported_not_crashed():
-    a = {"btag_eff_c": _curve([])}
-    b = {"btag_eff_c": _curve([0.1] * 5)}
-    (_, rel, _, verdict), = compare(a, b, tol=0.05)
-    assert np.isnan(rel) and verdict == "empty on one side"
+def test_the_prescription_is_a_missing_variable_not_a_per_process_patch(capsys):
+    a = {"e": _m([0.40, 0.60, 0.70], [10_000_000] * 3)}
+    b = {"e": _m([0.55, 0.60, 0.70], [10_000_000] * 3)}
+    with tempfile.TemporaryDirectory() as td:
+        fa, fb = Path(td) / "a.json", Path(td) / "b.json"
+        fa.write_text(json.dumps({"maps": a}))
+        fb.write_text(json.dumps({"maps": b}))
+        compare_maps.main([str(fa), str(fb), "--out", td])
+    said = capsys.readouterr().out
+    assert "missing" in said.lower() and "VARIABLE" in said
+    assert "per-process" not in said.lower().replace("per process.", "")

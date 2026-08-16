@@ -55,36 +55,84 @@ def _curve(m):
             np.asarray(m.get("values", []), dtype=float))
 
 
-def compare(a, b, *, tol):
+def _sigma(m):
+    """Per-bin uncertainty on a map's values, or NaN where it cannot be derived.
+
+    E3's pass condition is that per-process determinations agree *within statistics* --
+    not within a flat relative tolerance. The failing bins here are the highest-pT ones,
+    which are also the emptiest, so a relative cut alone cannot separate "the
+    parameterisation is missing a variable" from "this bin has 468 entries".
+    """
+    v = np.asarray(m.get("values", []), dtype=float)
+    n = np.asarray(m.get("counts", []), dtype=float)
+    if v.size == 0 or n.size != v.size:
+        return np.full(v.shape, np.nan)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        qv = m.get("quantile_values")
+        if qv:
+            # a median drawn from a stored distribution: sigma_median = 1.253 sigma/sqrt(n)
+            q = np.asarray(qv, dtype=float)
+            if q.ndim == 2 and q.shape[0] == v.size:
+                lo = np.percentile(q, 16, axis=1)
+                hi = np.percentile(q, 84, axis=1)
+                return 1.253 * (hi - lo) / 2.0 / np.sqrt(np.maximum(n, 1))
+        if np.all((v >= 0) & (v <= 1)):
+            return np.sqrt(np.maximum(v * (1 - v), 0) / np.maximum(n, 1))   # binomial
+        if m.get("x") == "ht" or "resolution" in str(m.get("ylabel", "")):
+            return v / np.sqrt(2 * np.maximum(n, 1))                        # width
+    return np.full(v.shape, np.nan)
+
+
+def compare(a, b, *, tol, nsigma=3.0):
     """Per-map relative difference of b vs a, on a's grid. Returns rows for reporting."""
     rows = []
     for q in sorted(set(a) & set(b)):
         ca, va = _curve(a[q])
         cb, vb = _curve(b[q])
         if va.size == 0 or vb.size == 0:
-            rows.append((q, float("nan"), float("nan"), "empty on one side"))
+            rows.append((q, float("nan"), float("nan"), float("nan"), "empty on one side"))
             continue
         if a[q].get("x") == _SCALAR_X or ca.size == 1 or cb.size == 1:
             rel = abs(vb[0] - va[0]) / abs(va[0]) if va[0] else float("nan")
-            rows.append((q, rel, float("nan"), _verdict(rel, tol)))
+            rows.append((q, rel, float("nan"), float("nan"),
+                         _verdict(rel, tol, float("nan"), nsigma)))
             continue
-        # interpolate b onto a's grid; flat outside, matching TuningMaps.efficiency
-        vb_on_a = np.interp(ca, cb, vb, left=vb[0], right=vb[-1])
-        with np.errstate(divide="ignore", invalid="ignore"):
-            r = np.abs(vb_on_a - va) / np.abs(va)
-        r = r[np.isfinite(r)]
-        if r.size == 0:
-            rows.append((q, float("nan"), float("nan"), "no overlap"))
+        # Same binning on both sides (DEFAULT_PT_BINS) with slightly different bin
+        # CENTRES, since a centre is the mean pT in the bin. Compare bin-by-bin so the
+        # per-bin counts line up; only fall back to interpolation if the grids differ,
+        # and then without a pull, since the errors no longer correspond.
+        if ca.size == cb.size:
+            diff = np.abs(vb - va)
+            sa, sb = _sigma(a[q]), _sigma(b[q])
+            with np.errstate(divide="ignore", invalid="ignore"):
+                pull = diff / np.sqrt(sa ** 2 + sb ** 2)
+                r = diff / np.abs(va)
+        else:
+            vb_on_a = np.interp(ca, cb, vb, left=vb[0], right=vb[-1])
+            with np.errstate(divide="ignore", invalid="ignore"):
+                r = np.abs(vb_on_a - va) / np.abs(va)
+            pull = np.full(r.shape, np.nan)
+        if not np.isfinite(r).any():
+            rows.append((q, float("nan"), float("nan"), float("nan"), "no overlap"))
             continue
-        rows.append((q, float(r.max()), float(ca[int(np.nanargmax(np.abs(vb_on_a - va) / np.abs(va)))]),
-                     _verdict(float(r.max()), tol)))
+        i = int(np.nanargmax(np.where(np.isfinite(r), r, -np.inf)))
+        mx_pull = float(np.nanmax(pull)) if np.isfinite(pull).any() else float("nan")
+        rows.append((q, float(r[i]), float(ca[i]), mx_pull,
+                     _verdict(float(r[i]), tol, mx_pull, nsigma)))
     return rows
 
 
-def _verdict(rel, tol):
+def _verdict(rel, tol, pull, nsigma):
+    """Consistent within statistics is the question; the relative cut is the fallback.
+
+    A verdict marked * had no usable per-bin error, so it rests on the relative
+    tolerance alone and should not be read as a statistical statement.
+    """
     if not np.isfinite(rel):
         return "?"
-    return "TRANSFERS" if rel <= tol else "PER-PROCESS"
+    if np.isfinite(pull):
+        return "consistent" if pull <= nsigma else "DIFFERS"
+    return "consistent*" if rel <= tol else "DIFFERS*"
 
 
 def main(argv=None):
@@ -94,7 +142,11 @@ def main(argv=None):
     ap.add_argument("--labels", nargs=2, default=("A", "B"))
     ap.add_argument("--out", default="plots/maps_compare")
     ap.add_argument("--tol", type=float, default=0.05,
-                    help="relative difference above which a map needs per-process derivation")
+                    help="fallback relative-difference cut, used only where no per-bin "
+                         "error can be derived (verdict marked *)")
+    ap.add_argument("--nsigma", type=float, default=3.0,
+                    help="pull above which per-process determinations are called "
+                         "inconsistent — E3's actual pass condition")
     args = ap.parse_args(argv)
 
     a, pa = load(args.maps_a)
@@ -108,18 +160,28 @@ def main(argv=None):
     if only_b:
         print(f"[compare] only in {lb}: {', '.join(only_b)}")
 
-    rows = compare(a, b, tol=args.tol)
-    print(f"\n{'map':22s} {'max |rel diff|':>14s} {'at pT':>8s}   verdict")
-    for q, rel, at, verdict in rows:
+    rows = compare(a, b, tol=args.tol, nsigma=args.nsigma)
+    print(f"\n{'map':22s} {'max |rel diff|':>14s} {'at pT':>8s} {'max pull':>9s}   verdict")
+    for q, rel, at, pull, verdict in rows:
         at_s = f"{at:8.0f}" if np.isfinite(at) else f"{'scalar':>8s}"
         rel_s = f"{rel*100:13.1f}%" if np.isfinite(rel) else f"{'n/a':>14s}"
-        print(f"{q:22s} {rel_s} {at_s}   {verdict}")
-    need = [q for q, rel, _, v in rows if v == "PER-PROCESS"]
-    print(f"\n[compare] {len(need)}/{len(rows)} maps exceed {args.tol*100:.0f}%"
+        pl_s = f"{pull:9.1f}" if np.isfinite(pull) else f"{'-':>9s}"
+        print(f"{q:22s} {rel_s} {at_s} {pl_s}   {verdict}")
+    need = [q for q, _, _, _, v in rows if v.startswith("DIFFERS")]
+    print(f"\n[compare] {len(need)}/{len(rows)} maps differ beyond {args.nsigma:g}"
+          f"\u03c3 (or, where * marks no usable error, beyond {args.tol*100:.0f}%)"
           + (f": {', '.join(need)}" if need else ""))
     if need:
-        print("[compare] -> derive per process and ntuplize each sample with its own "
-              "--tuning-maps; a single map set biases the NSBI likelihood ratio.")
+        print("[compare] -> a map that DIFFERS means the parameterisation is missing a")
+        print("[compare]    VARIABLE, not that the map should be applied per process.")
+        print("[compare]    A detector response is a property of the final state: one")
+        print("[compare]    forward model for every process. Applying a different map to")
+        print("[compare]    signal and background makes the map DIFFERENCE into learned")
+        print("[compare]    S/B shape, which lands directly on the measured parameter.")
+        print("[compare]    Add the missing variable (flavour / gluon fraction, decay")
+        print("[compare]    mode or prong count, eta, sum-Et), re-derive, merge to ONE")
+        print("[compare]    frozen set, then ntuplize everything with it.")
+        print("[compare]    See docs/tuning_for_nsbi_audit.md")
 
     plot = [q for q in sorted(set(a) & set(b)) if _curve(a[q])[0].size > 1]
     if plot:
@@ -134,8 +196,8 @@ def main(argv=None):
             ax.set_title(q, fontsize=10)
             ax.set_xlabel("pT [GeV]")
             ax.legend(fontsize=8)
-        fig.suptitle(f"tuning maps: {la} vs {lb} — a map that does not overlap "
-                     "must be derived per process")
+        fig.suptitle(f"tuning maps: {la} vs {lb} — curves that do not overlap mark a "
+                     "MISSING VARIABLE in the parameterisation, not a per-process patch")
         fig.tight_layout()
         os.makedirs(args.out, exist_ok=True)
         for ext in ("png", "pdf"):
