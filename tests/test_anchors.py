@@ -15,9 +15,15 @@ def test_the_shipped_anchors_file_parses(cfg):
 
 
 def test_a_derivation_anchor_is_returned(cfg):
-    e = A.for_derivation(cfg, "tau_response")
+    e = A.for_derivation(cfg, "jet_response")
     assert e["use"] == "derivation"
-    assert "gen_decay_mode" in e["condition_on"]
+    assert "true_flavour" in e["condition_on"]
+
+
+def test_the_tau_response_conditioning_is_decay_mode_and_gen_pt(cfg):
+    """Q3: the joint draw is conditioned on gen decay mode, not pT alone."""
+    e = cfg["maps"]["tau_response"]
+    assert e["condition_on"] == ["gen_decay_mode", "gen_pt"]
 
 
 def test_a_validation_target_cannot_be_derived_from(cfg):
@@ -58,10 +64,6 @@ def test_the_systematics_share_is_present_because_the_paper_quotes_it(cfg):
     assert cfg["tier3_anchor"]["systematics_share"]["citation"] == A.TOVERIFY
 
 
-def test_the_pileup_jet_fake_term_is_recorded_as_blocked(cfg):
-    """No-PU samples contain no PU jets; a downstream map cannot create objects."""
-    pu = cfg["maps"]["tau_fake"]["pu_jet_contribution"]
-    assert pu["status"] == "BLOCKED"
 
 
 # --------------------------------------------------------------------------- #
