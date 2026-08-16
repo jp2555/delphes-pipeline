@@ -138,6 +138,37 @@ def _files(pattern, subtree=None, cache=None, refresh=False):
     return out
 
 
+def list_dirs(pattern, subtree=None, cache=None, refresh=False):
+    """Print the top-level sample directories under ``pattern`` with size and subtree.
+
+    Answers "what is actually on dCache" without planning anything. The DY production is
+    ten MLL-binned datasets whose directory names are not guessable, and each bin carries
+    a different cross section — so they must be planned as SEPARATE samples or the bin
+    identity, and with it the weight, is lost the way kappa_lambda was.
+    """
+    files = _files(pattern, subtree=subtree, cache=cache, refresh=refresh)
+    root = pattern.split("*")[0].rstrip("/")
+    groups = {}
+    for f, n in files:
+        rest = f[len(root):].lstrip("/") if f.startswith(root) else os.path.basename(f)
+        top = rest.split("/")[0]
+        g = groups.setdefault(top, {"n": 0, "bytes": 0, "hashes": set()})
+        g["n"] += 1
+        g["bytes"] += n
+        if (m := _SUBTREE.search(f)):
+            g["hashes"].add(m.group(1))
+    if not groups:
+        print(f"[shards] nothing matched {pattern!r}")
+        return 1
+    print(f"[shards] {len(groups)} sample dir(s) under {root}")
+    for top in sorted(groups):
+        g = groups[top]
+        subs = ", ".join(sorted(g["hashes"])) or "-"
+        flag = "  <-- SPANS SUBTREES" if len(g["hashes"]) > 1 else ""
+        print(f"  {g['n']:>7,} files  {g['bytes'] / 1e9:>9.1f} GB  [{subs}]{flag}  {top}")
+    return 0
+
+
 def check_subtrees(name, files):
     """Refuse a file set spanning several production subtrees.
 
@@ -305,6 +336,9 @@ def verify(outdir, write_missing=False, force=False, report=None, samples=None):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--list-dirs", metavar="GLOB",
+                    help="list the sample directories matching GLOB (files, size, "
+                         "production subtree) and exit — no planning")
     ap.add_argument("--verify", metavar="OUTDIR",
                     help="audit a finished campaign against its manifest and exit")
     ap.add_argument("--write-missing", action="store_true",
@@ -355,6 +389,13 @@ def main(argv=None):
     ap.add_argument("--count-events", action="store_true",
                     help="open each file for its entry count (accurate but slower)")
     args = ap.parse_args(argv)
+    if args.list_dirs:
+        cache = os.path.join(os.path.abspath(args.out), "_plan", "listing.tsv") \
+            if args.out else None
+        return list_dirs(args.list_dirs, subtree=args.subtree, cache=None,
+                         refresh=args.refresh) if cache is None else \
+            list_dirs(args.list_dirs, subtree=args.subtree, refresh=args.refresh)
+
     if args.verify:
         return verify(os.path.abspath(args.verify), write_missing=args.write_missing,
                       force=args.force)

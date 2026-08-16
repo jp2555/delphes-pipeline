@@ -625,3 +625,41 @@ def test_unparseable_rows_raise_instead_of_reading_as_an_empty_queue(monkeypatch
                                "Args": "undefined\nundefined\n"})
     with pytest.raises(RuntimeError, match="refusing to guess"):
         make_shards._condor_q_args()
+
+
+# --------------------------------------------------------------------------- #
+# DY is ten MLL-binned datasets, each with a DIFFERENT cross section. Globbing
+# them into one sample loses the bin identity exactly as globbing the kl points
+# lost kappa_lambda -- and there the loss was only recoverable because the plan
+# still held the input paths. Listing first is how the bins get planned apart.
+# --------------------------------------------------------------------------- #
+def _dy_tree(tmp, bins, per=2, subtree="delphes-tree-2ff38f65"):
+    for b in bins:
+        d = tmp / f"DYto2Tau_Bin-MLL-{b}_TuneCP5_powheg-pythia8_Delphes_v1" / subtree
+        d.mkdir(parents=True)
+        for i in range(per):
+            (d / f"delphes-tree_{i}.root").write_bytes(b"x" * 2048)
+    return tmp
+
+
+def test_list_dirs_reports_each_mll_bin_separately(tmp_path, capsys):
+    _dy_tree(tmp_path, ["10to50", "50to120", "120to200"])
+    assert make_shards.list_dirs(str(tmp_path / "*DYto2Tau*")) == 0
+    said = capsys.readouterr().out
+    assert "3 sample dir(s)" in said
+    for b in ("10to50", "50to120", "120to200"):
+        assert f"Bin-MLL-{b}" in said
+
+
+def test_list_dirs_flags_a_directory_spanning_two_subtrees(tmp_path, capsys):
+    _dy_tree(tmp_path, ["50to120"], subtree="delphes-tree-2ff38f65")
+    d = tmp_path / "DYto2Tau_Bin-MLL-50to120_TuneCP5_powheg-pythia8_Delphes_v1" / "delphes-tree-50b0dcf9"
+    d.mkdir(parents=True)
+    (d / "x.root").write_bytes(b"x" * 10)
+    make_shards.list_dirs(str(tmp_path / "*DYto2Tau*"))
+    assert "SPANS SUBTREES" in capsys.readouterr().out
+
+
+def test_list_dirs_says_so_when_nothing_matches(tmp_path, capsys):
+    assert make_shards.list_dirs(str(tmp_path / "*nope*")) == 1
+    assert "nothing matched" in capsys.readouterr().out
