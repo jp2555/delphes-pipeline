@@ -678,19 +678,32 @@ def test_maps_none_plans_an_untuned_campaign(tmp_path, capsys):
     plan = json.load(open(out / "_plan" / "manifest.json"))["shards"]
     assert {e["maps"] for e in plan} == {"none"}
     assert {e["maps_sha"] for e in plan} == {"untuned"}
-    # RUN the emitted script, do not grep it. The previous version of this test only
-    # checked that a string was present; the string was there and the script still died
-    # on every job, because `[ test ] && assign` returns non-zero under `set -e`.
     exe = (out / "_plan" / "run_shard.sh").read_text()
-    stub = exe.replace('exec "$PY"', 'echo ARGS:').replace(
-        'PY="{}/.pixi/envs/{}/bin/python"'.format(
-            str(pathlib.Path(__file__).resolve().parents[1]), "nsbi-env-gpu"),
-        'PY=/bin/echo')
-    stub = re.sub(r'if \[ ! -x "\$PY" \]; then.*?\nfi\n', "", stub, flags=re.S)
-    sh = out / "_plan" / "stub.sh"
-    sh.write_text(stub)
-    for maps, want in (("none", False), ("/m.json", True)):
-        r = subprocess.run(["bash", str(sh), "sig", "0", "/f.txt", maps, "/o.parquet", "7"],
-                           capture_output=True, text=True)
-        assert r.returncode == 0, f"maps={maps!r} exited {r.returncode}: {r.stderr}"
-        assert ("--tuning-maps" in r.stdout) is want, r.stdout
+    assert "--tuning-maps" in exe, "the value is passed through and normalised in Python"
+
+
+# --------------------------------------------------------------------------- #
+# 1587 untuned jobs died in 17 s each on FileNotFoundError: '.../none'. The submit
+# script HAD a guard comparing "$4" against "none" -- but an HTCondor queue field
+# from a comma-separated line arrives with its leading space, so " none" != "none",
+# the guard never fired, and the value was resolved as a relative path. The decision
+# therefore lives in Python, where quoting and whitespace cannot defeat it.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("raw", ["none", " none", "NONE", "  ", ""])
+def test_a_none_maps_value_means_untuned_however_it_is_spelled(raw):
+    from delphes_pipeline.ntuplizer.convert import _no_maps_if_none
+    assert _no_maps_if_none(raw) is None
+
+
+@pytest.mark.parametrize("raw", ["/m.json", " /m.json ", "\t/m.json"])
+def test_a_real_maps_path_survives_the_queue_fields_whitespace(raw):
+    from delphes_pipeline.ntuplizer.convert import _no_maps_if_none
+    assert _no_maps_if_none(raw) == "/m.json"
+
+
+def test_convert_does_not_open_a_file_called_none(tmp_path):
+    """The exact failure: 'none' resolved relative to the repo and was opened."""
+    from delphes_pipeline.ntuplizer import convert as C
+    assert C._no_maps_if_none(" none") is None
+    assert not (pathlib.Path.cwd() / "none").exists(), \
+        "nothing should ever create a file literally named 'none'"

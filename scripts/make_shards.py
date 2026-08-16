@@ -68,17 +68,12 @@ if [ ! -x "$PY" ]; then
     echo "no interpreter at $PY (is /ceph mounted on $(hostname -f)?)" >&2
     exit 127
 fi
-# maps "none" = the UNTUNED baseline: stock Delphes tagging and energies, no maps at
-# all. That is a different forward model from a tuned run and must never be mixed with
-# one inside a fit, which is why it is spelled explicitly rather than by omission.
-# `if`, NOT `[ ... ] && x=y`: under `set -e` a false test makes the AND-list return
-# non-zero and kills the job silently, one second in, with an empty log.
-MAPS_ARG=""
-if [ "$4" != "none" ]; then
-    MAPS_ARG="--tuning-maps $4"
-fi
+# maps "none" = the UNTUNED baseline: stock Delphes tagging and energies. The value is
+# passed through UNCONDITIONALLY and normalised in convert.py -- the queue field arrives
+# with its leading space intact, so a shell comparison against the literal "none" does
+# not fire, and the resulting relative path killed a whole 1587-job campaign.
 exec "$PY" -m delphes_pipeline.ntuplizer.convert \\
-    --files-from "$3" ${{MAPS_ARG}} --seed "$6" --shard "$2" {prune} "" "$5"
+    --files-from "$3" --tuning-maps "$4" --seed "$6" --shard "$2" {prune} "" "$5"
 """
 
 

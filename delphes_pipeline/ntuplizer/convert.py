@@ -42,6 +42,23 @@ def to_record(ev: DelphesEvents, tuning_maps=None, seed: int = 0,
     return ak.zip(fields, depth_limit=1)
 
 
+def _no_maps_if_none(tuning_maps):
+    """Treat "none" (or blank) as the UNTUNED baseline rather than a filename.
+
+    Decided in Python, not in the submit script. The worker receives the maps path as a
+    comma-separated HTCondor queue field, which arrives with its leading space intact, so
+    a shell guard comparing against the literal "none" does not fire and " none" is
+    resolved as a relative path -- which is how 1587 untuned jobs died in 17 seconds each
+    on `FileNotFoundError: .../none`. Normalising here cannot be defeated by quoting,
+    whitespace, or a stale submit file.
+    """
+    if isinstance(tuning_maps, str) and tuning_maps.strip().lower() in ("", "none"):
+        return None
+    if isinstance(tuning_maps, str):
+        return tuning_maps.strip()
+    return tuning_maps
+
+
 def convert(
     delphes_path,
     out_path: str,
@@ -57,6 +74,7 @@ def convert(
     ``tuning_maps`` may be a path to a maps JSON or a ``TuningMaps``; when set,
     the b-tag is re-tagged downstream from the anchor maps.
     """
+    tuning_maps = _no_maps_if_none(tuning_maps)
     if isinstance(tuning_maps, str):
         from ..tuning.maps import TuningMaps
         tuning_maps = TuningMaps.load(tuning_maps)
@@ -107,7 +125,8 @@ def main(argv=None) -> int:
         tuning_maps = load_config(args.config).get("tuning_maps")
     print(f"[ntuplizer] reading {args.delphes}"
           + (f" (first {args.entry_stop})" if args.entry_stop else "")
-          + (f" with re-tag from {tuning_maps}" if tuning_maps else " (stock tags, no tuning_maps)")
+          + (f" with re-tag from {tuning_maps}" if _no_maps_if_none(tuning_maps)
+             else " UNTUNED (stock Delphes tags and energies, no maps)")
           + " ...", flush=True)
     src = args.delphes
     if args.files_from:
