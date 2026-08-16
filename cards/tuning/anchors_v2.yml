@@ -1,0 +1,150 @@
+# Public-anchor reference values for tuning v2 (paper-facing maps).
+#
+# EVERY number here must carry its exact public citation (paper table / HEPData DOI /
+# DP-note number) and stays `verified: false` until checked against the PUBLISHED
+# version. Named placeholders are deliberate: map derivation does not block on the
+# Tier-3 anchor, but the gate and the equivalent-luminosity anchoring do.
+#
+# HARD RULE (rules note, restated for the public era):
+#   published event-level DISTRIBUTIONS are validation targets only, never derivation
+#   targets. Deriving maps from kinematic distributions launders physics into the
+#   detector model. Every entry therefore declares `use:` and the derivation code
+#   refuses to read a `validation` entry. Do not relax this by re-tagging an entry.
+
+schema_version: 2
+status: PLACEHOLDERS — no entry verified against a published source yet
+
+# ---------------------------------------------------------------------------
+# C. Anchor decisions (locked week 1)
+# ---------------------------------------------------------------------------
+era:
+  sqrt_s_tev: 13.6
+  # No sqrt(s) bridge: the anchor is 13.6 TeV as is our gen. Do NOT reintroduce a
+  # sigma(13)/sigma(13.6) rescale anywhere.
+  run: "Run 3"
+  tagger_package:
+    btag: UParT-AK4          # card v1 baseline, matches the anchor era by construction
+    tau_id: DeepTau v2.5
+    note: "No downgrade to Run-2 performance; Run-2 is at most an optional band variation."
+
+tier3_anchor:
+  name: CMS Run-3 HH->bbtautau
+  status: NOT YET PUBLIC        # the residual risk is timing, not physics
+  citation: TOVERIFY
+  hepdata_doi: TOVERIFY
+  dataset: TOVERIFY
+  luminosity_fb: TOVERIFY       # take EXACTLY as stated in the publication; do not guess
+  mean_pileup: TOVERIFY         # anchor's stated conditions, or Run-3 public lumi plots
+  expected_sm_hh_significance:
+    value: TOVERIFY
+    stat_only: TOVERIFY         # pull from HEPData/auxiliary where it exists
+    citation: TOVERIFY
+  expected_kappa_lambda_interval:
+    value: TOVERIFY             # [lo, hi], stat-only where quoted
+    citation: TOVERIFY
+  systematics_share:
+    value: 0.15                 # ~15% of total uncertainty — WILL BE QUOTED IN THE PAPER
+    citation: TOVERIFY          # verify against the anchor's published breakdown
+    note: >
+      Justifies both the stat-only headline configuration and the one-NP scope of the
+      systematics demo. A stat-only Delphes baseline should land modestly TIGHT of a
+      stat+syst anchor: a known-direction, bounded (<~15%) offset, inside the gate.
+  leading_np:
+    name: TOVERIFY              # from the anchor's published impact ranking
+    citation: TOVERIFY
+    note: "Do not pre-commit before the impact table is public."
+  gate_tolerance: 0.20          # pass = within ~10-20% per quantity, per interval side
+
+# ---------------------------------------------------------------------------
+# D. Derivation anchors — object-level maps only.
+#     use: derivation  -> may be read by delphes_pipeline.tuning
+#     use: validation  -> comparison targets ONLY; the deriver refuses these
+# ---------------------------------------------------------------------------
+maps:
+  btag_efficiency:
+    use: derivation
+    condition_on: [true_flavour, gen_pt, abs_eta_coarse]
+    source: BTV performance paper / DP note
+    citation: TOVERIFY
+    working_point: TOVERIFY
+
+  jet_response:
+    use: derivation
+    condition_on: [true_flavour, gen_pt, abs_eta_coarse]
+    source: JME JER/JES
+    citation: TOVERIFY
+    note: >
+      Scale AND resolution, replacing bjet_escale. CAVEAT: a published JER gives a core
+      width (and a tail parameterisation), not a full response DISTRIBUTION, so
+      "quantile resampling" against it requires an assumed shape (Gaussian core +
+      published tail). State the assumption in the paper; it is not a measurement.
+    mbb_resolution_reference:
+      use: validation
+      source: HH analyses quoting m_bb resolution
+      citation: TOVERIFY
+
+  tau_response:
+    use: derivation
+    condition_on: [gen_decay_mode, gen_pt]
+    source: TAU POG performance paper / DP note
+    citation: TOVERIFY
+    note: "Scale, resolution and visible mass drawn JOINTLY (audit reply Q3)."
+
+  tau_fake:
+    use: derivation
+    condition_on: [jet_true_flavour, pt, abs_eta_coarse]
+    source: TAU POG fake-rate results
+    citation: TOVERIFY
+    pu_jet_contribution:
+      status: BLOCKED
+      reason: >
+        The card runs WITHOUT pileup, so pileup jets do not exist in the samples. A
+        downstream map can re-tag and re-smear objects that are there; it cannot CREATE
+        objects that are not. This term needs either PU mixing in Delphes (contradicts
+        the standing no-PU-mixing decision) or explicit injection of synthetic PU jets
+        at ntuplization, which is a generative step and not a correction. Escalate.
+
+  lepton_sf:
+    use: derivation
+    condition_on: [pt, abs_eta]
+    source: EGM / MUO published scale factors
+    citation: TOVERIFY
+    note: "Applied as an event weight, not a selection."
+
+  met_resolution:
+    use: derivation
+    condition_on: [sum_et, recoil_axis]
+    source: MET performance paper / DP note
+    citation: TOVERIFY
+    mean_pileup: TOVERIFY       # must equal era.tier3_anchor.mean_pileup
+    note: >
+      Core sigma vs sum-ET at the anchor's <mu>, WITH parallel/perpendicular recoil
+      anisotropy (measured 1.24 vs 1.05 in v1 — the current map is isotropic). Residual
+      smear derived AFTER fluctuation propagation (audit reply Q2).
+
+  trigger:
+    use: derivation
+    condition_on: [leg_pt, leg_eta]
+    source: trigger DP notes / analysis auxiliary material
+    citation: TOVERIFY
+    note: "Published HH->bbtautau trigger efficiency parameterisations, applied as weights."
+
+  tagging_joint:
+    use: derivation
+    condition_on: [flavour, pt]
+    source: anchor joint rates / POG overlap prescriptions
+    citation: TOVERIFY
+    note: "Joint categorical (b-tag, tau-tag) per jet, or explicit overlap removal."
+
+# ---------------------------------------------------------------------------
+# E. Validation targets — NEVER derivation inputs
+# ---------------------------------------------------------------------------
+validation:
+  analysis_level_shapes:
+    use: validation
+    observables: [m_bb, m_tautau, m_hh]
+    source: Run-3 bbtautau paper when public; Run-2 HEPData as interim shape reference
+    citation: TOVERIFY
+    note: >
+      Shapes are less era-sensitive, so Run-2 HEPData is an acceptable interim target.
+      Digitise figures only as a last resort, and say so in the paper.
