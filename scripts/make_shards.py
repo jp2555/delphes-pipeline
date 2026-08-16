@@ -432,6 +432,20 @@ def main(argv=None):
         os.makedirs(d, exist_ok=True)
 
     rows, manifest, seed = [], [], 1        # seed 0 stays reserved for the tuning lens
+    # Streaming from dCache needs a grid proxy the WORKERS can read. Without it every
+    # job dies ~17 s in on "[FATAL] Auth failed: No protocols left to try" -- and it
+    # cannot be caught by running a shard on the submit node, which sees the user's own
+    # /tmp/x509up_* that the workers do not. Refuse to plan the campaign instead.
+    if any(str(sp[1]).startswith("root://") for sp in args.sample) and not args.proxy:
+        raise SystemExit(
+            "[shards] inputs are root:// but no --proxy was given.\n"
+            "[shards]   the workers cannot see your /tmp/x509up_$(id -u); copy it "
+            "somewhere shared and pass it:\n"
+            "[shards]     voms-proxy-init --voms cms --valid 192:00\n"
+            "[shards]     install -m 600 /tmp/x509up_u$(id -u) /ceph/$USER/.x509up\n"
+            "[shards]     PROXY=/ceph/$USER/.x509up bash runners/production_untuned.sh ...\n"
+            "[shards]   or point SRC at a local copy that needs no credential.")
+
     for spec in args.sample:
         if len(spec) not in (3, 4):
             raise SystemExit(f"[shards] --sample takes NAME GLOB MAPS [SUBTREE], got {spec}")

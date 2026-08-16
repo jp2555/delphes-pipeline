@@ -741,3 +741,33 @@ def test_a_real_maps_path_is_still_absolutised_in_the_queue(tmp_path):
     field = (out / "_plan" / "shards.txt").read_text().splitlines()[0].split(",")[3]
     assert os.path.isabs(field.strip()), "real paths must still be absolute for the workers"
     assert _no_maps_if_none(field) == field.strip()
+
+
+def test_streaming_without_a_proxy_is_refused_at_plan_time(tmp_path, capsys):
+    """1587 jobs died 17 s in on "Auth failed: No protocols left to try".
+
+    A shard run by hand on the submit node CANNOT catch this: the submit host sees the
+    user's own /tmp/x509up_*, the workers do not. So the check has to be at plan time.
+    """
+    with pytest.raises(SystemExit, match="no --proxy"):
+        make_shards.main(["--sample", "sig",
+                          "root://cmsdcache-kit-disk.gridka.de:1094//store/x/*.root",
+                          "none", "--out", str(tmp_path / "o"), "--shard-gb", "1"])
+
+
+def test_streaming_with_a_proxy_is_allowed(tmp_path):
+    """Only the missing-credential combination is refused."""
+    proxy = tmp_path / "x509"
+    proxy.write_text("x")
+    src = _inputs(tmp_path, 2)
+    make_shards.main(["--sample", "sig", str(src / "*.root"), "none",
+                      "--proxy", str(proxy),
+                      "--out", str(tmp_path / "o2"), "--shard-gb", "1e-9"])
+    assert (tmp_path / "o2" / "_plan" / "manifest.json").exists()
+
+
+def test_a_local_source_needs_no_proxy(tmp_path):
+    src = _inputs(tmp_path, 2)
+    make_shards.main(["--sample", "sig", str(src / "*.root"), "none",
+                      "--out", str(tmp_path / "o3"), "--shard-gb", "1e-9"])
+    assert (tmp_path / "o3" / "_plan" / "manifest.json").exists()

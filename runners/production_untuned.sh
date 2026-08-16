@@ -26,8 +26,18 @@ SRC="${SRC:-root://cmsdcache-kit-disk.gridka.de:1094//store/user/sdaigler/mc_pro
 SUB_SIGNAL="${SUB_SIGNAL:-_Delphes_v1/delphes-tree-61fd1c12}"
 SUB_BKG="${SUB_BKG:-_Delphes_v1/delphes-tree-2ff38f65}"
 
+# SRC above is a dCache URL, so a grid proxy the WORKERS can read is MANDATORY. It must
+# NOT live in /tmp: that is per-node, so the submit host's copy is invisible to mdm*/ms*.
+#   voms-proxy-init --voms cms --valid 192:00
+#   install -m 600 /tmp/x509up_u$(id -u) /ceph/$USER/.x509up
+#   PROXY=/ceph/$USER/.x509up bash runners/production_untuned.sh /ceph/jpan/ntuples_untuned
+# Set SRC to a local path instead if you have one; then no proxy is needed.
 PROXY="${PROXY:-}"
-PROXYARG=""; [ -n "${PROXY}" ] && PROXYARG="--proxy ${PROXY}"
+PROXYARG=""
+if [ -n "${PROXY}" ]; then
+    PROXYARG="--proxy ${PROXY}"
+    [ -r "${PROXY}" ] || { echo "PROXY=${PROXY} is not readable" >&2; exit 2; }
+fi
 
 SHARD_GB="${SHARD_GB:-20}"
 # Measured: peak RSS ~1.3x the shard's INPUT size (22.0 GB mean / 26.7 GB max at 20 GB
