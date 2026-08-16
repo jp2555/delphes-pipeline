@@ -9,6 +9,8 @@ array. The downstream reader is ``core.io.load_ntuple``.
 
 from __future__ import annotations
 
+import os
+
 from typing import Optional
 
 import awkward as ak
@@ -52,11 +54,14 @@ def _no_maps_if_none(tuning_maps):
     on `FileNotFoundError: .../none`. Normalising here cannot be defeated by quoting,
     whitespace, or a stale submit file.
     """
-    if isinstance(tuning_maps, str) and tuning_maps.strip().lower() in ("", "none"):
+    if not isinstance(tuning_maps, str):
+        return tuning_maps
+    v = tuning_maps.strip()
+    # Also match a sentinel that has been path-joined: the shard planner used to
+    # abspath() the value, so "none" arrived as "<repo>/none" and was opened as a file.
+    if v.lower() in ("", "none") or os.path.basename(v).lower() == "none":
         return None
-    if isinstance(tuning_maps, str):
-        return tuning_maps.strip()
-    return tuning_maps
+    return v
 
 
 def convert(
@@ -123,7 +128,7 @@ def main(argv=None) -> int:
     if tuning_maps is None and args.config:
         from ..validation.run_validation import load_config
         tuning_maps = load_config(args.config).get("tuning_maps")
-    print(f"[ntuplizer] reading {args.delphes}"
+    print(f"[ntuplizer] reading {args.delphes or args.files_from or '?'}"
           + (f" (first {args.entry_stop})" if args.entry_stop else "")
           + (f" with re-tag from {tuning_maps}" if _no_maps_if_none(tuning_maps)
              else " UNTUNED (stock Delphes tags and energies, no maps)")

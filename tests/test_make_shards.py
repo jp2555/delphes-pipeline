@@ -707,3 +707,37 @@ def test_convert_does_not_open_a_file_called_none(tmp_path):
     assert C._no_maps_if_none(" none") is None
     assert not (pathlib.Path.cwd() / "none").exists(), \
         "nothing should ever create a file literally named 'none'"
+
+
+def test_the_queue_file_carries_the_sentinel_not_a_path(tmp_path):
+    """END TO END, on the PLAN's own output — the test the last two fixes lacked.
+
+    The bug survived two rounds because every test exercised the normaliser in
+    isolation with the string I assumed the worker got. It got something else: the
+    planner abspath()'d the sentinel, so "none" reached the worker as "<repo>/none"
+    and was opened as a file. Read the queue line the workers actually receive.
+    """
+    from delphes_pipeline.ntuplizer.convert import _no_maps_if_none
+    src = _inputs(tmp_path, 3)
+    out = tmp_path / "out"
+    make_shards.main(["--sample", "sig", str(src / "*.root"), "none",
+                      "--out", str(out), "--shard-gb", "1e-9"])
+    lines = (out / "_plan" / "shards.txt").read_text().strip().splitlines()
+    assert lines
+    for ln in lines:
+        maps_field = ln.split(",")[3]                 # as HTCondor splits it, space and all
+        assert maps_field.strip() == "none", f"planner wrote {maps_field!r}"
+        assert _no_maps_if_none(maps_field) is None, "the worker must read this as untuned"
+
+
+def test_a_real_maps_path_is_still_absolutised_in_the_queue(tmp_path):
+    from delphes_pipeline.ntuplizer.convert import _no_maps_if_none
+    src = _inputs(tmp_path, 2)
+    mp = tmp_path / "maps.json"
+    mp.write_text('{"provenance": {}, "maps": {}}')
+    out = tmp_path / "out2"
+    make_shards.main(["--sample", "sig", str(src / "*.root"), "maps.json",
+                      "--out", str(out), "--shard-gb", "1e-9"])
+    field = (out / "_plan" / "shards.txt").read_text().splitlines()[0].split(",")[3]
+    assert os.path.isabs(field.strip()), "real paths must still be absolute for the workers"
+    assert _no_maps_if_none(field) == field.strip()

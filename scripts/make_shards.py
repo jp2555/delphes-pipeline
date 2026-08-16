@@ -476,7 +476,10 @@ def main(argv=None):
             with open(fl, "w") as fh:
                 fh.write("\n".join(chunk) + "\n")
             outfile = os.path.join(outdir, f"{name}.{i:04d}.parquet")
-            rows.append(f"{name}, {i}, {fl}, {os.path.abspath(maps)}, {outfile}, {seed}")
+            # "none" is a SENTINEL, not a path: abspath turned it into
+            # <repo>/none, which every untuned job then tried to open.
+            mval = maps if maps == "none" else os.path.abspath(maps)
+            rows.append(f"{name}, {i}, {fl}, {mval}, {outfile}, {seed}")
             manifest.append({"sample": name, "shard": i, "seed": seed, "maps": maps,
                              "maps_sha": fp,
                              "subtree": sub, "files": chunk, "out": outfile})
