@@ -13,6 +13,9 @@ from __future__ import annotations
 
 import glob
 import json
+import subprocess
+import re
+import pathlib
 import os
 import sys
 from pathlib import Path
@@ -675,5 +678,19 @@ def test_maps_none_plans_an_untuned_campaign(tmp_path, capsys):
     plan = json.load(open(out / "_plan" / "manifest.json"))["shards"]
     assert {e["maps"] for e in plan} == {"none"}
     assert {e["maps_sha"] for e in plan} == {"untuned"}
+    # RUN the emitted script, do not grep it. The previous version of this test only
+    # checked that a string was present; the string was there and the script still died
+    # on every job, because `[ test ] && assign` returns non-zero under `set -e`.
     exe = (out / "_plan" / "run_shard.sh").read_text()
-    assert '[ "$4" != "none" ]' in exe, "the worker must skip --tuning-maps for none"
+    stub = exe.replace('exec "$PY"', 'echo ARGS:').replace(
+        'PY="{}/.pixi/envs/{}/bin/python"'.format(
+            str(pathlib.Path(__file__).resolve().parents[1]), "nsbi-env-gpu"),
+        'PY=/bin/echo')
+    stub = re.sub(r'if \[ ! -x "\$PY" \]; then.*?\nfi\n', "", stub, flags=re.S)
+    sh = out / "_plan" / "stub.sh"
+    sh.write_text(stub)
+    for maps, want in (("none", False), ("/m.json", True)):
+        r = subprocess.run(["bash", str(sh), "sig", "0", "/f.txt", maps, "/o.parquet", "7"],
+                           capture_output=True, text=True)
+        assert r.returncode == 0, f"maps={maps!r} exited {r.returncode}: {r.stderr}"
+        assert ("--tuning-maps" in r.stdout) is want, r.stdout
