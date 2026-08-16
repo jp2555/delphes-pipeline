@@ -251,23 +251,20 @@ def test_proxy_is_written_into_the_submit_when_given():
         assert "x509userproxy" in sub and "use_x509userproxy       = true" in sub
 
 
-def test_remote_inputs_without_a_proxy_are_warned_about(capsys):
-    """A root:// job with no proxy fails to authenticate to dCache; silence would mean
-    discovering that only after the whole campaign has been submitted."""
+def test_remote_inputs_without_a_proxy_are_REFUSED_not_merely_warned():
+    """Superseded a warning, deliberately: a warning did not stop 1587 jobs.
+
+    The campaign was planned, submitted, and every job died ~17 s in on
+    "[FATAL] Auth failed: No protocols left to try" -- the warning scrolled past on the
+    submit node hours earlier. A root:// source with no worker-readable proxy is not a
+    situation worth continuing from, so planning now aborts.
+    """
     import tempfile
     with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        out = tmp / "out"
-        (tmp / "_plan").mkdir(parents=True, exist_ok=True)
-        orig = make_shards._files
-        make_shards._files = lambda p, subtree=None, cache=None, refresh=False: [
-            ("root://h//store/a_Delphes_v1/delphes-tree-61fd1c12/f.root", 1 << 30)]
-        try:
+        out = Path(td) / "out"
+        with pytest.raises(SystemExit, match="no --proxy"):
             make_shards.main(["--sample", "sig", "root://h//store/*", "/m.json",
                               "--out", str(out), "--shard-gb", "1e-9"])
-        finally:
-            make_shards._files = orig
-        assert "no --proxy given" in capsys.readouterr().out
 
 
 # --------------------------------------------------------------------------- #
