@@ -68,8 +68,13 @@ if [ ! -x "$PY" ]; then
     echo "no interpreter at $PY (is /ceph mounted on $(hostname -f)?)" >&2
     exit 127
 fi
+# maps "none" = the UNTUNED baseline: stock Delphes tagging and energies, no maps at
+# all. That is a different forward model from a tuned run and must never be mixed with
+# one inside a fit, which is why it is spelled explicitly rather than by omission.
+MAPS_ARG=""
+[ "$4" != "none" ] && MAPS_ARG="--tuning-maps $4"
 exec "$PY" -m delphes_pipeline.ntuplizer.convert \\
-    --files-from "$3" --tuning-maps "$4" --seed "$6" --shard "$2" {prune} "" "$5"
+    --files-from "$3" ${{MAPS_ARG}} --seed "$6" --shard "$2" {prune} "" "$5"
 """
 
 
@@ -440,8 +445,10 @@ def main(argv=None):
         if not files:
             print(f"[shards] WARNING {name}: no files matched {pattern}")
             continue
-        fp = maps_fingerprint(maps)
-        if not os.path.exists(maps):
+        fp = "untuned" if maps == "none" else maps_fingerprint(maps)
+        if maps == "none":
+            print(f"[shards] {name}: UNTUNED — stock Delphes, no maps applied")
+        elif not os.path.exists(maps):
             print(f"[shards] WARNING {name}: maps {maps} not found — derive them first")
         else:
             print(f"[shards] {name}: maps {os.path.basename(maps)} sha {fp}")

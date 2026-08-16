@@ -663,3 +663,17 @@ def test_list_dirs_flags_a_directory_spanning_two_subtrees(tmp_path, capsys):
 def test_list_dirs_says_so_when_nothing_matches(tmp_path, capsys):
     assert make_shards.list_dirs(str(tmp_path / "*nope*")) == 1
     assert "nothing matched" in capsys.readouterr().out
+
+
+def test_maps_none_plans_an_untuned_campaign(tmp_path, capsys):
+    """The untuned baseline is a DIFFERENT forward model, so it is spelled out."""
+    src = _inputs(tmp_path, 3)
+    out = tmp_path / "out"
+    make_shards.main(["--sample", "sig", str(src / "*.root"), "none",
+                      "--out", str(out), "--shard-gb", "1e-9"])
+    assert "UNTUNED" in capsys.readouterr().out
+    plan = json.load(open(out / "_plan" / "manifest.json"))["shards"]
+    assert {e["maps"] for e in plan} == {"none"}
+    assert {e["maps_sha"] for e in plan} == {"untuned"}
+    exe = (out / "_plan" / "run_shard.sh").read_text()
+    assert '[ "$4" != "none" ]' in exe, "the worker must skip --tuning-maps for none"
