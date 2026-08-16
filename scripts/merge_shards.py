@@ -93,6 +93,7 @@ def write_group(job):
     name, part, entries, dest = job
     out_path = os.path.join(dest, f"{name}.{part:04d}.parquet")
     writer, schema, rows = None, None, 0
+    sumw = sumw_sf = 0.0
     try:
         for e in entries:
             kl = _kl_of(e)
@@ -117,10 +118,17 @@ def write_group(job):
                     f"        expected {schema.names}\n        got      {t.schema.names}")
             writer.write_table(t)
             rows += t.num_rows
+            if "genWeight" in t.column_names:
+                # sum WITH sign: NLO weights are negative for a real fraction of events,
+                # and sigma_eff's numerator and denominator must both include them
+                sumw += float(np.asarray(t.column("genWeight")).sum())
+            if "lepton_sf" in t.column_names:
+                sumw_sf += float((np.asarray(t.column("genWeight"))
+                                  * np.asarray(t.column("lepton_sf"))).sum())
     finally:
         if writer is not None:
             writer.close()
-    return out_path, rows
+    return out_path, rows, sumw, sumw_sf
 
 
 def merge_sample(name, entries, dest, target_bytes, jobs=1):
@@ -132,7 +140,8 @@ def merge_sample(name, entries, dest, target_bytes, jobs=1):
     else:
         with ProcessPoolExecutor(max_workers=min(jobs, len(todo))) as ex:
             results = list(ex.map(write_group, todo))
-    return [r[0] for r in results], sum(r[1] for r in results)
+    return ([r[0] for r in results], sum(r[1] for r in results),
+            sum(r[2] for r in results), sum(r[3] for r in results))
 
 
 def main(argv=None):
@@ -189,7 +198,8 @@ def main(argv=None):
         jobs = args.jobs or (os.cpu_count() or 1)
         t1 = time.perf_counter()
         try:
-            files, rows = merge_sample(name, entries, dest, args.target_gb * 1e9, jobs=jobs)
+            files, rows, sumw, sumw_sf = merge_sample(
+                name, entries, dest, args.target_gb * 1e9, jobs=jobs)
         except ValueError as exc:
             # raised in a worker; surface it as a clean abort rather than a traceback
             raise SystemExit(f"[merge] {exc}")
@@ -198,7 +208,15 @@ def main(argv=None):
         print(f"[merge] {name}: {len(entries)} shards -> {len(files)} files, "
               f"{rows:,} events, {size/1e9:.1f} GB in {dt:.0f}s "
               f"({size/1e6/dt:.0f} MB/s out, {min(jobs, len(files))} workers)")
-        summary[name] = {"shards": len(entries), "files": files, "events": rows,
+        planned = sum(1 for e in plan if e["sample"] == name)
+        # sigma_eff = sigma_gen * (sum w on PROCESSED shards / sum w generated over the
+        # SAME shard set). Recording both the sum and the shard accounting is what lets
+        # that be computed without ever quoting a generated count the sample does not
+        # correspond to (the 4 lost ttbar shards are exactly this trap).
+        summary[name] = {"shards": len(entries), "shards_planned": planned,
+                         "files": files, "events": rows,
+                         "sum_genweight": sumw,
+                         "sum_genweight_x_lepton_sf": sumw_sf,
                          "bytes": size,
                          "maps": sorted({e["maps"] for e in entries}),
                          "maps_sha": sorted({e.get("maps_sha") for e in entries}),

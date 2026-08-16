@@ -21,7 +21,10 @@ from delphes_pipeline.core.nanoaod import NanoAODEvents
 from delphes_pipeline.core.observables import Profile
 
 # observables for which the NanoAOD anchor provides a target
-_MASS_QUANTILES = 21          # uniform quantile grid stored for the τ_h visible mass
+_MASS_QUANTILES = 101         # uniform quantile grid stored for the τ_h visible mass.
+# 21 points was measured to inflate the top quantile by 7.2% on the response map (the
+# last segment interpolates to the sample maximum); the mass map had the same grid and
+# the same defect. 101 brings it to 0.11%.
 # 101, not 21: the grid's TOP segment runs from its last stored level to the sample MAX,
 # and a linear draw across it inflates the extreme tail — measured 7.2% high at q99 with 21
 # levels, 0.11% with 101, because q99 then lands exactly on a grid point. The response tail

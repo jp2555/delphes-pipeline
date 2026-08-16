@@ -130,7 +130,13 @@ def features(ev):
     hh = _sum_p4(hbb, htt)
 
     deta = np.abs(hbb[1] - htt[1])
+    # Ladder-weight rule: lepton_sf is part of the EVENT WEIGHT, not a correction some
+    # methods apply and others don't. A weight column consumed by the ratio training and
+    # not by the histogram baseline silently breaks N >= D >= H by construction. It is
+    # 1.0 on an untuned sample, so this is a no-op for the baseline and correct for v2.
     w = ak.to_numpy(ev.array["genWeight"])[idx].astype(np.float64)
+    if "lepton_sf" in ak.fields(ev.array):
+        w = w * ak.to_numpy(ev.array["lepton_sf"])[idx].astype(np.float64)
     out = {
         "m_hh": hh[3], "pt_hh": hh[0],
         "m_bb": hbb[3], "m_tautau": htt[3],

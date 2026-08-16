@@ -323,3 +323,54 @@ def test_the_merged_manifest_records_the_map_fingerprint(tmp_path):
     merge_shards.main(["--out", str(out), "--target-gb", "1e-9"])
     man = json.load(open(out / "merged" / "manifest.json"))
     assert man["signal"]["maps_sha"] == ["aaaa1111"], "a path is not a version"
+
+
+# --------------------------------------------------------------------------- #
+# Q8, codified: sigma_eff = sigma_gen * (sum w on PROCESSED shards / sum w
+# generated over the SAME shard set), negative genWeights in BOTH sums. Recording
+# the sum and the shard accounting is what stops anyone quoting a generated count
+# the tuned sample does not correspond to -- the 4 lost ttbar shards are that trap.
+# --------------------------------------------------------------------------- #
+def _weighted_campaign(tmp, n=4, rows=10, drop=()):
+    out = tmp / "out"
+    (out / "_plan").mkdir(parents=True)
+    shards = [{"sample": "ttbar", "shard": i, "seed": i, "maps": "/m.json",
+               "maps_sha": "abc", "files": [f"/in/{i}.root"],
+               "out": str(out / f"ttbar.{i:04d}.parquet")} for i in range(n)]
+    (out / "_plan" / "manifest.json").write_text(json.dumps({"shards": shards}))
+    for e in shards:
+        if e["shard"] in drop:
+            continue
+        w = np.where(np.arange(rows) % 5 == 0, -1.0, 1.0).astype(np.float32)
+        ak.to_parquet(ak.zip({"genWeight": w,
+                              "lepton_sf": np.full(rows, 1.1, dtype=np.float32),
+                              "shard": np.full(rows, e["shard"], dtype=np.int32)}),
+                      e["out"])
+    return out
+
+
+def test_the_manifest_records_signed_sum_of_weights(tmp_path):
+    out = _weighted_campaign(tmp_path, n=4, rows=10)
+    merge_shards.main(["--out", str(out), "--target-gb", "1e-9"])
+    man = json.load(open(out / "merged" / "manifest.json"))["ttbar"]
+    # 8 positive + 2 negative per shard, 4 shards
+    assert man["sum_genweight"] == pytest.approx(4 * (8 - 2), rel=1e-6)
+    assert man["events"] == 40
+
+
+def test_lost_shards_leave_processed_and_planned_both_visible(tmp_path):
+    out = _weighted_campaign(tmp_path, n=4, rows=10, drop=(2,))
+    merge_shards.main(["--out", str(out), "--target-gb", "1e-9", "--force"])
+    man = json.load(open(out / "merged" / "manifest.json"))["ttbar"]
+    assert man["shards"] == 3 and man["shards_planned"] == 4
+    assert man["sum_genweight"] == pytest.approx(3 * (8 - 2), rel=1e-6), \
+        "the denominator must be the PROCESSED shard set, not the planned one"
+
+
+def test_the_lepton_sf_weighted_sum_is_recorded_too(tmp_path):
+    """lepton_sf is part of the event weight; the ladder needs it consistently."""
+    out = _weighted_campaign(tmp_path, n=2, rows=10)
+    merge_shards.main(["--out", str(out), "--target-gb", "1e-9"])
+    man = json.load(open(out / "merged" / "manifest.json"))["ttbar"]
+    assert man["sum_genweight_x_lepton_sf"] == pytest.approx(
+        man["sum_genweight"] * 1.1, rel=1e-5)
