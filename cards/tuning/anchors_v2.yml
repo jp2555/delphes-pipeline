@@ -63,6 +63,11 @@ tier3_anchor:
 maps:
   btag_efficiency:
     use: derivation
+    # The C4 residual argument assumes our objects correspond to the anchor's
+    # POST-mitigation population. A pre-mitigation POG number would double-count the PU
+    # term: the bound above already accounts for what survives mitigation. The deriver
+    # REFUSES a derivation anchor whose mitigation_state is unset or pre_mitigation.
+    mitigation_state: TOVERIFY          # post_mitigation | pre_mitigation | not_applicable
     condition_on: [true_flavour, gen_pt, abs_eta_coarse]
     source: BTV performance paper / DP note
     citation: TOVERIFY
@@ -85,6 +90,7 @@ maps:
 
   tau_response:
     use: derivation
+    mitigation_state: TOVERIFY
     condition_on: [gen_decay_mode, gen_pt]
     source: TAU POG performance paper / DP note
     citation: TOVERIFY
@@ -92,20 +98,42 @@ maps:
 
   tau_fake:
     use: derivation
+    # Must be the post-PU-jet-ID, post-PV-association j->tau rate. This is the hinge the
+    # whole C4 perfect-mitigation argument turns on.
+    mitigation_state: TOVERIFY
     condition_on: [jet_true_flavour, pt, abs_eta_coarse]
     source: TAU POG fake-rate results
     citation: TOVERIFY
     pu_jet_contribution:
-      status: BLOCKED
+      status: omitted_bounded          # pending the week-1 calculation below
+      framing: perfect-mitigation limit
       reason: >
-        The card runs WITHOUT pileup, so pileup jets do not exist in the samples. A
-        downstream map can re-tag and re-smear objects that are there; it cannot CREATE
-        objects that are not. This term needs either PU mixing in Delphes (contradicts
-        the standing no-PU-mixing decision) or explicit injection of synthetic PU jets
-        at ntuplization, which is a generative step and not a correction. Escalate.
+        A downstream map re-tags and re-smears objects that exist; it cannot create PU
+        jets in no-PU samples. Resolved by framing rather than by injection: the anchor
+        analysis applies pileup jet ID on the jet legs and DeepTau + primary-vertex
+        association on the tau legs precisely to remove PU-origin objects, so its signal
+        region contains hard-scatter objects plus a RESIDUAL post-mitigation PU
+        contamination. Our no-PU samples are that same pipeline with the residual set to
+        zero, so the model error is the residual -- a bounded published quantity -- not
+        the full PU-jet population.
+      bound_per_leg:                   # week-1 [P0][S], all factors from public material
+        n_pu_jets_above_threshold: TOVERIFY   # at anchor <mu>, within acceptance (JME)
+        frac_passing_pu_jet_id: TOVERIFY      # at the analysis WP (published)
+        fake_probability: TOVERIFY            # b-mistag or DeepTau-Medium for such jets;
+                                              # conservatively the generic j->tau rate
+        pairing_acceptance: 1.0               # <= 1; take 1 for the bound
+        citation: TOVERIFY
+        result: TOVERIFY
+      escalation_criterion: >
+        Decided end of week 2, before it can threaten the freeze. If the bound is not
+        comfortably small against the SR background yield (guide: > few %), consider
+        synthetic PU-jet injection at ntuplisation (generative; needs its own public
+        anchor and Tier-1 validation) or a small diagnostic PU-mixed Delphes sample
+        (order-of-magnitude only). Neither enters the baseline production.
 
   lepton_sf:
     use: derivation
+    mitigation_state: TOVERIFY
     condition_on: [pt, abs_eta]
     source: EGM / MUO published scale factors
     citation: TOVERIFY
@@ -113,7 +141,9 @@ maps:
 
   met_resolution:
     use: derivation
-    condition_on: [sum_et, recoil_axis]
+    mitigation_state: not_applicable    # a resolution, not a rate on a mitigated object
+    condition_on: [hard_scatter_ht, recoil_axis]
+    conditioning_must_be_pu_independent: true
     source: MET performance paper / DP note
     citation: TOVERIFY
     mean_pileup: TOVERIFY       # must equal era.tier3_anchor.mean_pileup

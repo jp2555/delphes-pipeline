@@ -40,7 +40,60 @@ def for_derivation(anchors: dict, name: str) -> dict:
             f"anchor {name!r} is tagged use={entry.get('use')!r}; only "
             f"use='derivation' entries may be read by the deriver. Re-tagging a "
             f"validation target to get past this is the error the tag exists to stop.")
+    _check_mitigation(name, entry)
+    _check_pu_conditioning(name, entry)
     return entry
+
+
+#: rates and efficiencies measured on a population CMS has already cleaned of PU-origin
+#: objects. Anything else double-counts against the C4 residual bound.
+_MITIGATION_OK = ("post_mitigation", "not_applicable")
+
+
+def _check_mitigation(name, entry):
+    """Refuse a rate/efficiency anchor that is not the post-mitigation number.
+
+    The C4 argument is that our no-PU samples ARE the anchor's pipeline with the residual
+    PU contamination set to zero, so the model error is the published residual and not the
+    whole PU-jet population. That holds only if the maps we take from public material are
+    the post-PU-jet-ID, post-primary-vertex-association numbers. A pre-mitigation POG
+    fake rate would count the PU term twice -- once in the map and once in the residual
+    bound -- and the whole framing collapses. It is a one-line check when filling the
+    file, which is exactly the kind of check that gets skipped, so it is enforced here.
+    """
+    state = entry.get("mitigation_state")
+    if state is None:
+        return                                  # not a rate/efficiency anchor
+    if state == TOVERIFY:
+        raise AnchorError(
+            f"anchor {name!r} has mitigation_state=TOVERIFY: confirm the public number is "
+            f"post-PU-jet-ID / post-PV-association before deriving from it. A "
+            f"pre-mitigation rate double-counts against the C4 residual bound.")
+    if state not in _MITIGATION_OK:
+        raise AnchorError(
+            f"anchor {name!r} has mitigation_state={state!r}; only "
+            f"{' or '.join(_MITIGATION_OK)} may be derived from. A pre-mitigation number "
+            f"counts the pileup term twice (map + residual bound).")
+
+
+def _check_pu_conditioning(name, entry):
+    """Refuse a PU-inclusive conditioning variable on a map applied to no-PU events.
+
+    An anchor map binned in a PU-inclusive activity variable, applied to a no-PU event,
+    reads a systematically LOW bin and under-corrects. This is live in v1: met_smear is
+    conditioned on jet H_T with pt > 20 GeV out to |eta| <= 4.7, which is PU-inclusive on
+    the CMS side and PU-free on ours.
+    """
+    if not entry.get("conditioning_must_be_pu_independent"):
+        return
+    pu_dependent = {"sum_et", "sumet", "jet_ht", "ht", "n_jets", "n_vertices", "rho"}
+    bad = [v for v in entry.get("condition_on", []) if v in pu_dependent]
+    if bad:
+        raise AnchorError(
+            f"anchor {name!r} requires PU-independent conditioning but is binned in "
+            f"{bad}: a PU-inclusive anchor variable applied to a no-PU event reads a low "
+            f"bin and under-corrects. Use hard-scatter H_T or visible q_T, or "
+            f"offset-correct by the mean PU contribution at <mu>.")
 
 
 def unverified(anchors: dict) -> list[str]:

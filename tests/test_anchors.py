@@ -62,3 +62,56 @@ def test_the_pileup_jet_fake_term_is_recorded_as_blocked(cfg):
     """No-PU samples contain no PU jets; a downstream map cannot create objects."""
     pu = cfg["maps"]["tau_fake"]["pu_jet_contribution"]
     assert pu["status"] == "BLOCKED"
+
+
+# --------------------------------------------------------------------------- #
+# The C4 perfect-mitigation framing turns on ONE hinge: the public rates we derive
+# from must be post-PU-jet-ID / post-PV-association. A pre-mitigation number counts
+# the pileup term twice — once in the map, once in the residual bound.
+# --------------------------------------------------------------------------- #
+def test_a_placeholder_mitigation_state_blocks_derivation(cfg):
+    with pytest.raises(A.AnchorError, match="post-PU-jet-ID"):
+        A.for_derivation(cfg, "tau_fake")
+
+
+def test_a_pre_mitigation_rate_is_refused():
+    bad = {"maps": {"tau_fake": {"use": "derivation",
+                                 "mitigation_state": "pre_mitigation"}}}
+    with pytest.raises(A.AnchorError, match="twice"):
+        A.for_derivation(bad, "tau_fake")
+
+
+def test_a_post_mitigation_rate_is_accepted():
+    ok = {"maps": {"tau_fake": {"use": "derivation",
+                                "mitigation_state": "post_mitigation"}}}
+    assert A.for_derivation(ok, "tau_fake")["mitigation_state"] == "post_mitigation"
+
+
+def test_a_map_with_no_mitigation_field_is_unaffected(cfg):
+    """jet_response is a response, not a rate on a mitigated population."""
+    assert A.for_derivation(cfg, "jet_response")["use"] == "derivation"
+
+
+# --------------------------------------------------------------------------- #
+# A PU-inclusive conditioning variable applied to a no-PU event reads a low bin
+# and under-corrects. Live in v1: met_smear is binned in jet H_T (pt>20, |eta|<4.7).
+# --------------------------------------------------------------------------- #
+def test_a_pu_inclusive_conditioning_variable_is_refused():
+    bad = {"maps": {"met_resolution": {
+        "use": "derivation", "mitigation_state": "not_applicable",
+        "conditioning_must_be_pu_independent": True,
+        "condition_on": ["sum_et", "recoil_axis"]}}}
+    with pytest.raises(A.AnchorError, match="under-correct"):
+        A.for_derivation(bad, "met_resolution")
+
+
+def test_hard_scatter_conditioning_passes(cfg):
+    e = A.for_derivation(cfg, "met_resolution")
+    assert "hard_scatter_ht" in e["condition_on"]
+
+
+def test_the_pu_fake_term_is_now_bounded_not_blocked(cfg):
+    pu = cfg["maps"]["tau_fake"]["pu_jet_contribution"]
+    assert pu["status"] == "omitted_bounded"
+    assert pu["framing"] == "perfect-mitigation limit"
+    assert pu["bound_per_leg"]["pairing_acceptance"] == 1.0
