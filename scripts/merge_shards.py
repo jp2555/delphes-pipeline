@@ -201,7 +201,19 @@ def main(argv=None):
         summary[name] = {"shards": len(entries), "files": files, "events": rows,
                          "bytes": size,
                          "maps": sorted({e["maps"] for e in entries}),
+                         "maps_sha": sorted({e.get("maps_sha") for e in entries}),
                          "subtree": sorted({e.get("subtree") for e in entries})}
+
+    # Provenance uniformity is what the downstream unbinned CI depends on. Samples
+    # corrected with DIFFERENT maps are different forward models, and a signal/background
+    # ratio trained across them inherits the map difference as learned S/B shape. That may
+    # be intended; it must never be silent.
+    shas = {n: (v.get("maps_sha") or [None])[0] for n, v in summary.items()}
+    if len(set(shas.values())) > 1:
+        print("[merge] NOTE: samples were corrected with DIFFERENT map sets — "
+              + ", ".join(f"{n}={v}" for n, v in sorted(shas.items())))
+        print("[merge]   valid within each sample; a ratio trained ACROSS them carries "
+              "the map difference. See docs/tuning_for_nsbi_audit.md")
 
     mpath = os.path.join(dest, "manifest.json")
     if os.path.exists(mpath):

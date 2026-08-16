@@ -8,12 +8,24 @@ Every map in ``maps_v1.json`` is measured on the HH signal, on both sides, and w
 recently applied to tt̄ as well. Whether that transfer is legitimate is an empirical
 question, and this answers it: derive a second set on tt̄ and see how far apart they are.
 
-The verdict column is a means, not an end. A map that agrees within its own statistical
-error transfers; one that does not has to be derived per process, and the NSBI training
-must then use the right set per sample (``convert.py --tuning-maps``). ``--tol`` sets the
-relative difference above which a map is called out; the default 5% matches the level-0
-closure tolerance, so a map that fails here would also fail its own closure if the other
-process's value were imposed on it.
+The verdict column is a means, not an end -- but read the verdict the right way round.
+
+Agreement within statistics validates the PARAMETERISATION: the map is an object-level
+detector property and one merged set can be applied everywhere. Disagreement means a
+variable is MISSING from the parameterisation (flavour, prong multiplicity, eta,
+pileup) -- it is NOT a licence to apply a different map to each process.
+
+That distinction is the whole point. A detector response is a property of the final
+state: one forward model for everything. Per-process APPLICATION makes two kinematically
+identical jets smear differently according to an unobservable process label, and a
+signal/background likelihood ratio then inherits the difference BETWEEN the maps as
+learned S/B shape. Deriving per process is a measurement strategy (each process is a
+control region weighting the same universal map differently); applying per process is a
+modelling error. See docs/tuning_for_nsbi_audit.md.
+
+``--tol`` sets the relative difference above which a map is called out; the default 5%
+matches the level-0 closure tolerance, so a map that fails here would also fail its own
+closure if the other process's value were imposed on it.
 """
 
 from __future__ import annotations

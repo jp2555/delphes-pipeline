@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import glob
+import hashlib
 import json
 import os
 import re
@@ -167,6 +168,23 @@ def list_dirs(pattern, subtree=None, cache=None, refresh=False):
         flag = "  <-- SPANS SUBTREES" if len(g["hashes"]) > 1 else ""
         print(f"  {g['n']:>7,} files  {g['bytes'] / 1e9:>9.1f} GB  [{subs}]{flag}  {top}")
     return 0
+
+
+def maps_fingerprint(path):
+    """sha256 of a maps file, so a plan pins map CONTENT and not just a filename.
+
+    Provenance uniformity, not tuning fidelity, is what the downstream unbinned CI
+    depends on: every density in a fit -- basis points, reference, backgrounds, toys,
+    Asimov -- must come from ONE frozen forward model. A path is not a version: re-deriving
+    to the same filename changes the forward model with nothing recording it.
+    """
+    if not path or not os.path.exists(path):
+        return None
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()[:16]
 
 
 def check_subtrees(name, files):
@@ -422,8 +440,11 @@ def main(argv=None):
         if not files:
             print(f"[shards] WARNING {name}: no files matched {pattern}")
             continue
+        fp = maps_fingerprint(maps)
         if not os.path.exists(maps):
             print(f"[shards] WARNING {name}: maps {maps} not found — derive them first")
+        else:
+            print(f"[shards] {name}: maps {os.path.basename(maps)} sha {fp}")
         by_events = args.count_events and args.shard_events
         counts = [_events(f) for f, _ in files] if args.count_events else [None] * len(files)
         target = args.shard_events if by_events else args.shard_gb * 1e9
@@ -451,6 +472,7 @@ def main(argv=None):
             outfile = os.path.join(outdir, f"{name}.{i:04d}.parquet")
             rows.append(f"{name}, {i}, {fl}, {os.path.abspath(maps)}, {outfile}, {seed}")
             manifest.append({"sample": name, "shard": i, "seed": seed, "maps": maps,
+                             "maps_sha": fp,
                              "subtree": sub, "files": chunk, "out": outfile})
             seed += 1
 

@@ -278,3 +278,48 @@ def test_a_shard_spanning_two_kl_points_aborts_rather_than_guessing():
     with pytest.raises(ValueError, match="spans multiple"):
         merge_shards._kl_of({"sample": "signal", "shard": 3,
                              "files": ["/in/kl-1p00/a.root", "/in/kl-5p00/b.root"]})
+
+
+# --------------------------------------------------------------------------- #
+# Provenance uniformity -- not tuning fidelity -- is what the downstream unbinned
+# CI depends on. Samples corrected with different map sets are different forward
+# models; a ratio trained across them inherits the map difference as S/B shape.
+# That can be intended, but it must never be silent.
+# --------------------------------------------------------------------------- #
+def _campaign_with_maps(tmp, per_sample_maps, rows=20):
+    out = tmp / "out"
+    (out / "_plan").mkdir(parents=True)
+    shards = []
+    for i, (name, mp) in enumerate(per_sample_maps.items()):
+        for k in range(2):
+            shards.append({"sample": name, "shard": k, "seed": 10 * i + k,
+                           "maps": f"/maps/{name}.json", "maps_sha": mp,
+                           "files": [f"/in/{name}.{k}.root"],
+                           "out": str(out / f"{name}.{k:04d}.parquet")})
+    (out / "_plan" / "manifest.json").write_text(json.dumps({"shards": shards}))
+    for e in shards:
+        ak.to_parquet(ak.zip({"MET_pt": np.ones(rows, dtype=np.float32),
+                              "shard": np.full(rows, e["shard"], dtype=np.int32)}),
+                      e["out"])
+    return out
+
+
+def test_mixed_map_provenance_is_announced(tmp_path, capsys):
+    out = _campaign_with_maps(tmp_path, {"signal": "aaaa1111", "ttbar": "bbbb2222"})
+    assert merge_shards.main(["--out", str(out), "--target-gb", "1e-9"]) == 0
+    said = capsys.readouterr().out
+    assert "DIFFERENT map sets" in said
+    assert "signal=aaaa1111" in said and "ttbar=bbbb2222" in said
+
+
+def test_uniform_map_provenance_says_nothing(tmp_path, capsys):
+    out = _campaign_with_maps(tmp_path, {"signal": "aaaa1111", "ttbar": "aaaa1111"})
+    merge_shards.main(["--out", str(out), "--target-gb", "1e-9"])
+    assert "DIFFERENT map sets" not in capsys.readouterr().out
+
+
+def test_the_merged_manifest_records_the_map_fingerprint(tmp_path):
+    out = _campaign_with_maps(tmp_path, {"signal": "aaaa1111"})
+    merge_shards.main(["--out", str(out), "--target-gb", "1e-9"])
+    man = json.load(open(out / "merged" / "manifest.json"))
+    assert man["signal"]["maps_sha"] == ["aaaa1111"], "a path is not a version"
