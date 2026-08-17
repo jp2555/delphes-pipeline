@@ -148,6 +148,61 @@ def save_maps(maps: dict, path, provenance: dict) -> None:
         json.dump({"provenance": provenance, "maps": maps}, fh, indent=2, default=str)
 
 
+
+def _lookup(m: dict, x, *, default: float = 0.0, cat=None, y=None) -> np.ndarray:
+    """Evaluate a map, dispatching on its shape.
+
+    Three shapes, chosen so v1 files keep working and v2 adds only what it needs:
+
+      1-D          {"centers", "values"}                    -> interp in x
+      categorical  {"by", "cats": {key: <map>}}             -> per-object slice, then recurse
+      2-D          {"centers", "y_edges", "values": [[..]]} -> interp in x within an y bin
+
+    A categorical key with no entry falls back to ``cats["_"]`` if present, else
+    ``default`` -- an unmapped category must be visible as a no-op, never silently
+    borrowed from a neighbouring one.
+    """
+    x = np.asarray(x, dtype=float)
+    if "cats" in m:
+        if cat is None:
+            raise ValueError(f"map is conditioned on {m.get('by')!r} but no cat= was given")
+        out = np.full(x.shape, float(default))
+        key = np.asarray(cat)
+        for k, sub in m["cats"].items():
+            if k == "_":
+                continue
+            sel = key == type(key.flat[0])(k) if key.size else np.zeros(x.shape, bool)
+            if np.any(sel):
+                out[sel] = _lookup(sub, x[sel], default=default, y=None if y is None
+                                   else np.asarray(y)[sel])
+        if "_" in m["cats"]:
+            known = np.zeros(x.shape, bool)
+            for k in m["cats"]:
+                if k != "_" and key.size:
+                    known |= key == type(key.flat[0])(k)
+            if np.any(~known):
+                out[~known] = _lookup(m["cats"]["_"], x[~known], default=default,
+                                      y=None if y is None else np.asarray(y)[~known])
+        return out
+    c = np.asarray(m.get("centers", []), dtype=float)
+    v = np.asarray(m.get("values", []), dtype=float)
+    if c.size == 0 or v.size == 0:
+        return np.full(x.shape, float(default))
+    if "y_edges" in m and v.ndim == 2:
+        if y is None:
+            raise ValueError("map has a second axis but no y= was given")
+        edges = np.asarray(m["y_edges"], dtype=float)
+        # clip into range: the edge bin is the right asymptote, same as flat extrapolation in x
+        iy = np.clip(np.digitize(np.asarray(y, dtype=float), edges) - 1, 0, v.shape[0] - 1)
+        out = np.empty(x.shape, dtype=float)
+        for b in np.unique(iy):
+            sel = iy == b
+            row = v[b]
+            out[sel] = np.interp(x[sel], c, row, left=row[0], right=row[-1])
+        return out
+    return np.interp(x, c, v, left=v[0], right=v[-1])          # flat extrapolation
+
+
 class TuningMaps:
     """A loaded set of pT-binned efficiency curves with interpolation."""
 
@@ -159,17 +214,25 @@ class TuningMaps:
         with open(path) as fh:
             return cls(json.load(fh)["maps"])
 
-    def efficiency(self, quantity: str, pt, *, default: float = 0.0) -> np.ndarray:
-        """Interpolate the curve at ``pt``. ``default`` is returned for an empty grid —
-        0 for efficiencies, but 1.0 for *multiplicative* corrections (escale / SF) so a
-        missing/empty map is a no-op rather than zeroing the jet pT or the event weight."""
-        m = self.maps[quantity]
-        c = np.asarray(m["centers"], dtype=float)
-        v = np.asarray(m["values"], dtype=float)
-        pt = np.asarray(pt, dtype=float)
-        if c.size == 0:
-            return np.full(pt.shape, default)
-        return np.interp(pt, c, v, left=v[0], right=v[-1])  # flat extrapolation
+    def efficiency(self, quantity: str, pt, *, default: float = 0.0,
+                   cat=None, y=None) -> np.ndarray:
+        """Interpolate the map at ``pt``, optionally conditioned.
+
+        ``default`` is returned for an empty grid — 0 for efficiencies, but 1.0 for
+        *multiplicative* corrections (escale / SF) so a missing or empty map is a no-op
+        rather than zeroing a jet pT or an event weight.
+
+        ``cat`` selects a CATEGORICAL slice (jet true flavour, tau gen decay mode) and
+        ``y`` a second CONTINUOUS axis (|eta|). Both are per-object arrays, evaluated
+        element-wise. This is the v2 conditioning: a map binned in pT alone is not a
+        detector property but a per-process average, and applying different such averages
+        to signal and background writes the map DIFFERENCE into the learned S/B ratio.
+        Conditioning on the variable that explains the process difference is what makes
+        one universal map applicable everywhere.
+
+        A 1-D map is read unchanged, so v1 files keep working.
+        """
+        return _lookup(self.maps[quantity], pt, default=default, cat=cat, y=y)
 
 
 def retag_btag(events, maps: TuningMaps, rng: np.random.Generator, jets=None) -> ak.Array:
