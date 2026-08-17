@@ -22,6 +22,8 @@ from typing import Optional
 from dataclasses import asdict, dataclass
 
 import awkward as ak
+import functools
+import operator
 import numpy as np
 
 from .io import DelphesEvents
@@ -280,6 +282,60 @@ def gen_taus(gen: ak.Array, *, hadronic_only: bool = False, dr: float = 0.4,
     pairs = ak.cartesian({"i": tau_idx, "a": lep_anc}, nested=True)
     is_leptonic = ak.fill_none(ak.any(pairs["i"] == pairs["a"], axis=-1), False)
     return taus[~is_leptonic]
+
+
+#: charged pi/K -- the "prongs" CMS counts. Electrons and muons are handled separately:
+#: their presence makes the decay leptonic, not a 1-prong hadronic one.
+_GEN_PRONG_PIDS = (211, 321)
+_GEN_PI0_PID = 111
+
+
+def gen_tau_decay_mode(gen: ak.Array, *, last_copy: bool = True,
+                       max_depth: int = 12) -> ak.Array:
+    """CMS gen decay mode per tau: ``5*(n_prong - 1) + n_pi0``; -1 if not hadronic 1/3-prong.
+
+    So DM 0/1/2 are 1-prong with 0/1/2 pi0 and DM 10/11 are 3-prong -- the categories the
+    tau visible mass is essentially determined by (1-prong ~ m_pi; 1-prong+pi0 ~ rho(770);
+    3-prong ~ a1(1260)). That is why it is the conditioning variable the v2 tau maps need:
+    drawing visible mass and energy response independently of it, and of each other, is the
+    single worst of the destroyed-correlation defects, and conditioning on it also makes the
+    genuine-tau maps process-independent by construction.
+
+    Delphes' gen record carries no decay-mode flag and no daughter links, so the counting
+    is done by DESCENT with the same m1 ancestor walk used for the leptonic veto: every
+    stable charged pi/K is attributed to the tau it descends from. pi0 are counted before
+    they decay (they are in the record at status 2); counting their photons instead would
+    double every pi0.
+
+    Returns one entry per LAST-COPY tau, aligned with
+    ``gen_taus(gen, hadronic_only=False, last_copy=last_copy)`` -- pinned by a test,
+    because a silent misalignment here would attach every tau's response to the wrong
+    decay mode.
+    """
+    is_tau = np.abs(gen.pid) == _GEN_TAU_PID
+    tau_idx = ak.local_index(gen)[is_tau]
+    if last_copy:
+        # same rule as gen_taus: a tau is the last copy iff no other tau lists it as mother
+        pairs = ak.cartesian({"i": tau_idx, "m": gen.m1[is_tau]}, nested=True)
+        is_parent = ak.fill_none(ak.any(pairs["i"] == pairs["m"], axis=-1), False)
+        tau_idx = tau_idx[~is_parent]
+
+    def _count(sel):
+        anc = tau_ancestor_index(gen, max_depth=max_depth, rows=sel)
+        anc = anc[anc >= 0]
+        p = ak.cartesian({"i": tau_idx, "a": anc}, nested=True)
+        return ak.fill_none(ak.sum(p["i"] == p["a"], axis=-1), 0)
+
+    stable = gen.status == 1
+    is_prong = stable & functools.reduce(
+        operator.or_, (np.abs(gen.pid) == q for q in _GEN_PRONG_PIDS))
+    is_pi0 = gen.pid == _GEN_PI0_PID
+    is_lep = stable & ((np.abs(gen.pid) == 11) | (np.abs(gen.pid) == 13))
+
+    n_prong, n_pi0, n_lep = _count(is_prong), _count(is_pi0), _count(is_lep)
+    dm = 5 * (n_prong - 1) + n_pi0
+    hadronic = (n_lep == 0) & ((n_prong == 1) | (n_prong == 3))
+    return ak.where(hadronic, dm, -1)
 
 
 def gen_visible_taus(gen: ak.Array, *, dr: float = 0.4, veto: str = "descent") -> ak.Array:
