@@ -28,6 +28,11 @@ FLAT_SCHEMA: dict[str, dict[str, type]] = {
         "btag": np.int32,           # Delphes Jet.BTag bit
         "tautag": np.int32,         # Delphes Jet.TauTag bit
         "hadronFlavour": np.int32,  # Delphes Jet.Flavor
+        # Jet.Charge is already written by the card and read by core.io; it was simply
+        # not carried here. Without it the tau_h leg has no charge, so the opposite-sign
+        # requirement of the CMS selection cannot be applied -- and same-sign pairs are
+        # CMS's ~99%-pure QCD control region, i.e. pure fake background if kept.
+        "charge": np.float32,       # Delphes Jet.Charge (approximate jet charge)
     },
     "Tau": {  # derived: jets passing TauTag
         "pt": np.float32,
@@ -70,7 +75,8 @@ SCALARS: dict[str, type] = {
 
 # Audit trail: flat name -> "DelphesCollection.Leaf [derivation]".
 DELPHES_SOURCE: dict[str, str] = {
-    "Jet": "Jet.{PT,Eta,Phi,Mass}; btag=Jet.BTag; tautag=Jet.TauTag; hadronFlavour=Jet.Flavor",
+    "Jet": "Jet.{PT,Eta,Phi,Mass,Charge}; btag=Jet.BTag; tautag=Jet.TauTag; "
+           "hadronFlavour=Jet.Flavor",
     "Tau": "Jet with Jet.TauTag==1; kinematics from Jet.{PT,Eta,Phi,Mass}",
     "Electron": "Electron.{PT,Eta,Phi,Charge}",
     "Muon": "Muon.{PT,Eta,Phi,Charge}",

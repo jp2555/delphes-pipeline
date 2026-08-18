@@ -372,11 +372,13 @@ class NtupleEvents:
     @cached_property
     def jets(self) -> ak.Array:
         j = self.array["Jet"]
-        # The ntuple drops jet charge (nothing downstream reads it), but the shared
-        # τ-candidate builder zips it, so supply zeros rather than fork that code.
+        # Older ntuples predate the charge column; fall back to zeros so they still
+        # read, but the opposite-sign requirement is then unavailable (and callers that
+        # need it must check, not assume).
+        charge = j.charge if "charge" in ak.fields(j) else ak.zeros_like(j.pt)
         return ak.zip({"pt": j.pt, "eta": j.eta, "phi": j.phi, "mass": j.mass,
                        "btag": j.btag, "tautag": j.tautag, "flavor": j.hadronFlavour,
-                       "charge": ak.zeros_like(j.pt)})
+                       "charge": charge})
 
     @cached_property
     def taus(self) -> ak.Array:

@@ -206,3 +206,22 @@ def test_tvd_ignores_events_outside_the_plotted_range():
     a = np.concatenate([np.zeros(1000), np.full(1000, 999.0)])
     b = np.zeros(1000)
     assert nsbi_overlay._tvd(a, b, -1, 1) < 1e-9
+
+
+def test_jet_charge_is_read_back_when_the_ntuple_carries_it(tmp_path):
+    """Needed for the opposite-sign requirement: the tau_h leg IS a jet."""
+    p = tmp_path / "a.parquet"
+    a = ak.zip({"Jet": ak.Array([[{"pt": 50.0, "eta": 0.0, "phi": 0.0, "mass": 5.0,
+                                   "btag": 1, "tautag": 1, "hadronFlavour": 0,
+                                   "charge": -1.0}]]),
+                "MET_pt": np.ones(1, dtype=np.float32),
+                "MET_phi": np.zeros(1, dtype=np.float32)}, depth_limit=1)
+    ak.to_parquet(a, str(p))
+    ev = NtupleEvents(p)
+    assert ak.to_list(ev.jets.charge) == [[-1.0]]
+
+
+def test_an_older_ntuple_without_charge_still_reads(tmp_path):
+    """Charge was added later; existing files must not become unreadable."""
+    ev = NtupleEvents(_write(tmp_path / "b.parquet", 2))
+    assert ak.all(ev.jets.charge == 0)

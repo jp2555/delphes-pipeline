@@ -38,6 +38,7 @@ def build_jets(ev: DelphesEvents) -> ak.Array:
             "btag": _cast(j.btag, s["btag"]),
             "tautag": _cast(j.tautag, s["tautag"]),
             "hadronFlavour": _cast(j.flavor, s["hadronFlavour"]),
+            "charge": _cast(j.charge, s["charge"]),
         }
     )
 
