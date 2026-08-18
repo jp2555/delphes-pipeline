@@ -117,7 +117,7 @@ def _dR(eta1, phi1, eta2, phi2):
     return np.hypot(eta1 - eta2, _dphi(phi1, phi2))
 
 
-def cms_select(ev, *, btag_min=1, ellipse=True):
+def cms_select(ev, *, btag_min=1, ellipse=True, channels=("mt", "et")):
     """The HIG-25-008 resolved selection, as far as Delphes can support it.
 
     APPLIED (Table 1 / Sec. 5-6):
@@ -174,6 +174,8 @@ def cms_select(ev, *, btag_min=1, ellipse=True):
     out = []
     for ch, lepcoll, chan_mask in (("mt", mu, is_mt), ("et", el, is_et),
                                    ("tt", None, is_tt)):
+        if ch not in channels:
+            continue
         if ch == "tt":
             keep = ak.to_numpy(is_tt)
             if not keep.any():
@@ -309,7 +311,8 @@ def features(ev, *, cms=False, **sel_kw):
     """The 12 required branches plus the Table 6.1 extras the CMS ntuple carries."""
     if cms:
         blocks = cms_select(ev, btag_min=sel_kw.get("btag_min", 1),
-                            ellipse=sel_kw.get("ellipse", True))
+                            ellipse=sel_kw.get("ellipse", True),
+                            channels=sel_kw.get("channels", ("mt", "et")))
         if not blocks:
             return {k: np.array([]) for k in REQUIRED}, 0, 0
         outs = [_build(ev, *b) for b in blocks]
@@ -481,6 +484,12 @@ def main(argv=None):
     ap.add_argument("--cms-selection", action="store_true",
                     help="apply the HIG-25-008 resolved selection instead of the loose "
                          "preselection (see cms_select for what Delphes cannot support)")
+    ap.add_argument("--channels", default="mt,et",
+                    help="channels to select. DEFAULT mt,et -- the semi-leptonic scope "
+                         "the CMS NSBI test uses. Adding 'tt' brings in tau_h tau_h, "
+                         "CMS's most sensitive channel, but then the Delphes sample "
+                         "covers a final state the CMS test does not and the two are no "
+                         "longer comparable.")
     ap.add_argument("--no-ellipse", action="store_true",
                     help="with --cms-selection: skip the elliptical (m_tautau, m_bb) SR")
     ap.add_argument("--lep-veto", action="store_true",
@@ -491,10 +500,11 @@ def main(argv=None):
     import uproot
 
     if args.cms_selection:
+        chans = tuple(c.strip() for c in args.channels.split(",") if c.strip())
         sel_kw = {"cms": True, "btag_min": max(args.btag_min, 1),
-                  "ellipse": not args.no_ellipse}
-        print(f"[sbi] selection: CMS HIG-25-008 resolved, btag_min="
-              f"{sel_kw['btag_min']}, ellipse={sel_kw['ellipse']}")
+                  "ellipse": not args.no_ellipse, "channels": chans}
+        print(f"[sbi] selection: CMS HIG-25-008 resolved, channels={','.join(chans)}, "
+              f"btag_min={sel_kw['btag_min']}, ellipse={sel_kw['ellipse']}")
         print("[sbi]   NOT applied: opposite charge (Jet has no charge field), lepton "
               "ID/isolation/IP, HH-BTAG jet assignment, boosted/VBF categories, trigger")
     else:

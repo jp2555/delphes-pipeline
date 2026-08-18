@@ -437,7 +437,8 @@ def _tt_event(tmp, n=3, tau_pt=(60.0, 45.0)):
 
 def test_a_tau_h_tau_h_event_is_selected_and_labelled(tmp_path):
     p = _tt_event(tmp_path)
-    d, _, _ = S.features(NtupleEvents(p), cms=True, ellipse=False)
+    d, _, _ = S.features(NtupleEvents(p), cms=True, ellipse=False,
+                         channels=("mt", "et", "tt"))
     assert len(d["m_hh"]) == 3
     assert set(d["channel"]) == {float(S.CHANNEL["tt"])}
 
@@ -445,7 +446,8 @@ def test_a_tau_h_tau_h_event_is_selected_and_labelled(tmp_path):
 def test_a_soft_second_tau_fails_the_double_tau_threshold(tmp_path):
     """Table 1: the double-tau trigger requires pT > 40 on BOTH legs."""
     p = _tt_event(tmp_path, tau_pt=(60.0, 30.0))
-    d, _, _ = S.features(NtupleEvents(p), cms=True, ellipse=False)
+    d, _, _ = S.features(NtupleEvents(p), cms=True, ellipse=False,
+                         channels=("mt", "et", "tt"))
     assert len(d["m_hh"]) == 0
 
 
@@ -460,3 +462,17 @@ def test_a_leptonic_event_is_not_classified_as_tau_h_tau_h(tmp_path):
     p = _cms_event(tmp_path)
     d, _, _ = S.features(NtupleEvents(p), cms=True, ellipse=False)
     assert set(d["channel"]) == {float(S.CHANNEL["mt"])}
+
+
+def test_tau_h_tau_h_is_off_by_default(tmp_path):
+    """The CMS NSBI test is semi-leptonic only; including tt would make the Delphes
+    sample cover a final state the comparison does not."""
+    p = _tt_event(tmp_path)
+    assert len(S.features(NtupleEvents(p), cms=True, ellipse=False)[0]["m_hh"]) == 0
+
+
+def test_tau_h_tau_h_can_be_enabled_explicitly(tmp_path):
+    p = _tt_event(tmp_path)
+    d, _, _ = S.features(NtupleEvents(p), cms=True, ellipse=False,
+                         channels=("mt", "et", "tt"))
+    assert len(d["m_hh"]) == 3 and set(d["channel"]) == {float(S.CHANNEL["tt"])}
