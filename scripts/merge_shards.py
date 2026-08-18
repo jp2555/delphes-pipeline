@@ -49,6 +49,11 @@ def _plan(outdir):
 # merged signal sample with every kl point in it would be unusable for NSBI -- the
 # method is entirely about ratios BETWEEN kl hypotheses. Recover it here, from the
 # plan, and write it as a column so the merged file is self-describing.
+#: dataset_id for events whose shard straddled two primary datasets. NOT a dataset:
+#: their cross section is genuinely ambiguous, so they are marked and counted rather
+#: than attributed to whichever contributed more files.
+MIXED_DATASET = -1
+
 _KL_RE = re.compile(r"kl-(m?)(\d+)p(\d+)")
 
 
@@ -108,20 +113,27 @@ def _group(entries, target_bytes):
 def write_group(job):
     """Write ONE output file from a group of shards. Module level, so it can be pickled
     to a worker process."""
-    name, part, entries, dest, datasets = job
+    name, part, entries, dest, datasets, allow_mixed = job
     out_path = os.path.join(dest, f"{name}.{part:04d}.parquet")
     writer, schema, rows = None, None, 0
     sumw = sumw_sf = 0.0
+    mixed = 0
     try:
         for e in entries:
             kl = _kl_of(e)
             ds = _dataset_of(e)
-            if len(ds) > 1:
+            if len(ds) > 1 and not allow_mixed:
                 raise ValueError(
-                    f"shard {e['sample']}.{e['shard']:04d} spans {len(ds)} datasets "
+                    f"shard {e['sample']}.{e['shard']:04d} straddles {len(ds)} datasets "
                     f"({', '.join(ds)}) — they have different cross sections and the "
-                    f"events cannot be labelled")
-            dsid = datasets.setdefault(ds[0], len(datasets)) if ds else None
+                    f"events cannot be labelled. Shards are cut on accumulated BYTES "
+                    f"across the whole file list, so one straddles each dataset "
+                    f"boundary. Pass --allow-mixed-datasets to label those events -1 "
+                    f"(unnormalisable, and counted in the manifest) instead of aborting.")
+            if len(ds) > 1:
+                dsid = MIXED_DATASET      # sentinel: known-unattributable, never guessed
+            else:
+                dsid = datasets.setdefault(ds[0], len(datasets)) if ds else None
             if kl is None and dsid is None:
                 t = pq.read_table(e["out"])          # fast path: straight arrow
             else:
@@ -134,6 +146,8 @@ def write_group(job):
                     a = ak.with_field(a, np.full(len(a), kl, dtype="float32"), "kl")
                 if dsid is not None:
                     a = ak.with_field(a, np.full(len(a), dsid, dtype="int16"), "dataset_id")
+                    if dsid == MIXED_DATASET:
+                        mixed += len(a)
                 t = ak.to_arrow_table(a)
             if schema is None:
                 schema = t.schema
@@ -156,10 +170,11 @@ def write_group(job):
     finally:
         if writer is not None:
             writer.close()
-    return out_path, rows, sumw, sumw_sf
+    return out_path, rows, sumw, sumw_sf, mixed
 
 
-def merge_sample(name, entries, dest, target_bytes, jobs=1, datasets=None):
+def merge_sample(name, entries, dest, target_bytes, jobs=1, datasets=None,
+                 allow_mixed=False):
     """Stream ``entries`` into ``dest/name.NNNN.parquet`` files of ~target size."""
     datasets = {} if datasets is None else datasets
     # assign ids up front so every worker agrees on them
@@ -167,14 +182,16 @@ def merge_sample(name, entries, dest, target_bytes, jobs=1, datasets=None):
         for d in _dataset_of(e):
             datasets.setdefault(d, len(datasets))
     groups = _group(entries, target_bytes)
-    todo = [(name, i, g, dest, dict(datasets)) for i, g in enumerate(groups)]
+    todo = [(name, i, g, dest, dict(datasets), allow_mixed)
+            for i, g in enumerate(groups)]
     if jobs <= 1 or len(todo) <= 1:
         results = [write_group(j) for j in todo]
     else:
         with ProcessPoolExecutor(max_workers=min(jobs, len(todo))) as ex:
             results = list(ex.map(write_group, todo))
     return ([r[0] for r in results], sum(r[1] for r in results),
-            sum(r[2] for r in results), sum(r[3] for r in results))
+            sum(r[2] for r in results), sum(r[3] for r in results),
+            sum(r[4] for r in results))
 
 
 def main(argv=None):
@@ -189,6 +206,11 @@ def main(argv=None):
     ap.add_argument("--sample", action="append", metavar="NAME",
                     help="merge only this sample (repeatable). Lets a finished sample "
                          "be merged for real while another is still being recovered.")
+    ap.add_argument("--allow-mixed-datasets", action="store_true",
+                    help="label events from a shard spanning two primary datasets with "
+                         "dataset_id=-1 instead of aborting. Those events cannot be "
+                         "normalised (the cross sections differ) and must be dropped "
+                         "downstream; the count is recorded in the manifest.")
     ap.add_argument("--force", action="store_true",
                     help="merge even when shards are missing or duplicated — the merged "
                          "sample will then be silently short")
@@ -232,8 +254,9 @@ def main(argv=None):
         t1 = time.perf_counter()
         try:
             datasets = {}
-            files, rows, sumw, sumw_sf = merge_sample(
-                name, entries, dest, args.target_gb * 1e9, jobs=jobs, datasets=datasets)
+            files, rows, sumw, sumw_sf, mixed = merge_sample(
+                name, entries, dest, args.target_gb * 1e9, jobs=jobs, datasets=datasets,
+                allow_mixed=args.allow_mixed_datasets)
         except ValueError as exc:
             # raised in a worker; surface it as a clean abort rather than a traceback
             raise SystemExit(f"[merge] {exc}")
@@ -253,6 +276,7 @@ def main(argv=None):
                          # dataset_id column -> CMS primary dataset. Each carries its own
                          # cross section, so this is what makes the sample normalisable.
                          "datasets": {v: k for k, v in datasets.items()},
+                         "mixed_dataset_events": mixed,
                          "sum_genweight_x_lepton_sf": sumw_sf,
                          "bytes": size,
                          "maps": sorted({e["maps"] for e in entries}),

@@ -427,4 +427,35 @@ def test_a_shard_spanning_two_datasets_aborts(tmp_path):
             [{"sample": "ttbar", "shard": 0, "out": "x",
               "files": ["/s/TTto4Q_TuneCP5_x_Delphes_v1/a.root",
                         "/s/TTto2L2Nu_TuneCP5_x_Delphes_v1/b.root"]}],
-            str(tmp_path), {}))
+            str(tmp_path), {}, False))
+
+
+def test_a_boundary_straddling_shard_is_labelled_not_guessed(tmp_path):
+    """Shards are cut on accumulated BYTES across the whole file list, so one straddles
+    each dataset boundary. Attributing it to whichever contributed more files would be a
+    fabricated cross section; it is marked -1 and counted instead."""
+    out = tmp_path / "out"
+    (out / "_plan").mkdir(parents=True)
+    base = "root://h//store/{}_TuneCP5_13p6TeV_powheg-pythia8_Delphes_v1/t/f.root"
+    shards = [
+        {"sample": "ttbar", "shard": 0, "seed": 0, "maps": "none", "maps_sha": "untuned",
+         "files": [base.format("TTto2L2Nu")], "out": str(out / "ttbar.0000.parquet")},
+        {"sample": "ttbar", "shard": 1, "seed": 1, "maps": "none", "maps_sha": "untuned",
+         "files": [base.format("TTto2L2Nu"), base.format("TTto4Q")],   # straddles
+         "out": str(out / "ttbar.0001.parquet")},
+    ]
+    (out / "_plan" / "manifest.json").write_text(json.dumps({"shards": shards}))
+    for e in shards:
+        ak.to_parquet(ak.zip({"genWeight": np.ones(10, dtype=np.float32),
+                              "shard": np.full(10, e["shard"], dtype=np.int32)}), e["out"])
+
+    with pytest.raises(ValueError, match="straddles"):
+        merge_shards.write_group(("ttbar", 0, [shards[1]], str(out), {}, False))
+
+    assert merge_shards.main(["--out", str(out), "--target-gb", "1e-9",
+                              "--allow-mixed-datasets"]) == 0
+    t = ak.from_parquet(str(out / "merged" / "ttbar.*.parquet"))
+    ids = sorted(set(int(i) for i in t.dataset_id))
+    assert merge_shards.MIXED_DATASET in ids, "the straddling shard must be marked"
+    man = json.load(open(out / "merged" / "manifest.json"))["ttbar"]
+    assert man["mixed_dataset_events"] == 10

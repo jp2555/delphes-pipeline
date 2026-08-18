@@ -122,6 +122,11 @@ def build(merged_manifest: dict, cms: dict, *, prefer: str | None = None,
             if not per_id:
                 print(f"[meta] WARNING {sample}: could not scan per-dataset counts; "
                       f"nevents will be left null rather than guessed")
+        mixed = info.get("mixed_dataset_events") or 0
+        if mixed:
+            print(f"[meta] {sample}: {mixed:,} events came from shards straddling two "
+                  f"primary datasets (dataset_id = -1). They have no unambiguous cross "
+                  f"section and MUST be dropped downstream.")
         for dsid, dataset in sorted(datasets.items(), key=lambda kv: int(kv[0])):
             nick, cms_entry = _match(cms, dataset, prefer)
             if nick is None:
@@ -158,6 +163,7 @@ def build(merged_manifest: dict, cms: dict, *, prefer: str | None = None,
                 "dataset_id": int(dsid),
                 "subtree": info.get("subtree"),
                 "maps_sha": info.get("maps_sha"),
+                "mixed_dataset_events_in_sample": mixed or None,
             }
             if shared:
                 entry["note"] = (
