@@ -377,3 +377,86 @@ def test_what_delphes_cannot_apply_is_documented_not_silently_skipped():
     doc = S.cms_select.__doc__
     for missing in ("opposite charge", "isolation", "HH-BTAG", "boosted", "trigger"):
         assert missing in doc, missing
+
+
+# --------------------------------------------------------------------------- #
+# The CMS converter maps the BRANCH mass_tautaubb -> m_hh; ours is computed from
+# the VISIBLE tautau system. Those are different observables, and a config cut of
+# m_hh > 250 behaves completely differently on the two -- removing 42% of the
+# kl=5 basis sample against 9% of kl=1, which distorts the morphing basis.
+# --------------------------------------------------------------------------- #
+def test_the_fastmtt_corrected_masses_are_carried_alongside(tmp_path):
+    p = _cms_event(tmp_path)
+    d, _, _ = S.features(NtupleEvents(p), cms=True, ellipse=False)
+    for f in ("m_tautau_fastmtt", "m_hh_fastmtt", "pt_hh_fastmtt"):
+        assert f in d, f
+
+
+def test_the_corrected_masses_exceed_the_visible_ones(tmp_path):
+    """FastMTT divides by x1 x2 <= 1, so it can only raise the mass."""
+    p = _cms_event(tmp_path)
+    d, _, _ = S.features(NtupleEvents(p), cms=True, ellipse=False)
+    ok = np.isfinite(d["m_tautau_fastmtt"])
+    assert ok.any()
+    assert np.all(d["m_tautau_fastmtt"][ok] >= d["m_tautau"][ok] - 1e-6)
+    assert np.all(d["m_hh_fastmtt"][ok] >= d["m_hh"][ok] - 1e-6)
+
+
+def test_the_visible_definitions_are_unchanged(tmp_path):
+    """m_hh / m_tautau must stay the CMS converter's visible ones; nothing replaced."""
+    p = _cms_event(tmp_path)
+    d, _, _ = S.features(NtupleEvents(p), cms=True, ellipse=False)
+    lep = (40.0, -0.2, 2.0, 0.0)
+    tau = (45.0, 1.0, 1.4, 1.2)
+    assert d["m_tautau"][0] == pytest.approx(S._sum_p4(lep, tau)[3], rel=1e-9)
+
+
+# --------------------------------------------------------------------------- #
+# tau_h tau_h is CMS's most sensitive channel and a lepton-requiring converter
+# drops it silently.
+# --------------------------------------------------------------------------- #
+def _tt_event(tmp, n=3, tau_pt=(60.0, 45.0)):
+    jets = [[{"pt": 90.0, "eta": 0.5, "phi": 0.0, "mass": 8.0, "btag": 1,
+              "tautag": 0, "hadronFlavour": 5},
+             {"pt": 70.0, "eta": -0.4, "phi": 2.8, "mass": 7.0, "btag": 1,
+              "tautag": 0, "hadronFlavour": 5},
+             {"pt": tau_pt[0], "eta": 1.0, "phi": 1.4, "mass": 1.2, "btag": 0,
+              "tautag": 1, "hadronFlavour": 0},
+             {"pt": tau_pt[1], "eta": -1.1, "phi": 4.0, "mass": 1.1, "btag": 0,
+              "tautag": 1, "hadronFlavour": 0}]] * n
+    empty = ak.Array([[{"pt": 9.0, "eta": 0.0, "phi": 0.0, "charge": 1}]] * n)[:, :0]
+    f = {"Jet": ak.Array(jets), "Electron": empty, "Muon": empty,
+         "Tau": ak.Array([[{"pt": tau_pt[0], "eta": 1.0, "phi": 1.4, "mass": 1.2}]] * n),
+         "MET_pt": np.full(n, 60.0, dtype=np.float32),
+         "MET_phi": np.full(n, 1.0, dtype=np.float32),
+         "genWeight": np.ones(n, dtype=np.float32)}
+    p = tmp / "tt.parquet"
+    ak.to_parquet(ak.zip(f, depth_limit=1), str(p))
+    return p
+
+
+def test_a_tau_h_tau_h_event_is_selected_and_labelled(tmp_path):
+    p = _tt_event(tmp_path)
+    d, _, _ = S.features(NtupleEvents(p), cms=True, ellipse=False)
+    assert len(d["m_hh"]) == 3
+    assert set(d["channel"]) == {float(S.CHANNEL["tt"])}
+
+
+def test_a_soft_second_tau_fails_the_double_tau_threshold(tmp_path):
+    """Table 1: the double-tau trigger requires pT > 40 on BOTH legs."""
+    p = _tt_event(tmp_path, tau_pt=(60.0, 30.0))
+    d, _, _ = S.features(NtupleEvents(p), cms=True, ellipse=False)
+    assert len(d["m_hh"]) == 0
+
+
+def test_tau_h_tau_h_is_absent_from_the_loose_preselection(tmp_path):
+    """The preselection requires a light lepton, so it drops the channel entirely."""
+    p = _tt_event(tmp_path)
+    assert len(S.features(NtupleEvents(p))[0]["m_hh"]) == 0
+
+
+def test_a_leptonic_event_is_not_classified_as_tau_h_tau_h(tmp_path):
+    """Sec. 5 priority: a muon makes it mt even when two tau_h are present."""
+    p = _cms_event(tmp_path)
+    d, _, _ = S.features(NtupleEvents(p), cms=True, ellipse=False)
+    assert set(d["channel"]) == {float(S.CHANNEL["mt"])}

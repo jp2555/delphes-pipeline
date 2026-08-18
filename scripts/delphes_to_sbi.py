@@ -53,7 +53,7 @@ COLUMNS = ["Jet", "Electron", "Muon", "genWeight", "lepton_sf", "dataset_id", "k
            "MET_pt", "MET_phi"]
 
 #: channel code on leg 1, so mt/et can be separated after the fact
-CHANNEL = {"mt": 0, "et": 1}
+CHANNEL = {"mt": 0, "et": 1, "tt": 2}
 
 # --------------------------------------------------------------------------- #
 # CMS HIG-25-008 (Run-3 bbtautau, 172/fb) selection, Table 1 and Sections 5-6.
@@ -62,6 +62,9 @@ CHANNEL = {"mt": 0, "et": 1}
 CMS_SEL = {
     "mt": {"lep_pt": 22.0, "lep_eta": 2.4, "tau_pt": 32.0},   # cross mu-tau trigger
     "et": {"lep_pt": 25.0, "lep_eta": 2.5, "tau_pt": 35.0},   # cross e-tau trigger
+    # tau_h tau_h: double-tau trigger, pT > 40(35) on BOTH legs (Table 1). CMS's most
+    # sensitive channel, and the one a lepton-requiring converter silently drops.
+    "tt": {"lep_pt": None, "lep_eta": None, "tau_pt": 40.0},
 }
 CMS_TAU_ETA = 2.5
 CMS_JET_PT, CMS_JET_ETA, CMS_JET_DR = 20.0, 2.5, 0.5     # H->bb resolved, Sec. 5
@@ -71,6 +74,7 @@ CMS_PAIR_DR = 0.5                                        # resolved tau-tau, Tab
 CMS_ELLIPSE = {
     "mt": ((116.0, 61.0), (114.0, 228.0)),
     "et": ((119.0, 57.0), (109.0, 232.0)),
+    "tt": ((117.0, 54.0), (134.0, 169.0)),
 }
 
 #: kept in step with merge_shards.MIXED_DATASET
@@ -163,13 +167,26 @@ def cms_select(ev, *, btag_min=1, ellipse=True):
     # additional-lepton veto (Table 1): no second light lepton of either flavour
     veto = ((n_mu + n_el) == 1)
 
+    # Sec. 5: no muon and no electron, but two tau_h -> tau_h tau_h
+    tau_tt = tau_all[tau_all.pt > CMS_SEL["tt"]["tau_pt"]]
+    is_tt = (n_mu == 0) & (n_el == 0) & (ak.num(tau_tt) >= 2)
+
     out = []
-    for ch, lepcoll, chan_mask in (("mt", mu, is_mt), ("et", el, is_et)):
-        tau = tau_all[tau_all.pt > CMS_SEL[ch]["tau_pt"]]
-        keep = ak.to_numpy(chan_mask & veto & (ak.num(tau) >= 1))
-        if not keep.any():
-            continue
-        L, T, J = lepcoll[keep][:, :1], tau[keep][:, :1], j[keep]
+    for ch, lepcoll, chan_mask in (("mt", mu, is_mt), ("et", el, is_et),
+                                   ("tt", None, is_tt)):
+        if ch == "tt":
+            keep = ak.to_numpy(is_tt)
+            if not keep.any():
+                continue
+            # leg 1 is the harder tau_h (CMS sorts by isolation; Delphes has none)
+            pair = tau_tt[keep][:, :2]
+            L, T, J = pair[:, 0:1], pair[:, 1:2], j[keep]
+        else:
+            tau = tau_all[tau_all.pt > CMS_SEL[ch]["tau_pt"]]
+            keep = ak.to_numpy(chan_mask & veto & (ak.num(tau) >= 1))
+            if not keep.any():
+                continue
+            L, T, J = lepcoll[keep][:, :1], tau[keep][:, :1], j[keep]
         far_pair = _dR(L[:, 0].eta, L[:, 0].phi, T[:, 0].eta, T[:, 0].phi) > CMS_PAIR_DR
         ok = ak.to_numpy(far_pair)
         L, T, J = L[ok], T[ok], J[ok]
@@ -191,24 +208,33 @@ def cms_select(ev, *, btag_min=1, ellipse=True):
         extra = {"n_jets": ak.to_numpy(ak.num(J)),
                  "n_btag": ak.to_numpy(ak.sum(J.btag == 1, axis=1)),
                  "channel": np.full(len(idx), float(CHANNEL[ch]))}
+        extra["fastmtt"] = _fastmtt(ev, L, T, idx, ch)
         if ellipse:
             keep_e = _in_ellipse(ev, L, T, bb, idx, ch)
             L, T, bb, idx = L[keep_e], T[keep_e], bb[keep_e], idx[keep_e]
-            extra = {k: v[keep_e] for k, v in extra.items()}
+            extra = {k: (tuple(a[keep_e] for a in v) if k == "fastmtt" else v[keep_e])
+                     for k, v in extra.items()}
         out.append((L, T, bb, idx, extra))
     return out
 
 
-def _in_ellipse(ev, lep, tau, bb, idx, ch):
-    """Eqs. 2-4, on the FastMTT mass -- CMS's ellipse is NOT on the visible mass."""
+def _fastmtt(ev, lep, tau, idx, ch):
+    """(m_tautau, x1, x2) from the covariance-free FastMTT fit."""
     from delphes_pipeline.extensions.mtautau import _leg, fastmtt_mass
     met = ak.to_numpy(ev.array["MET_pt"])[idx].astype(np.float64)
     phi = ak.to_numpy(ev.array["MET_phi"])[idx].astype(np.float64)
+    had1 = 1.0 if ch == "tt" else 0.0            # leg 1 is a tau_h only in tau_h tau_h
     l1 = ak.zip({"pt": lep.pt, "eta": lep.eta, "phi": lep.phi, "mass": lep.mass,
-                 "is_tauh": ak.zeros_like(lep.pt)})
+                 "is_tauh": ak.full_like(lep.pt, had1)})
     l2 = ak.zip({"pt": tau.pt, "eta": tau.eta, "phi": tau.phi, "mass": tau.mass,
                  "is_tauh": ak.ones_like(tau.pt)})
-    m_tt = fastmtt_mass(_leg(l1), _leg(l2), met * np.cos(phi), met * np.sin(phi))
+    return fastmtt_mass(_leg(l1), _leg(l2), met * np.cos(phi), met * np.sin(phi),
+                        with_x=True)
+
+
+def _in_ellipse(ev, lep, tau, bb, idx, ch):
+    """Eqs. 2-4, on the FastMTT mass -- CMS's ellipse is NOT on the visible mass."""
+    m_tt = _fastmtt(ev, lep, tau, idx, ch)[0]
     m_bb = _sum_p4((ak.to_numpy(bb[:, 0].pt), ak.to_numpy(bb[:, 0].eta),
                     ak.to_numpy(bb[:, 0].phi), ak.to_numpy(bb[:, 0].mass)),
                    (ak.to_numpy(bb[:, 1].pt), ak.to_numpy(bb[:, 1].eta),
@@ -287,7 +313,8 @@ def features(ev, *, cms=False, **sel_kw):
         if not blocks:
             return {k: np.array([]) for k in REQUIRED}, 0, 0
         outs = [_build(ev, *b) for b in blocks]
-        merged = {k: np.concatenate([o[0][k] for o in outs]) for k in outs[0][0]}
+        keys = set(outs[0][0]).intersection(*[set(o[0]) for o in outs])
+        merged = {k: np.concatenate([o[0][k] for o in outs]) for k in keys}
         return merged, sum(o[1] for o in outs), sum(o[2] for o in outs)
     return _build(ev, *select(ev, **sel_kw))
 
@@ -343,6 +370,25 @@ def _build(ev, lep, tau, bb, idx, extra):
         "channel": (extra["channel"] if "channel" in extra
                     else g(lep, "channel")).astype(np.float64),
     }
+    if met_pt is not None and extra.get("fastmtt") is not None:
+        # The CMS converter maps the BRANCH mass_tautaubb -> m_hh; ours is computed from
+        # the VISIBLE tautau system, so the two are almost certainly different
+        # observables. Carry the FastMTT-corrected versions alongside rather than
+        # replacing anything, so the two can be compared and the right one chosen.
+        m_tt, x1, x2 = extra["fastmtt"]
+        def _full(leg, x):
+            px, py, pz, e = _p4(*leg)
+            nu = np.sqrt(px * px + py * py + pz * pz) * (1 - x) / np.maximum(x, 1e-9)
+            return px / x, py / x, pz / x, e + nu
+        t1f, t2f = _full(l1, x1), _full(l2, x2)
+        pxs = [t1f[i] + t2f[i] for i in range(4)]
+        hbbp = _p4(*hbb)
+        tot = [hbbp[i] + pxs[i] for i in range(4)]
+        out["m_tautau_fastmtt"] = m_tt
+        out["m_hh_fastmtt"] = np.sqrt(np.maximum(
+            tot[3] ** 2 - tot[0] ** 2 - tot[1] ** 2 - tot[2] ** 2, 0.0))
+        out["pt_hh_fastmtt"] = np.hypot(tot[0], tot[1])
+
     if met_pt is not None:
         # CMS mt_tot: quadrature of the three transverse masses of (l, tau, MET)
         out["mt_tot"] = np.sqrt(_mt(l1[0], l1[2], met_pt, met_phi) ** 2
