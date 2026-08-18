@@ -45,7 +45,8 @@ def _write(path, n=4, kl=None):
 
 
 def _feats(tmp_path, **kw):
-    return S.features(NtupleEvents(_write(tmp_path / "a.parquet", **kw)))[0]
+    sel = {k: kw.pop(k) for k in ("btag_min", "lep_veto") if k in kw}
+    return S.features(NtupleEvents(_write(tmp_path / "a.parquet", **kw)), **sel)[0]
 
 
 def test_every_required_branch_is_produced(tmp_path):
@@ -228,3 +229,64 @@ def test_streaming_skips_files_holding_no_events_of_the_requested_kl(tmp_path):
     _write(d / "signal.0001.parquet", n=4, kl=5.0)
     _, _, _, n_read = S.features_streamed(d, kl=5.0)
     assert n_read == 4, "the kl=0 file must contribute nothing"
+
+
+# --------------------------------------------------------------------------- #
+# The converter applies a PRESELECTION, not the CMS analysis selection. Making
+# that explicit — and giving the knobs to tighten it — is what lets the flat
+# file be studied post-hoc instead of guessed at from yields.
+# --------------------------------------------------------------------------- #
+def test_by_default_an_event_with_no_btag_still_passes(tmp_path):
+    """This is why signal/ttbar acceptance is ~2.5 and not hundreds."""
+    p = _write(tmp_path / "a.parquet", n=3)
+    a = ak.from_parquet(str(p))
+    j = a["Jet"]
+    a = ak.with_field(a, ak.with_field(j, ak.zeros_like(j.btag), "btag"), "Jet")
+    ak.to_parquet(a, str(p))
+    d, _, _ = S.features(NtupleEvents(p))
+    assert len(d["m_hh"]) == 3, "an untagged event passes the preselection"
+    assert set(d["n_btag"]) == {0.0}
+
+
+def test_btag_min_two_rejects_untagged_events(tmp_path):
+    p = _write(tmp_path / "a.parquet", n=3)
+    a = ak.from_parquet(str(p))
+    j = a["Jet"]
+    a = ak.with_field(a, ak.with_field(j, ak.zeros_like(j.btag), "btag"), "Jet")
+    ak.to_parquet(a, str(p))
+    d, _, _ = S.features(NtupleEvents(p), btag_min=2)
+    assert len(d["m_hh"]) == 0
+
+
+def test_btag_min_two_keeps_a_double_tagged_event(tmp_path):
+    d = _feats(tmp_path, n=2, btag_min=2)
+    assert len(d["m_hh"]) == 2 and set(d["btag_1"]) == {1.0}
+
+
+def test_the_channel_label_distinguishes_mt_from_et(tmp_path):
+    """Without it the flat file cannot be split into mt/et after the fact."""
+    d = _feats(tmp_path, n=2)
+    assert set(d["channel"]) == {float(S.CHANNEL["mt"])}, "fixture has muons"
+
+
+def test_the_table_61_extras_are_present(tmp_path):
+    d = _feats(tmp_path, n=2)
+    for f in ("pt_l1", "pt_b1", "pt_vis", "btag_1", "btag_2", "n_jets", "n_btag",
+              "channel", "mt_tot", "met"):
+        assert f in d, f
+
+
+def test_lepton_veto_rejects_an_event_with_two_leptons(tmp_path):
+    p = _write(tmp_path / "a.parquet", n=2)
+    a = ak.from_parquet(str(p))
+    m = a["Muon"]
+    a = ak.with_field(a, ak.concatenate([m, m], axis=1), "Muon")
+    ak.to_parquet(a, str(p))
+    assert len(S.features(NtupleEvents(p))[0]["m_hh"]) == 2
+    assert len(S.features(NtupleEvents(p), lep_veto=True)[0]["m_hh"]) == 0
+
+
+def test_btag_branches_are_bits_not_scores(tmp_path):
+    """Delphes has no tagger, only a parameterised efficiency: btag is 0/1, NOT UParT."""
+    d = _feats(tmp_path, n=2)
+    assert set(d["btag_1"]) <= {0.0, 1.0}

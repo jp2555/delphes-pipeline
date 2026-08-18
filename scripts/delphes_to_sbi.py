@@ -49,7 +49,11 @@ from delphes_pipeline.core.io import (NtupleEvents, available_kl,
 #: the only columns these features touch. GenPart is ~99% of the ntuple and is never
 #: read: no FastMTT here, so not even MET is needed -- the CMS converter's m_tautau is
 #: the VISIBLE di-tau mass.
-COLUMNS = ["Jet", "Electron", "Muon", "genWeight", "lepton_sf", "dataset_id", "kl"]
+COLUMNS = ["Jet", "Electron", "Muon", "genWeight", "lepton_sf", "dataset_id", "kl",
+           "MET_pt", "MET_phi"]
+
+#: channel code on leg 1, so mt/et can be separated after the fact
+CHANNEL = {"mt": 0, "et": 1}
 
 #: kept in step with merge_shards.MIXED_DATASET
 MIXED_DATASET = -1
@@ -93,19 +97,30 @@ def _dR(eta1, phi1, eta2, phi2):
 
 def select(ev, *, lep_pt_min=20.0, lep_eta_max=2.4,
            tau_pt_min=20.0, tau_eta_max=2.3,
-           jet_pt_min=20.0, jet_eta_max=2.4, clean_dr=0.4):
-    """The mt/et selection: one light lepton, one tau_h, two b-tagged jets.
+           jet_pt_min=20.0, jet_eta_max=2.4, clean_dr=0.4,
+           btag_min=0, lep_veto=False):
+    """The mt/et preselection: one light lepton, one tau_h, two jets.
 
     Jets are cleaned against BOTH selected legs before the b pair is chosen. On Delphes a
     tau_h *is* an AK4 jet, so without that removal the tau would be free to enter the b
     pair -- an artefact that lands on dr_bb and m_bb.
+
+    **This is a PRESELECTION, deliberately looser than the CMS analysis.** By default
+    ``btag_min=0``: the b pair is the two highest-btag jets, and an event with no tag at
+    all still passes. That is why the signal/ttbar acceptance ratio is ~2.5 rather than
+    the hundreds a real bbtautau selection gives. ``btag_min`` (the card's b-tag bit is
+    UParT-AK4 Medium, cut 0.1272, per card PATCH-6) and ``lep_veto`` tighten it; the
+    remaining CMS handles -- opposite charge, m_tautau window, m_T cuts, trigger,
+    b-tag categorisation -- are NOT applied here.
     """
     e, m = ev.electrons, ev.muons
     lep = ak.concatenate([
         ak.zip({"pt": e.pt, "eta": e.eta, "phi": e.phi,
-                "mass": ak.zeros_like(e.pt)}),
+                "mass": ak.zeros_like(e.pt),
+                "channel": ak.full_like(e.pt, CHANNEL["et"])}),
         ak.zip({"pt": m.pt, "eta": m.eta, "phi": m.phi,
-                "mass": ak.zeros_like(m.pt)}),
+                "mass": ak.zeros_like(m.pt),
+                "channel": ak.full_like(m.pt, CHANNEL["mt"])}),
     ], axis=1)
     lep = lep[(lep.pt > lep_pt_min) & (np.abs(lep.eta) <= lep_eta_max)]
     lep = lep[ak.argsort(lep.pt, axis=1, ascending=False, stable=True)]
@@ -114,7 +129,9 @@ def select(ev, *, lep_pt_min=20.0, lep_eta_max=2.4,
     tau = j[(j.tautag == 1) & (j.pt > tau_pt_min) & (np.abs(j.eta) <= tau_eta_max)]
     tau = tau[ak.argsort(tau.pt, axis=1, ascending=False, stable=True)]
 
-    keep = ak.to_numpy((ak.num(lep) >= 1) & (ak.num(tau) >= 1))
+    n_lep = ak.num(lep)
+    ok_lep = (n_lep == 1) if lep_veto else (n_lep >= 1)
+    keep = ak.to_numpy(ok_lep & (ak.num(tau) >= 1))
     lep, tau, j = lep[keep][:, :1], tau[keep][:, :1], j[keep]
 
     j = j[(j.pt > jet_pt_min) & (np.abs(j.eta) <= jet_eta_max)]
@@ -126,18 +143,33 @@ def select(ev, *, lep_pt_min=20.0, lep_eta_max=2.4,
     bb = j[ak.argsort(j.btag, axis=1, ascending=False, stable=True)][:, :2]
 
     ok = ak.to_numpy(ak.num(bb) >= 2)
+    if btag_min:
+        # count over the CLEANED jets, then require it of the pair actually used
+        ok &= ak.to_numpy(ak.sum(bb.btag == 1, axis=1) >= btag_min)
     idx = np.flatnonzero(keep)[ok]
-    return lep[ok][:, 0], tau[ok][:, 0], bb[ok], idx
+    extra = {"n_jets": ak.to_numpy(ak.num(j[ok])),
+             "n_btag": ak.to_numpy(ak.sum(j[ok].btag == 1, axis=1))}
+    return lep[ok][:, 0], tau[ok][:, 0], bb[ok], idx, extra
 
 
-def features(ev):
-    """The 12 required branches, using the CMS converter's definitions."""
-    lep, tau, bb, idx = select(ev)
+def _mt(pt1, phi1, pt2, phi2):
+    return np.sqrt(np.maximum(2 * pt1 * pt2 * (1 - np.cos(phi1 - phi2)), 0.0))
+
+
+def features(ev, **sel_kw):
+    """The 12 required branches plus the Table 6.1 extras the CMS ntuple carries."""
+    lep, tau, bb, idx, extra = select(ev, **sel_kw)
     g = lambda c, k: ak.to_numpy(c[k])                       # noqa: E731
     b1 = (g(bb[:, 0], "pt"), g(bb[:, 0], "eta"), g(bb[:, 0], "phi"), g(bb[:, 0], "mass"))
     b2 = (g(bb[:, 1], "pt"), g(bb[:, 1], "eta"), g(bb[:, 1], "phi"), g(bb[:, 1], "mass"))
     l1 = (g(lep, "pt"), g(lep, "eta"), g(lep, "phi"), g(lep, "mass"))
     l2 = (g(tau, "pt"), g(tau, "eta"), g(tau, "phi"), g(tau, "mass"))
+
+    if "MET_pt" in ak.fields(ev.array):
+        met_pt = ak.to_numpy(ev.array["MET_pt"])[idx].astype(np.float64)
+        met_phi = ak.to_numpy(ev.array["MET_phi"])[idx].astype(np.float64)
+    else:
+        met_pt = met_phi = None
 
     hbb = _sum_p4(b1, b2)
     htt = _sum_p4(l1, l2)                                     # VISIBLE, no FastMTT
@@ -163,7 +195,25 @@ def features(ev):
         "pt_h1": hbb[0],            # bb by CONTENT, not the harder Higgs
         "pt_h2": htt[0],
         "weights": w,
+        # --- Table 6.1 extras: present in the CMS ntuple, absent here until now, and
+        # needed for any post-hoc channel or selection study on the flat file ---
+        "pt_l1": l1[0],
+        "pt_b1": b1[0],
+        "pt_vis": htt[0],
+        "btag_1": g(bb[:, 0], "btag").astype(np.float64),
+        "btag_2": g(bb[:, 1], "btag").astype(np.float64),
+        "n_jets": extra["n_jets"].astype(np.float64),
+        "n_btag": extra["n_btag"].astype(np.float64),
+        # channel: 0 = mu-tau_h, 1 = e-tau_h. Without it the flat file cannot be split
+        # into mt/et after the fact.
+        "channel": g(lep, "channel").astype(np.float64),
     }
+    if met_pt is not None:
+        # CMS mt_tot: quadrature of the three transverse masses of (l, tau, MET)
+        out["mt_tot"] = np.sqrt(_mt(l1[0], l1[2], met_pt, met_phi) ** 2
+                                + _mt(l2[0], l2[2], met_pt, met_phi) ** 2
+                                + _mt(l1[0], l1[2], l2[0], l2[2]) ** 2)
+        out["met"] = met_pt
     # dataset_id: one sample can span several CMS primary datasets with DIFFERENT cross
     # sections (ttbar globs three decay channels at 98 / 420 / 406 pb), so the label has
     # to travel with the events or the sample cannot be normalised per channel.
@@ -204,7 +254,7 @@ def _report(name, d, dropped, dropped_mixed=0):
         raise SystemExit(f"[sbi] missing required branches: {missing}")
 
 
-def features_streamed(path, *, kl=None, max_events=None):
+def features_streamed(path, *, kl=None, max_events=None, sel_kw=None):
     """features() over one file at a time, concatenating only the OUTPUT.
 
     The merged tt-bar sample is 298M events across 145 GB; materialising it in one
@@ -222,7 +272,7 @@ def features_streamed(path, *, kl=None, max_events=None):
         except ValueError:
             continue                        # no events of this kl in this file
         n_read += ev.n
-        d, nf, nm = features(ev)
+        d, nf, nm = features(ev, **(sel_kw or {}))
         dropped += nf
         mixed += nm
         if len(d["m_hh"]):
@@ -242,11 +292,21 @@ def main(argv=None):
                     help="'signal' (one tree per kl) or a background name (ttbar, dy, ...)")
     ap.add_argument("--out", required=True, help="output ROOT file")
     ap.add_argument("--max-events", type=int, default=None)
+    ap.add_argument("--btag-min", type=int, default=0,
+                    help="require this many of the two selected jets to carry the "
+                         "UParT-AK4 Medium tag bit (card PATCH-6, cut 0.1272). The "
+                         "default 0 is a PRESELECTION: an untagged event still passes, "
+                         "which is why signal/ttbar acceptance is ~2.5 and not hundreds")
+    ap.add_argument("--lep-veto", action="store_true",
+                    help="require EXACTLY one light lepton (CMS vetoes extra leptons)")
     ap.add_argument("--tree", default=None, help="override the output tree name")
     args = ap.parse_args(argv)
 
     import uproot
 
+    sel_kw = {"btag_min": args.btag_min, "lep_veto": args.lep_veto}
+    print(f"[sbi] selection: >=1 lepton{' (exactly 1)' if args.lep_veto else ''}, "
+          f">=1 tau_h, 2 jets, btag_min={args.btag_min}")
     trees = {}
     if args.sample == "signal":
         for kl in available_kl(args.ntuple):
@@ -254,14 +314,14 @@ def main(argv=None):
                     else "tree_sbi_lam" + str(kl).replace(".", "p"))
             print(f"  {name} (kl={kl:g}) ...", flush=True)
             d, dropped, dm, n_read = features_streamed(
-                args.ntuple, kl=kl, max_events=args.max_events)
+                args.ntuple, kl=kl, max_events=args.max_events, sel_kw=sel_kw)
             _report(f"{name} (kl={kl:g}, {n_read:,} read)", d, dropped, dm)
             trees[name] = d
     else:
         name = args.tree or TREES.get(args.sample, f"tree_{args.sample}")
         print(f"  {name} ...", flush=True)
         d, dropped, dm, n_read = features_streamed(
-            args.ntuple, max_events=args.max_events)
+            args.ntuple, max_events=args.max_events, sel_kw=sel_kw)
         _report(f"{name} ({n_read:,} read)", d, dropped, dm)
         trees[name] = d
 
