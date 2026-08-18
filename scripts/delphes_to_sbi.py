@@ -43,7 +43,13 @@ import os
 import awkward as ak
 import numpy as np
 
-from delphes_pipeline.core.io import NtupleEvents, available_kl
+from delphes_pipeline.core.io import (NtupleEvents, available_kl,
+                                      resolve_ntuple_paths)
+
+#: the only columns these features touch. GenPart is ~99% of the ntuple and is never
+#: read: no FastMTT here, so not even MET is needed -- the CMS converter's m_tautau is
+#: the VISIBLE di-tau mass.
+COLUMNS = ["Jet", "Electron", "Muon", "genWeight", "lepton_sf", "dataset_id", "kl"]
 
 #: kept in step with merge_shards.MIXED_DATASET
 MIXED_DATASET = -1
@@ -198,6 +204,37 @@ def _report(name, d, dropped, dropped_mixed=0):
         raise SystemExit(f"[sbi] missing required branches: {missing}")
 
 
+def features_streamed(path, *, kl=None, max_events=None):
+    """features() over one file at a time, concatenating only the OUTPUT.
+
+    The merged tt-bar sample is 298M events across 145 GB; materialising it in one
+    awkward array is what made this step run for hours. The selected output is ~1% of
+    that and a dozen flat float64 columns, so accumulating per file is bounded by the
+    result rather than by the input.
+    """
+    parts, dropped, mixed, n_read = [], 0, 0, 0
+    for f in resolve_ntuple_paths(path):
+        if max_events is not None and n_read >= max_events:
+            break
+        try:
+            ev = NtupleEvents(f, kl=kl, columns=COLUMNS,
+                              entry_stop=None if max_events is None else max_events - n_read)
+        except ValueError:
+            continue                        # no events of this kl in this file
+        n_read += ev.n
+        d, nf, nm = features(ev)
+        dropped += nf
+        mixed += nm
+        if len(d["m_hh"]):
+            parts.append(d)
+        print(f"    {os.path.basename(f)}: {ev.n:,} read -> {len(d['m_hh']):,} kept",
+              flush=True)
+    if not parts:
+        raise SystemExit(f"[sbi] no events selected from {path!r}")
+    out = {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
+    return out, dropped, mixed, n_read
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--ntuple", required=True, help="merged ntuple dir or glob")
@@ -213,17 +250,19 @@ def main(argv=None):
     trees = {}
     if args.sample == "signal":
         for kl in available_kl(args.ntuple):
-            ev = NtupleEvents(args.ntuple, kl=kl, entry_stop=args.max_events)
-            d, dropped, dm = features(ev)
             name = (f"tree_sbi_lam{int(kl)}" if kl == int(kl)
                     else "tree_sbi_lam" + str(kl).replace(".", "p"))
-            _report(f"{name} (kl={kl:g}, {ev.n:,} read)", d, dropped, dm)
+            print(f"  {name} (kl={kl:g}) ...", flush=True)
+            d, dropped, dm, n_read = features_streamed(
+                args.ntuple, kl=kl, max_events=args.max_events)
+            _report(f"{name} (kl={kl:g}, {n_read:,} read)", d, dropped, dm)
             trees[name] = d
     else:
-        ev = NtupleEvents(args.ntuple, entry_stop=args.max_events)
-        d, dropped, dm = features(ev)
         name = args.tree or TREES.get(args.sample, f"tree_{args.sample}")
-        _report(f"{name} ({ev.n:,} read)", d, dropped, dm)
+        print(f"  {name} ...", flush=True)
+        d, dropped, dm, n_read = features_streamed(
+            args.ntuple, max_events=args.max_events)
+        _report(f"{name} ({n_read:,} read)", d, dropped, dm)
         trees[name] = d
 
     os.makedirs(os.path.dirname(os.path.abspath(args.out)) or ".", exist_ok=True)

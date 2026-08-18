@@ -326,7 +326,7 @@ class NtupleEvents:
     """
 
     def __init__(self, path: PathLike, *, kl: Optional[float] = None,
-                 entry_stop: Optional[int] = None):
+                 entry_stop: Optional[int] = None, columns=None):
         self.paths = resolve_ntuple_paths(path)
         self.kl = kl
         parts, have = [], 0
@@ -334,6 +334,12 @@ class NtupleEvents:
             if entry_stop is not None and have >= entry_stop:
                 break
             pf = pq.ParquetFile(p)
+            # GenPart is ~99% of an ntuple's bytes and most consumers never touch it.
+            # Reading only what is asked for turns a 145 GB scan into a ~1 GB one.
+            cols = None
+            if columns is not None:
+                want = set(columns) | ({"kl"} if kl is not None else set())
+                cols = [c for c in want if c in pf.schema_arrow.names] or None
             jkl = _kl_column_index(pf) if kl is not None else None
             if kl is not None and jkl is None:
                 # no kl column at all: a sample that was never generated per kl (ttbar
@@ -347,7 +353,7 @@ class NtupleEvents:
                     st = pf.metadata.row_group(i).column(jkl).statistics
                     if st is not None and st.has_min_max and not (st.min <= kl <= st.max):
                         continue
-                a = ak.from_parquet(p, row_groups=[i])
+                a = ak.from_parquet(p, row_groups=[i], columns=cols)
                 if kl is not None:
                     a = a[np.isclose(ak.to_numpy(a["kl"]), kl)]
                 if entry_stop is not None:

@@ -181,3 +181,50 @@ def test_mixed_dataset_events_are_dropped_not_normalised(tmp_path):
 def test_a_sample_without_dataset_id_is_unaffected(tmp_path):
     d, _, dm = S.features(NtupleEvents(_write(tmp_path / "b.parquet", n=3)))
     assert "dataset_id" not in d and dm == 0
+
+
+# --------------------------------------------------------------------------- #
+# The merged ttbar sample is 298M events across 145 GB. Materialising it in one
+# awkward array is what made this step run for hours; GenPart alone is ~99% of
+# the bytes and these features never touch it.
+# --------------------------------------------------------------------------- #
+def test_streaming_over_files_matches_a_single_pass(tmp_path):
+    d = tmp_path / "m"
+    d.mkdir()
+    for i in range(3):
+        _write(d / f"ttbar.{i:04d}.parquet", n=4)
+    one, _, _ = S.features(NtupleEvents(d))
+    many, _, _, n_read = S.features_streamed(d)
+    assert n_read == 12
+    assert len(many["m_hh"]) == len(one["m_hh"])
+    for k in one:
+        assert np.allclose(sorted(many[k]), sorted(one[k])), k
+
+
+def test_genpart_is_not_among_the_columns_read():
+    """It is ~99% of the ntuple and no SBI feature uses it."""
+    assert "GenPart" not in S.COLUMNS
+    assert {"Jet", "Electron", "Muon", "genWeight"} <= set(S.COLUMNS)
+
+
+def test_the_reader_honours_a_column_subset(tmp_path):
+    p = _write(tmp_path / "a.parquet", n=3)
+    ev = NtupleEvents(p, columns=["Jet", "Electron", "Muon", "genWeight"])
+    assert "GenPart" not in ak.fields(ev.array)
+    assert ev.n == 3 and len(ev.jets) == 3
+
+
+def test_a_kl_selection_still_works_with_a_column_subset(tmp_path):
+    """kl must be added to the projection even when the caller forgets it."""
+    p = _write(tmp_path / "a.parquet", n=6, kl=5.0)
+    ev = NtupleEvents(p, kl=5.0, columns=["Jet", "Electron", "Muon", "genWeight"])
+    assert ev.n == 6
+
+
+def test_streaming_skips_files_holding_no_events_of_the_requested_kl(tmp_path):
+    d = tmp_path / "m"
+    d.mkdir()
+    _write(d / "signal.0000.parquet", n=4, kl=0.0)
+    _write(d / "signal.0001.parquet", n=4, kl=5.0)
+    _, _, _, n_read = S.features_streamed(d, kl=5.0)
+    assert n_read == 4, "the kl=0 file must contribute nothing"
