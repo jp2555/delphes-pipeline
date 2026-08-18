@@ -52,6 +52,24 @@ def _plan(outdir):
 _KL_RE = re.compile(r"kl-(m?)(\d+)p(\d+)")
 
 
+#: the CMS primary dataset a shard's inputs came from. One `--sample` can span several
+#: (ttbar globs TTto2L2Nu + TTto4Q + TTtoLNu2Q; DY is jet- and mass-binned), and those
+#: carry DIFFERENT cross sections -- 98.0 / 419.7 / 405.7 pb for the three ttbar channels.
+#: Merging them without a per-event label makes the sample unnormalisable, exactly as
+#: globbing the kl directories did. Recovered here, from the plan, for the same reason.
+_DATASET_RE = re.compile(r"/([A-Za-z0-9][^/]*?_TuneCP5_[^/]*?)_Delphes")
+
+
+def _dataset_of(entry):
+    """The primary dataset name(s) a shard's input files belong to."""
+    out = set()
+    for f in entry.get("files", ()):
+        m = _DATASET_RE.search(f)
+        if m:
+            out.add(m.group(1))
+    return sorted(out)
+
+
 def _kl_of(entry):
     """The kappa_lambda a shard was generated at, or None for samples without one.
 
@@ -90,14 +108,21 @@ def _group(entries, target_bytes):
 def write_group(job):
     """Write ONE output file from a group of shards. Module level, so it can be pickled
     to a worker process."""
-    name, part, entries, dest = job
+    name, part, entries, dest, datasets = job
     out_path = os.path.join(dest, f"{name}.{part:04d}.parquet")
     writer, schema, rows = None, None, 0
     sumw = sumw_sf = 0.0
     try:
         for e in entries:
             kl = _kl_of(e)
-            if kl is None:
+            ds = _dataset_of(e)
+            if len(ds) > 1:
+                raise ValueError(
+                    f"shard {e['sample']}.{e['shard']:04d} spans {len(ds)} datasets "
+                    f"({', '.join(ds)}) — they have different cross sections and the "
+                    f"events cannot be labelled")
+            dsid = datasets.setdefault(ds[0], len(datasets)) if ds else None
+            if kl is None and dsid is None:
                 t = pq.read_table(e["out"])          # fast path: straight arrow
             else:
                 # Appending through raw arrow leaves the file's awkward metadata not
@@ -105,7 +130,10 @@ def write_group(job):
                 # Adding the field through awkward keeps the metadata consistent. Only
                 # signal pays this; ttbar (the 145 GB one) stays on the fast path.
                 a = ak.from_parquet(e["out"])
-                a = ak.with_field(a, np.full(len(a), kl, dtype="float32"), "kl")
+                if kl is not None:
+                    a = ak.with_field(a, np.full(len(a), kl, dtype="float32"), "kl")
+                if dsid is not None:
+                    a = ak.with_field(a, np.full(len(a), dsid, dtype="int16"), "dataset_id")
                 t = ak.to_arrow_table(a)
             if schema is None:
                 schema = t.schema
@@ -131,10 +159,15 @@ def write_group(job):
     return out_path, rows, sumw, sumw_sf
 
 
-def merge_sample(name, entries, dest, target_bytes, jobs=1):
+def merge_sample(name, entries, dest, target_bytes, jobs=1, datasets=None):
     """Stream ``entries`` into ``dest/name.NNNN.parquet`` files of ~target size."""
+    datasets = {} if datasets is None else datasets
+    # assign ids up front so every worker agrees on them
+    for e in entries:
+        for d in _dataset_of(e):
+            datasets.setdefault(d, len(datasets))
     groups = _group(entries, target_bytes)
-    todo = [(name, i, g, dest) for i, g in enumerate(groups)]
+    todo = [(name, i, g, dest, dict(datasets)) for i, g in enumerate(groups)]
     if jobs <= 1 or len(todo) <= 1:
         results = [write_group(j) for j in todo]
     else:
@@ -198,8 +231,9 @@ def main(argv=None):
         jobs = args.jobs or (os.cpu_count() or 1)
         t1 = time.perf_counter()
         try:
+            datasets = {}
             files, rows, sumw, sumw_sf = merge_sample(
-                name, entries, dest, args.target_gb * 1e9, jobs=jobs)
+                name, entries, dest, args.target_gb * 1e9, jobs=jobs, datasets=datasets)
         except ValueError as exc:
             # raised in a worker; surface it as a clean abort rather than a traceback
             raise SystemExit(f"[merge] {exc}")
@@ -216,6 +250,9 @@ def main(argv=None):
         summary[name] = {"shards": len(entries), "shards_planned": planned,
                          "files": files, "events": rows,
                          "sum_genweight": sumw,
+                         # dataset_id column -> CMS primary dataset. Each carries its own
+                         # cross section, so this is what makes the sample normalisable.
+                         "datasets": {v: k for k, v in datasets.items()},
                          "sum_genweight_x_lepton_sf": sumw_sf,
                          "bytes": size,
                          "maps": sorted({e["maps"] for e in entries}),

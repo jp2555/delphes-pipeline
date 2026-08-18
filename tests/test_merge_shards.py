@@ -374,3 +374,57 @@ def test_the_lepton_sf_weighted_sum_is_recorded_too(tmp_path):
     man = json.load(open(out / "merged" / "manifest.json"))["ttbar"]
     assert man["sum_genweight_x_lepton_sf"] == pytest.approx(
         man["sum_genweight"] * 1.1, rel=1e-5)
+
+
+# --------------------------------------------------------------------------- #
+# One --sample can span several CMS primary datasets: ttbar globs TTto2L2Nu +
+# TTto4Q + TTtoLNu2Q (98.0 / 419.7 / 405.7 pb) and DY is jet- and mass-binned.
+# Without a per-event label the merged sample cannot be normalised at all.
+# --------------------------------------------------------------------------- #
+def _multi_dataset_campaign(tmp, rows=10):
+    out = tmp / "out"
+    (out / "_plan").mkdir(parents=True)
+    chans = ["TTto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8",
+             "TTto4Q_TuneCP5_13p6TeV_powheg-pythia8",
+             "TTtoLNu2Q_TuneCP5_13p6TeV_powheg-pythia8"]
+    shards = [{"sample": "ttbar", "shard": i, "seed": i, "maps": "none",
+               "maps_sha": "untuned",
+               "files": [f"root://h//store/{c}_Delphes_v1/delphes-tree-2ff38f65/f.root"],
+               "out": str(out / f"ttbar.{i:04d}.parquet")}
+              for i, c in enumerate(chans)]
+    (out / "_plan" / "manifest.json").write_text(json.dumps({"shards": shards}))
+    for e in shards:
+        ak.to_parquet(ak.zip({"genWeight": np.ones(rows, dtype=np.float32),
+                              "shard": np.full(rows, e["shard"], dtype=np.int32)}),
+                      e["out"])
+    return out, chans
+
+
+def test_each_ttbar_channel_gets_its_own_dataset_id(tmp_path):
+    out, chans = _multi_dataset_campaign(tmp_path)
+    assert merge_shards.main(["--out", str(out), "--target-gb", "1e-9"]) == 0
+    t = ak.from_parquet(str(out / "merged" / "ttbar.*.parquet"))
+    by_shard = {int(s): int(d) for s, d in zip(t.shard, t.dataset_id)}
+    assert len(set(by_shard.values())) == 3, "three channels must be distinguishable"
+    man = json.load(open(out / "merged" / "manifest.json"))["ttbar"]
+    assert sorted(man["datasets"].values()) == sorted(chans)
+
+
+def test_the_manifest_maps_every_id_back_to_its_primary_dataset(tmp_path):
+    out, _ = _multi_dataset_campaign(tmp_path)
+    merge_shards.main(["--out", str(out), "--target-gb", "1e-9"])
+    man = json.load(open(out / "merged" / "manifest.json"))["ttbar"]
+    t = ak.from_parquet(str(out / "merged" / "ttbar.*.parquet"))
+    ids = {str(int(i)) for i in t.dataset_id}
+    assert ids <= set(man["datasets"]), "every id in the data must resolve to a name"
+
+
+def test_a_shard_spanning_two_datasets_aborts(tmp_path):
+    """Its events could not be labelled, and the two have different cross sections."""
+    with pytest.raises(ValueError, match="different cross sections"):
+        merge_shards.write_group((
+            "ttbar", 0,
+            [{"sample": "ttbar", "shard": 0, "out": "x",
+              "files": ["/s/TTto4Q_TuneCP5_x_Delphes_v1/a.root",
+                        "/s/TTto2L2Nu_TuneCP5_x_Delphes_v1/b.root"]}],
+            str(tmp_path), {}))
