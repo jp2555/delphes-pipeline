@@ -109,7 +109,7 @@ def test_events_without_a_light_lepton_are_dropped(tmp_path):
     a = ak.from_parquet(str(p))
     a = ak.with_field(a, a["Muon"][:, :0], "Muon")     # remove the muon
     ak.to_parquet(a, str(p))
-    d, _ = S.features(NtupleEvents(p))
+    d, _, _ = S.features(NtupleEvents(p))
     assert len(d["m_hh"]) == 0
 
 
@@ -147,3 +147,37 @@ def test_the_warning_free_path_gives_the_same_masses_as_before():
         np.sqrt(max((S._p4(*a)[3] + S._p4(*b)[3]) ** 2
                     - sum((S._p4(*a)[i] + S._p4(*b)[i]) ** 2 for i in range(3)), 0.0)),
         rel=1e-12)
+
+
+# --------------------------------------------------------------------------- #
+# dataset_id must travel with the events: ttbar spans three decay channels at
+# 98 / 420 / 406 pb, and the -1 sentinel marks events with no defined xsec.
+# --------------------------------------------------------------------------- #
+def _with_ids(path, ids):
+    n = len(ids)
+    p = _write(path, n=n)
+    a = ak.from_parquet(str(p))
+    a = ak.with_field(a, np.array(ids, dtype=np.int16), "dataset_id")
+    ak.to_parquet(a, str(p))
+    return p
+
+
+def test_dataset_id_is_carried_into_the_sbi_output(tmp_path):
+    p = _with_ids(tmp_path / "a.parquet", [0, 1, 2, 0])
+    d, _, _ = S.features(NtupleEvents(p))
+    assert "dataset_id" in d
+    assert sorted(set(d["dataset_id"].astype(int))) == [0, 1, 2]
+
+
+def test_mixed_dataset_events_are_dropped_not_normalised(tmp_path):
+    """-1 means the shard straddled two primary datasets: no defined cross section."""
+    p = _with_ids(tmp_path / "a.parquet", [0, -1, 1, -1])
+    d, _, dropped_mixed = S.features(NtupleEvents(p))
+    assert dropped_mixed == 2
+    assert -1 not in set(d["dataset_id"].astype(int))
+    assert len(d["m_hh"]) == 2
+
+
+def test_a_sample_without_dataset_id_is_unaffected(tmp_path):
+    d, _, dm = S.features(NtupleEvents(_write(tmp_path / "b.parquet", n=3)))
+    assert "dataset_id" not in d and dm == 0

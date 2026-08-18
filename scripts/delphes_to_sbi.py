@@ -45,6 +45,9 @@ import numpy as np
 
 from delphes_pipeline.core.io import NtupleEvents, available_kl
 
+#: kept in step with merge_shards.MIXED_DATASET
+MIXED_DATASET = -1
+
 REQUIRED = ["m_hh", "m_bb", "m_tautau", "pt_hh", "deta_hh", "dr_bb", "dr_tautau",
             "cos_theta_star", "dphi_hh", "pt_h1", "pt_h2", "weights"]
 
@@ -155,19 +158,41 @@ def features(ev):
         "pt_h2": htt[0],
         "weights": w,
     }
+    # dataset_id: one sample can span several CMS primary datasets with DIFFERENT cross
+    # sections (ttbar globs three decay channels at 98 / 420 / 406 pb), so the label has
+    # to travel with the events or the sample cannot be normalised per channel.
+    dropped_mixed = 0
+    if "dataset_id" in ak.fields(ev.array):
+        out["dataset_id"] = ak.to_numpy(ev.array["dataset_id"])[idx].astype(np.float64)
+
     out = {k: np.asarray(v, dtype=np.float64) for k, v in out.items()}
     good = np.ones(len(out["m_hh"]), dtype=bool)
     for v in out.values():
         good &= np.isfinite(v)
-    return {k: v[good] for k, v in out.items()}, int((~good).sum())
+    if "dataset_id" in out:
+        # -1 marks events whose SHARD straddled two primary datasets. Their cross section
+        # is genuinely ambiguous; keeping them would mean normalising with a number
+        # nobody can justify, so they are dropped here rather than downstream by memory.
+        mixed = out["dataset_id"] == MIXED_DATASET
+        dropped_mixed = int((good & mixed).sum())
+        good &= ~mixed
+    return {k: v[good] for k, v in out.items()}, int((~good).sum()), dropped_mixed
 
 
-def _report(name, d, dropped):
+def _report(name, d, dropped, dropped_mixed=0):
     n = len(d["m_hh"])
     w = d["weights"]
     neg = int((w < 0).sum())
     print(f"  {name}: {n:,} events ({dropped:,} dropped non-finite), "
           f"sum(w)={w.sum():.1f}" + (f", {neg:,} negative weights" if neg else ""))
+    if dropped_mixed:
+        print(f"      dropped {dropped_mixed:,} events from shards straddling two "
+              f"primary datasets (no unambiguous cross section)")
+    if "dataset_id" in d and len(d["dataset_id"]):
+        ids, cnt = np.unique(d["dataset_id"].astype(int), return_counts=True)
+        print("      per dataset_id: "
+              + ", ".join(f"{i}:{c:,}" for i, c in zip(ids, cnt))
+              + "  (normalise each with its own xsec from datasets_delphes.json)")
     missing = [b for b in REQUIRED if b not in d]
     if missing:
         raise SystemExit(f"[sbi] missing required branches: {missing}")
@@ -189,16 +214,16 @@ def main(argv=None):
     if args.sample == "signal":
         for kl in available_kl(args.ntuple):
             ev = NtupleEvents(args.ntuple, kl=kl, entry_stop=args.max_events)
-            d, dropped = features(ev)
+            d, dropped, dm = features(ev)
             name = (f"tree_sbi_lam{int(kl)}" if kl == int(kl)
                     else "tree_sbi_lam" + str(kl).replace(".", "p"))
-            _report(f"{name} (kl={kl:g}, {ev.n:,} read)", d, dropped)
+            _report(f"{name} (kl={kl:g}, {ev.n:,} read)", d, dropped, dm)
             trees[name] = d
     else:
         ev = NtupleEvents(args.ntuple, entry_stop=args.max_events)
-        d, dropped = features(ev)
+        d, dropped, dm = features(ev)
         name = args.tree or TREES.get(args.sample, f"tree_{args.sample}")
-        _report(f"{name} ({ev.n:,} read)", d, dropped)
+        _report(f"{name} ({ev.n:,} read)", d, dropped, dm)
         trees[name] = d
 
     os.makedirs(os.path.dirname(os.path.abspath(args.out)) or ".", exist_ok=True)
