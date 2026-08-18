@@ -119,3 +119,31 @@ def test_signal_trees_are_named_per_kappa_lambda(tmp_path):
                 else "tree_sbi_lam" + str(kl).replace(".", "p"))
         assert name == want
     assert S.TREES["ttbar"] == "tree_ttbar" and S.TREES["dy"] == "tree_dy"
+
+
+def test_float32_inputs_do_not_produce_infinite_eta():
+    """The ntuple is float32, where `1 - 1e-10` rounds to 1.0 and the clip stops
+    guarding: arctanh(1.0) = inf, and the event is then silently dropped."""
+    f32 = np.float32
+    a = (f32(50.0), f32(0.0), f32(0.0), f32(5.0))
+    b = (f32(50.0), f32(0.0), f32(np.pi), f32(5.0))    # exactly back-to-back -> p_z = 0
+    pt, eta, phi, m = S._sum_p4(a, b)
+    assert np.all(np.isfinite([pt, eta, phi, m])), (pt, eta, phi, m)
+
+
+def test_a_collinear_pair_keeps_a_finite_eta():
+    """Large |eta| with tiny transverse momentum is where pz/p -> 1."""
+    f32 = np.float32
+    leg = (f32(0.001), f32(6.0), f32(0.0), f32(0.0))
+    pt, eta, phi, m = S._sum_p4(leg, leg)
+    assert np.isfinite(eta) and abs(eta) < 20.0
+
+
+def test_the_warning_free_path_gives_the_same_masses_as_before():
+    """The float64 cast must not move any physics."""
+    a = (90.0, 0.5, 0.0, 8.0)
+    b = (70.0, -0.4, 2.8, 7.0)
+    assert S._sum_p4(a, b)[3] == pytest.approx(
+        np.sqrt(max((S._p4(*a)[3] + S._p4(*b)[3]) ** 2
+                    - sum((S._p4(*a)[i] + S._p4(*b)[i]) ** 2 for i in range(3)), 0.0)),
+        rel=1e-12)

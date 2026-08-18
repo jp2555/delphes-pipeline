@@ -54,6 +54,11 @@ TREES = {"ttbar": "tree_ttbar", "dy": "tree_dy",
 
 
 def _p4(pt, eta, phi, mass):
+    # float64 FIRST. The ntuple stores kinematics as float32, in which the guard
+    # `1 - 1e-10` rounds to exactly 1.0, so the clip in _sum_p4 stops guarding and
+    # arctanh(1.0) returns inf. The affected events are then silently dropped by the
+    # finiteness filter rather than reconstructed.
+    pt, eta, phi, mass = (np.asarray(a, dtype=np.float64) for a in (pt, eta, phi, mass))
     px, py, pz = pt * np.cos(phi), pt * np.sin(phi), pt * np.sinh(eta)
     return px, py, pz, np.sqrt(px * px + py * py + pz * pz + mass * mass)
 
