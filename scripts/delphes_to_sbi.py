@@ -55,6 +55,24 @@ COLUMNS = ["Jet", "Electron", "Muon", "genWeight", "lepton_sf", "dataset_id", "k
 #: channel code on leg 1, so mt/et can be separated after the fact
 CHANNEL = {"mt": 0, "et": 1}
 
+# --------------------------------------------------------------------------- #
+# CMS HIG-25-008 (Run-3 bbtautau, 172/fb) selection, Table 1 and Sections 5-6.
+# Cross-trigger thresholds are used (the lower, primary ones).
+# --------------------------------------------------------------------------- #
+CMS_SEL = {
+    "mt": {"lep_pt": 22.0, "lep_eta": 2.4, "tau_pt": 32.0},   # cross mu-tau trigger
+    "et": {"lep_pt": 25.0, "lep_eta": 2.5, "tau_pt": 35.0},   # cross e-tau trigger
+}
+CMS_TAU_ETA = 2.5
+CMS_JET_PT, CMS_JET_ETA, CMS_JET_DR = 20.0, 2.5, 0.5     # H->bb resolved, Sec. 5
+CMS_PAIR_DR = 0.5                                        # resolved tau-tau, Table 1
+#: elliptical SR in (m_tautau, m_bb): (centre, width) per channel, Eqs. 2-4.
+#: ~99% signal efficiency; background efficiency 62/60/54%.
+CMS_ELLIPSE = {
+    "mt": ((116.0, 61.0), (114.0, 228.0)),
+    "et": ((119.0, 57.0), (109.0, 232.0)),
+}
+
 #: kept in step with merge_shards.MIXED_DATASET
 MIXED_DATASET = -1
 
@@ -93,6 +111,111 @@ def _dphi(a, b):
 
 def _dR(eta1, phi1, eta2, phi2):
     return np.hypot(eta1 - eta2, _dphi(phi1, phi2))
+
+
+def cms_select(ev, *, btag_min=1, ellipse=True):
+    """The HIG-25-008 resolved selection, as far as Delphes can support it.
+
+    APPLIED (Table 1 / Sec. 5-6):
+      * channel priority: a muon makes it tau_mu-tau_h, else an electron makes it
+        tau_e-tau_h (the tau_h tau_h channel is out of scope for this converter)
+      * per-channel pT thresholds at the CROSS-trigger values: mu > 22 with tau_h > 32,
+        e > 25 with tau_h > 35; |eta| < 2.4 (mu) / 2.5 (e, tau_h)
+      * additional-lepton veto
+      * dR(lepton, tau_h) > 0.5
+      * H->bb: AK4 jets pT > 20, |eta| < 2.5, dR > 0.5 from BOTH tau candidates
+      * b-tag requirement (the card's bit is UParT-AK4 Medium, PATCH-6)
+      * elliptical (m_tautau, m_bb) signal region, Eqs. 2-4 -- evaluated on the
+        FastMTT mass, since CMS's ellipse is defined on their regressed tau-tau mass,
+        NOT on the visible mass the SBI feature carries
+
+    NOT APPLIED, and why:
+      * opposite charge -- the ntuple's Jet has no charge field, so the tau_h leg has no
+        charge to compare. Needs `charge` added to schema.FLAT_SCHEMA['Jet'] and a
+        re-ntuplisation; until then this selection is charge-blind and keeps same-sign
+        pairs CMS would reject
+      * lepton ID / isolation / impact parameters (d_xy, d_z) -- Delphes leptons carry
+        only the card's efficiency parameterisation; there is no ID or IP to cut on
+      * HH-BTAG DNN jet assignment -- approximated by the two highest-btag jets
+      * DeepTau vs-e / vs-mu working points -- Delphes has one tau bit, not three
+        discriminants
+      * boosted (AK8) and VBF categories, and the trigger itself
+    """
+    e, m = ev.electrons, ev.muons
+    j = ev.jets
+    tau_all = j[(j.tautag == 1) & (np.abs(j.eta) <= CMS_TAU_ETA)]
+    tau_all = tau_all[ak.argsort(tau_all.pt, axis=1, ascending=False, stable=True)]
+
+    def _lep(coll, ch):
+        c = CMS_SEL[ch]
+        sel = coll[(coll.pt > c["lep_pt"]) & (np.abs(coll.eta) <= c["lep_eta"])]
+        # zip in the massless four-vector field the builder expects; the raw ntuple
+        # lepton carries only pt/eta/phi/charge
+        sel = ak.zip({"pt": sel.pt, "eta": sel.eta, "phi": sel.phi,
+                      "mass": ak.zeros_like(sel.pt)})
+        return sel[ak.argsort(sel.pt, axis=1, ascending=False, stable=True)]
+
+    mu, el = _lep(m, "mt"), _lep(e, "et")
+    n_mu, n_el = ak.num(mu), ak.num(el)
+    # channel priority, Sec. 5: a muon makes it mt, else an electron makes it et
+    is_mt = n_mu >= 1
+    is_et = (~is_mt) & (n_el >= 1)
+    # additional-lepton veto (Table 1): no second light lepton of either flavour
+    veto = ((n_mu + n_el) == 1)
+
+    out = []
+    for ch, lepcoll, chan_mask in (("mt", mu, is_mt), ("et", el, is_et)):
+        tau = tau_all[tau_all.pt > CMS_SEL[ch]["tau_pt"]]
+        keep = ak.to_numpy(chan_mask & veto & (ak.num(tau) >= 1))
+        if not keep.any():
+            continue
+        L, T, J = lepcoll[keep][:, :1], tau[keep][:, :1], j[keep]
+        far_pair = _dR(L[:, 0].eta, L[:, 0].phi, T[:, 0].eta, T[:, 0].phi) > CMS_PAIR_DR
+        ok = ak.to_numpy(far_pair)
+        L, T, J = L[ok], T[ok], J[ok]
+        idx = np.flatnonzero(keep)[ok]
+
+        J = J[(J.pt > CMS_JET_PT) & (np.abs(J.eta) <= CMS_JET_ETA)]
+        far = (_dR(J.eta, J.phi, L[:, 0].eta, L[:, 0].phi) > CMS_JET_DR) & \
+              (_dR(J.eta, J.phi, T[:, 0].eta, T[:, 0].phi) > CMS_JET_DR)
+        J = J[far]
+        J = J[ak.argsort(J.pt, axis=1, ascending=False, stable=True)]
+        bb = J[ak.argsort(J.btag, axis=1, ascending=False, stable=True)][:, :2]
+        ok2 = ak.to_numpy(ak.num(bb) >= 2)
+        if btag_min:
+            ok2 &= ak.to_numpy(ak.sum(bb.btag == 1, axis=1) >= btag_min)
+        L, T, bb, J, idx = L[ok2][:, 0], T[ok2][:, 0], bb[ok2], J[ok2], idx[ok2]
+        if len(idx) == 0:
+            continue
+
+        extra = {"n_jets": ak.to_numpy(ak.num(J)),
+                 "n_btag": ak.to_numpy(ak.sum(J.btag == 1, axis=1)),
+                 "channel": np.full(len(idx), float(CHANNEL[ch]))}
+        if ellipse:
+            keep_e = _in_ellipse(ev, L, T, bb, idx, ch)
+            L, T, bb, idx = L[keep_e], T[keep_e], bb[keep_e], idx[keep_e]
+            extra = {k: v[keep_e] for k, v in extra.items()}
+        out.append((L, T, bb, idx, extra))
+    return out
+
+
+def _in_ellipse(ev, lep, tau, bb, idx, ch):
+    """Eqs. 2-4, on the FastMTT mass -- CMS's ellipse is NOT on the visible mass."""
+    from delphes_pipeline.extensions.mtautau import _leg, fastmtt_mass
+    met = ak.to_numpy(ev.array["MET_pt"])[idx].astype(np.float64)
+    phi = ak.to_numpy(ev.array["MET_phi"])[idx].astype(np.float64)
+    l1 = ak.zip({"pt": lep.pt, "eta": lep.eta, "phi": lep.phi, "mass": lep.mass,
+                 "is_tauh": ak.zeros_like(lep.pt)})
+    l2 = ak.zip({"pt": tau.pt, "eta": tau.eta, "phi": tau.phi, "mass": tau.mass,
+                 "is_tauh": ak.ones_like(tau.pt)})
+    m_tt = fastmtt_mass(_leg(l1), _leg(l2), met * np.cos(phi), met * np.sin(phi))
+    m_bb = _sum_p4((ak.to_numpy(bb[:, 0].pt), ak.to_numpy(bb[:, 0].eta),
+                    ak.to_numpy(bb[:, 0].phi), ak.to_numpy(bb[:, 0].mass)),
+                   (ak.to_numpy(bb[:, 1].pt), ak.to_numpy(bb[:, 1].eta),
+                    ak.to_numpy(bb[:, 1].phi), ak.to_numpy(bb[:, 1].mass)))[3]
+    (c1, w1), (c2, w2) = CMS_ELLIPSE[ch]
+    r = ((m_tt - c1) / w1) ** 2 + ((m_bb - c2) / w2) ** 2
+    return np.nan_to_num(r, nan=np.inf) < 1.0
 
 
 def select(ev, *, lep_pt_min=20.0, lep_eta_max=2.4,
@@ -156,9 +279,20 @@ def _mt(pt1, phi1, pt2, phi2):
     return np.sqrt(np.maximum(2 * pt1 * pt2 * (1 - np.cos(phi1 - phi2)), 0.0))
 
 
-def features(ev, **sel_kw):
+def features(ev, *, cms=False, **sel_kw):
     """The 12 required branches plus the Table 6.1 extras the CMS ntuple carries."""
-    lep, tau, bb, idx, extra = select(ev, **sel_kw)
+    if cms:
+        blocks = cms_select(ev, btag_min=sel_kw.get("btag_min", 1),
+                            ellipse=sel_kw.get("ellipse", True))
+        if not blocks:
+            return {k: np.array([]) for k in REQUIRED}, 0, 0
+        outs = [_build(ev, *b) for b in blocks]
+        merged = {k: np.concatenate([o[0][k] for o in outs]) for k in outs[0][0]}
+        return merged, sum(o[1] for o in outs), sum(o[2] for o in outs)
+    return _build(ev, *select(ev, **sel_kw))
+
+
+def _build(ev, lep, tau, bb, idx, extra):
     g = lambda c, k: ak.to_numpy(c[k])                       # noqa: E731
     b1 = (g(bb[:, 0], "pt"), g(bb[:, 0], "eta"), g(bb[:, 0], "phi"), g(bb[:, 0], "mass"))
     b2 = (g(bb[:, 1], "pt"), g(bb[:, 1], "eta"), g(bb[:, 1], "phi"), g(bb[:, 1], "mass"))
@@ -206,7 +340,8 @@ def features(ev, **sel_kw):
         "n_btag": extra["n_btag"].astype(np.float64),
         # channel: 0 = mu-tau_h, 1 = e-tau_h. Without it the flat file cannot be split
         # into mt/et after the fact.
-        "channel": g(lep, "channel").astype(np.float64),
+        "channel": (extra["channel"] if "channel" in extra
+                    else g(lep, "channel")).astype(np.float64),
     }
     if met_pt is not None:
         # CMS mt_tot: quadrature of the three transverse masses of (l, tau, MET)
@@ -297,6 +432,11 @@ def main(argv=None):
                          "UParT-AK4 Medium tag bit (card PATCH-6, cut 0.1272). The "
                          "default 0 is a PRESELECTION: an untagged event still passes, "
                          "which is why signal/ttbar acceptance is ~2.5 and not hundreds")
+    ap.add_argument("--cms-selection", action="store_true",
+                    help="apply the HIG-25-008 resolved selection instead of the loose "
+                         "preselection (see cms_select for what Delphes cannot support)")
+    ap.add_argument("--no-ellipse", action="store_true",
+                    help="with --cms-selection: skip the elliptical (m_tautau, m_bb) SR")
     ap.add_argument("--lep-veto", action="store_true",
                     help="require EXACTLY one light lepton (CMS vetoes extra leptons)")
     ap.add_argument("--tree", default=None, help="override the output tree name")
@@ -304,9 +444,18 @@ def main(argv=None):
 
     import uproot
 
-    sel_kw = {"btag_min": args.btag_min, "lep_veto": args.lep_veto}
-    print(f"[sbi] selection: >=1 lepton{' (exactly 1)' if args.lep_veto else ''}, "
-          f">=1 tau_h, 2 jets, btag_min={args.btag_min}")
+    if args.cms_selection:
+        sel_kw = {"cms": True, "btag_min": max(args.btag_min, 1),
+                  "ellipse": not args.no_ellipse}
+        print(f"[sbi] selection: CMS HIG-25-008 resolved, btag_min="
+              f"{sel_kw['btag_min']}, ellipse={sel_kw['ellipse']}")
+        print("[sbi]   NOT applied: opposite charge (Jet has no charge field), lepton "
+              "ID/isolation/IP, HH-BTAG jet assignment, boosted/VBF categories, trigger")
+    else:
+        sel_kw = {"btag_min": args.btag_min, "lep_veto": args.lep_veto}
+        print(f"[sbi] selection: PRESELECTION — >=1 lepton"
+              f"{' (exactly 1)' if args.lep_veto else ''}, >=1 tau_h, 2 jets, "
+              f"btag_min={args.btag_min}")
     trees = {}
     if args.sample == "signal":
         for kl in available_kl(args.ntuple):

@@ -290,3 +290,90 @@ def test_btag_branches_are_bits_not_scores(tmp_path):
     """Delphes has no tagger, only a parameterised efficiency: btag is 0/1, NOT UParT."""
     d = _feats(tmp_path, n=2)
     assert set(d["btag_1"]) <= {0.0, 1.0}
+
+
+# --------------------------------------------------------------------------- #
+# CMS HIG-25-008 resolved selection (Table 1, Eqs. 2-4). Pins the thresholds
+# against the paper, and pins what Delphes CANNOT do so it stays visible.
+# --------------------------------------------------------------------------- #
+def test_the_thresholds_match_table_1():
+    assert S.CMS_SEL["mt"] == {"lep_pt": 22.0, "lep_eta": 2.4, "tau_pt": 32.0}
+    assert S.CMS_SEL["et"] == {"lep_pt": 25.0, "lep_eta": 2.5, "tau_pt": 35.0}
+    assert (S.CMS_TAU_ETA, S.CMS_PAIR_DR) == (2.5, 0.5)
+    assert (S.CMS_JET_PT, S.CMS_JET_ETA, S.CMS_JET_DR) == (20.0, 2.5, 0.5)
+
+
+def test_the_ellipse_matches_equations_2_and_3():
+    assert S.CMS_ELLIPSE["mt"] == ((116.0, 61.0), (114.0, 228.0))
+    assert S.CMS_ELLIPSE["et"] == ((119.0, 57.0), (109.0, 232.0))
+
+
+def _cms_event(tmp, mu_pt=40.0, tau_pt=45.0, n=4, extra_mu=False):
+    jets = [[{"pt": 90.0, "eta": 0.5, "phi": 0.0, "mass": 8.0, "btag": 1,
+              "tautag": 0, "hadronFlavour": 5},
+             {"pt": 70.0, "eta": -0.4, "phi": 2.8, "mass": 7.0, "btag": 1,
+              "tautag": 0, "hadronFlavour": 5},
+             {"pt": tau_pt, "eta": 1.0, "phi": 1.4, "mass": 1.2, "btag": 0,
+              "tautag": 1, "hadronFlavour": 0}]] * n
+    mus = [{"pt": mu_pt, "eta": -0.2, "phi": 2.0, "charge": -1}]
+    if extra_mu:
+        mus = mus + [{"pt": 30.0, "eta": 0.3, "phi": 0.5, "charge": 1}]
+    f = {"Jet": ak.Array(jets),
+         "Tau": ak.Array([[{"pt": tau_pt, "eta": 1.0, "phi": 1.4, "mass": 1.2}]] * n),
+         "Electron": ak.Array([[{"pt": 9.0, "eta": 0.0, "phi": 0.0,
+                                "charge": 1}]] * n)[:, :0],
+         "Muon": ak.Array([mus] * n),
+         "MET_pt": np.full(n, 55.0, dtype=np.float32),
+         "MET_phi": np.full(n, 1.0, dtype=np.float32),
+         "genWeight": np.ones(n, dtype=np.float32)}
+    p = tmp / "cms.parquet"
+    ak.to_parquet(ak.zip(f, depth_limit=1), str(p))
+    return p
+
+
+def test_a_passing_mu_tau_event_is_kept_and_labelled_mt(tmp_path):
+    p = _cms_event(tmp_path)
+    d, _, _ = S.features(NtupleEvents(p), cms=True, ellipse=False)
+    assert len(d["m_hh"]) == 4
+    assert set(d["channel"]) == {float(S.CHANNEL["mt"])}
+
+
+def test_a_soft_tau_fails_the_channel_threshold(tmp_path):
+    """mu-tau_h requires tau_h pT > 32; 25 is below it."""
+    p = _cms_event(tmp_path, tau_pt=25.0)
+    d, _, _ = S.features(NtupleEvents(p), cms=True, ellipse=False)
+    assert len(d["m_hh"]) == 0
+
+
+def test_a_soft_muon_fails_the_cross_trigger_threshold(tmp_path):
+    p = _cms_event(tmp_path, mu_pt=18.0)
+    d, _, _ = S.features(NtupleEvents(p), cms=True, ellipse=False)
+    assert len(d["m_hh"]) == 0
+
+
+def test_the_additional_lepton_veto_rejects_a_second_muon(tmp_path):
+    p = _cms_event(tmp_path, extra_mu=True)
+    d, _, _ = S.features(NtupleEvents(p), cms=True, ellipse=False)
+    assert len(d["m_hh"]) == 0
+
+
+def test_the_ellipse_rejects_events_far_from_the_higgs_masses(tmp_path):
+    """The visible di-tau mass here is ~60 GeV and m_bb ~200; the SR is centred at
+    (116, 114) with the FastMTT mass, so this must be cut."""
+    p = _cms_event(tmp_path, mu_pt=200.0, tau_pt=200.0)
+    kept = len(S.features(NtupleEvents(p), cms=True, ellipse=True)[0]["m_hh"])
+    loose = len(S.features(NtupleEvents(p), cms=True, ellipse=False)[0]["m_hh"])
+    assert loose > 0 and kept < loose
+
+
+def test_the_cms_selection_is_stricter_than_the_preselection(tmp_path):
+    p = _cms_event(tmp_path, mu_pt=25.0, tau_pt=25.0)
+    pre = len(S.features(NtupleEvents(p))[0]["m_hh"])
+    cms = len(S.features(NtupleEvents(p), cms=True, ellipse=False)[0]["m_hh"])
+    assert pre == 4 and cms == 0, "tau_h pT 25 < 32 passes preselection, fails CMS"
+
+
+def test_what_delphes_cannot_apply_is_documented_not_silently_skipped():
+    doc = S.cms_select.__doc__
+    for missing in ("opposite charge", "isolation", "HH-BTAG", "boosted", "trigger"):
+        assert missing in doc, missing
