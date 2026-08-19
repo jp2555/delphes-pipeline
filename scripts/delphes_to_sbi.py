@@ -66,6 +66,16 @@ CMS_SEL = {
     # sensitive channel, and the one a lepton-requiring converter silently drops.
     "tt": {"lep_pt": None, "lep_eta": None, "tau_pt": 40.0},
 }
+#: The CROWN ntuple baseline (KIT-CMS/BBTauTauAnalysis-CROWN, nmssm_config.py):
+#: tight_{muon,electron,tau}_min_pt = 20, |eta| 2.4/2.5/2.5. NOT the paper's
+#: trigger thresholds -- those, the elliptical SR and the categorisation are applied
+#: later in the analysis. This is the stage the NSBI test's ntuples correspond to.
+CROWN_SEL = {
+    "mt": {"lep_pt": 20.0, "lep_eta": 2.4, "tau_pt": 20.0},
+    "et": {"lep_pt": 20.0, "lep_eta": 2.5, "tau_pt": 20.0},
+    "tt": {"lep_pt": None, "lep_eta": None, "tau_pt": 20.0},
+}
+
 CMS_TAU_ETA = 2.5
 CMS_JET_PT, CMS_JET_ETA, CMS_JET_DR = 20.0, 2.5, 0.5     # H->bb resolved, Sec. 5
 CMS_PAIR_DR = 0.5                                        # resolved tau-tau, Table 1
@@ -118,7 +128,7 @@ def _dR(eta1, phi1, eta2, phi2):
 
 
 def cms_select(ev, *, btag_min=1, ellipse=True, channels=("mt", "et"),
-               cutflow=None):
+               cutflow=None, thresholds=None):
     """The HIG-25-008 resolved selection, as far as Delphes can support it.
 
     APPLIED (Table 1 / Sec. 5-6):
@@ -146,13 +156,14 @@ def cms_select(ev, *, btag_min=1, ellipse=True, channels=("mt", "et"),
         discriminants
       * boosted (AK8) and VBF categories, and the trigger itself
     """
+    TH = thresholds or CMS_SEL
     e, m = ev.electrons, ev.muons
     j = ev.jets
     tau_all = j[(j.tautag == 1) & (np.abs(j.eta) <= CMS_TAU_ETA)]
     tau_all = tau_all[ak.argsort(tau_all.pt, axis=1, ascending=False, stable=True)]
 
     def _lep(coll, ch):
-        c = CMS_SEL[ch]
+        c = TH[ch]
         sel = coll[(coll.pt > c["lep_pt"]) & (np.abs(coll.eta) <= c["lep_eta"])]
         # zip in the massless four-vector field the builder expects; the raw ntuple
         # lepton carries only pt/eta/phi/charge
@@ -169,7 +180,7 @@ def cms_select(ev, *, btag_min=1, ellipse=True, channels=("mt", "et"),
     veto = ((n_mu + n_el) == 1)
 
     # Sec. 5: no muon and no electron, but two tau_h -> tau_h tau_h
-    tau_tt = tau_all[tau_all.pt > CMS_SEL["tt"]["tau_pt"]]
+    tau_tt = tau_all[tau_all.pt > TH["tt"]["tau_pt"]]
     no_lep = (n_mu == 0) & (n_el == 0)
     is_tt = no_lep & (ak.num(tau_tt) >= 2)
 
@@ -186,7 +197,7 @@ def cms_select(ev, *, btag_min=1, ellipse=True, channels=("mt", "et"),
             continue
         if ch == "tt":
             _cf(ch, "no light lepton", no_lep)
-            _cf(ch, f">=2 tau_h pT>{CMS_SEL['tt']['tau_pt']:.0f}", is_tt)
+            _cf(ch, f">=2 tau_h pT>{TH['tt']['tau_pt']:.0f}", is_tt)
             keep = ak.to_numpy(is_tt)
             if not keep.any():
                 continue
@@ -194,8 +205,8 @@ def cms_select(ev, *, btag_min=1, ellipse=True, channels=("mt", "et"),
             pair = tau_tt[keep][:, :2]
             L, T, J = pair[:, 0:1], pair[:, 1:2], j[keep]
         else:
-            tau = tau_all[tau_all.pt > CMS_SEL[ch]["tau_pt"]]
-            c = CMS_SEL[ch]
+            tau = tau_all[tau_all.pt > TH[ch]["tau_pt"]]
+            c = TH[ch]
             lname = "muon" if ch == "mt" else "electron"
             m_chan = chan_mask
             m_veto = m_chan & veto
@@ -366,7 +377,8 @@ def features(ev, *, cms=False, cutflow=None, **sel_kw):
         blocks = cms_select(ev, btag_min=sel_kw.get("btag_min", 1),
                             ellipse=sel_kw.get("ellipse", True),
                             channels=sel_kw.get("channels", ("mt", "et")),
-                            cutflow=cutflow)
+                            cutflow=cutflow,
+                            thresholds=sel_kw.get("thresholds"))
         if not blocks:
             return {k: np.array([]) for k in REQUIRED}, 0, 0
         outs = [_build(ev, *b) for b in blocks]
@@ -535,6 +547,10 @@ def main(argv=None):
                          "UParT-AK4 Medium tag bit (card PATCH-6, cut 0.1272). The "
                          "default 0 is a PRESELECTION: an untagged event still passes, "
                          "which is why signal/ttbar acceptance is ~2.5 and not hundreds")
+    ap.add_argument("--crown", action="store_true",
+                    help="the CROWN NTUPLE baseline (pT>20 everywhere, no b-tag "
+                         "requirement, no elliptical SR) -- the stage the CMS ntuples "
+                         "the NSBI test reads correspond to. Implies --cms-selection.")
     ap.add_argument("--cms-selection", action="store_true",
                     help="apply the HIG-25-008 resolved selection instead of the loose "
                          "preselection (see cms_select for what Delphes cannot support)")
@@ -553,12 +569,21 @@ def main(argv=None):
 
     import uproot
 
+    if args.crown:
+        args.cms_selection, args.no_ellipse = True, True
     if args.cms_selection:
         chans = tuple(c.strip() for c in args.channels.split(",") if c.strip())
-        sel_kw = {"cms": True, "btag_min": max(args.btag_min, 1),
-                  "ellipse": not args.no_ellipse, "channels": chans}
-        print(f"[sbi] selection: CMS HIG-25-008 resolved, channels={','.join(chans)}, "
+        sel_kw = {"cms": True, "channels": chans,
+                  "btag_min": args.btag_min if args.crown else max(args.btag_min, 1),
+                  "ellipse": not args.no_ellipse,
+                  "thresholds": CROWN_SEL if args.crown else CMS_SEL}
+        mode = "CROWN ntuple baseline" if args.crown else "CMS HIG-25-008 resolved"
+        print(f"[sbi] selection: {mode}, channels={','.join(chans)}, "
               f"btag_min={sel_kw['btag_min']}, ellipse={sel_kw['ellipse']}")
+        if args.crown:
+            print("[sbi]   NOT applied vs CROWN: opposite charge (Jet has no charge "
+                  "field in these ntuples), tau_h at VVVLoose (Delphes has one "
+                  "Medium-equivalent bit), decay-mode requirement")
         print("[sbi]   NOT applied: opposite charge (Jet has no charge field), lepton "
               "ID/isolation/IP, HH-BTAG jet assignment, boosted/VBF categories, trigger")
     else:

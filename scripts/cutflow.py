@@ -25,7 +25,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from delphes_to_sbi import COLUMNS, features  # noqa: E402
+from delphes_to_sbi import CMS_SEL, COLUMNS, CROWN_SEL, features  # noqa: E402
 
 from delphes_pipeline.core.io import NtupleEvents, available_kl, resolve_ntuple_paths  # noqa: E402
 
@@ -119,6 +119,9 @@ def main(argv=None):
     ap.add_argument("--sample", default="signal")
     ap.add_argument("--max-events", type=int, default=None)
     ap.add_argument("--cms-selection", action="store_true")
+    ap.add_argument("--crown", action="store_true",
+                    help="the CROWN ntuple baseline (implies --cms-selection "
+                         "--no-ellipse, btag_min 0)")
     ap.add_argument("--channels", default="mt,et")
     ap.add_argument("--btag-min", type=int, default=0)
     ap.add_argument("--lep-veto", action="store_true")
@@ -126,11 +129,16 @@ def main(argv=None):
     ap.add_argument("--tex", action="store_true", help="emit a LaTeX tabular")
     args = ap.parse_args(argv)
 
+    if args.crown:
+        args.cms_selection, args.no_ellipse = True, True
     if args.cms_selection:
-        sel_kw = {"cms": True, "btag_min": max(args.btag_min, 1),
+        sel_kw = {"cms": True,
+                  "btag_min": args.btag_min if args.crown else max(args.btag_min, 1),
                   "ellipse": not args.no_ellipse,
+                  "thresholds": CROWN_SEL if args.crown else CMS_SEL,
                   "channels": tuple(c.strip() for c in args.channels.split(","))}
-        mode = "CMS HIG-25-008 resolved"
+        mode = ("CROWN ntuple baseline" if args.crown
+                else "CMS HIG-25-008 resolved")
     else:
         sel_kw = {"btag_min": args.btag_min, "lep_veto": args.lep_veto}
         mode = "preselection (CROWN-baseline counterpart)"

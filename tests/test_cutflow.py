@@ -130,3 +130,35 @@ def test_the_emitted_table_compiles(tmp_path):
     r = subprocess.run(["pdflatex", "-interaction=nonstopmode", "t.tex"],
                        cwd=tmp_path, capture_output=True, text=True)
     assert (tmp_path / "t.pdf").exists(), r.stdout[-1500:]
+
+
+# --------------------------------------------------------------------------- #
+# The CROWN baseline is a DIFFERENT STAGE from the paper's selection: pT>20
+# everywhere, no b-tag requirement, no elliptical SR. Matching it is what makes
+# the Delphes sample comparable to the ntuples the NSBI test actually reads.
+# --------------------------------------------------------------------------- #
+def test_crown_thresholds_match_the_crown_config():
+    import delphes_to_sbi as D
+    assert D.CROWN_SEL["mt"] == {"lep_pt": 20.0, "lep_eta": 2.4, "tau_pt": 20.0}
+    assert D.CROWN_SEL["et"] == {"lep_pt": 20.0, "lep_eta": 2.5, "tau_pt": 20.0}
+    assert D.CROWN_SEL["tt"]["tau_pt"] == 20.0
+
+
+def test_crown_keeps_events_the_paper_thresholds_reject(tmp_path):
+    """A 25 GeV muon with a 25 GeV tau_h is in CROWN's ntuple, out of the paper's SR."""
+    import delphes_to_sbi as D
+    p = _cms_event(tmp_path, mu_pt=25.0, tau_pt=25.0, n=5)
+    paper = S.features(NtupleEvents(p), cms=True, ellipse=False)[0]["m_hh"]
+    crown = S.features(NtupleEvents(p), cms=True, ellipse=False,
+                       btag_min=0, thresholds=D.CROWN_SEL)[0]["m_hh"]
+    assert len(paper) == 0 and len(crown) == 5
+
+
+def test_the_crown_cutflow_labels_show_the_looser_thresholds(tmp_path):
+    import delphes_to_sbi as D
+    p = _cms_event(tmp_path, n=4)
+    rows, _, _ = C.collect(p, sel_kw={"cms": True, "ellipse": False, "btag_min": 0,
+                                      "thresholds": D.CROWN_SEL})
+    labels = " ".join(l for _, l, _ in rows)
+    assert "pT>20" in labels and "pT>22" not in labels
+    assert not any("b-tag" in l for _, l, _ in rows), "CROWN has no b-tag requirement"
