@@ -1,0 +1,142 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue,urlcolor=blue]{hyperref}
+\usepackage{siunitx}
+
+\newcommand{\tauh}{\tau_{h}}
+\newcommand{\pt}{p_{T}}
+\newcommand{\ok}{\textcolor{teal}{$\checkmark$}}
+\newcommand{\no}{\textcolor{red}{$\times$}}
+\newcommand{\qm}{\textcolor{orange}{$?$}}
+
+\title{\vspace{-1.5cm}Delphes selection vs.\ the CROWN ntuple baseline\\
+\large the stage the NSBI test's CMS ntuples correspond to}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+\vspace{-0.8cm}
+
+\begin{abstract}
+\noindent
+Comparison of the \texttt{--crown} selection applied to the Delphes samples against the
+ntuple-level selection in \texttt{KIT-CMS/BBTauTauAnalysis-CROWN}
+(\texttt{nmssm\_config.py}). This is a \emph{different stage} from the published
+HIG-25-008 analysis selection: CROWN keeps $\pt>20$ on all three legs and $\tauh$
+candidates at the \textbf{VVVLoose} working point, applying the trigger thresholds,
+the elliptical signal region and the categorisation only later. Comparing our
+analysis-level selection against their ntuple-level one is what produced an apparent
+factor $\sim$5 discrepancy in signal efficiency; the correct comparison is this one.
+\end{abstract}
+
+\section{Object selection}
+
+\begin{table}[htbp]
+\centering\small
+\begin{tabular}{@{}lp{5.0cm}lp{3.9cm}c@{}}
+\toprule
+& \textbf{CROWN ntuple} & \textbf{source} & \textbf{Delphes \texttt{--crown}} & \\
+\midrule
+Muon $\pt$, $|\eta|$ & \texttt{tight\_muon\_min\_pt} 20, \texttt{max\_abs\_eta} 2.4
+  & config & 20, 2.4 & \ok \\
+Electron $\pt$, $|\eta|$ & \texttt{tight\_electron\_min\_pt} 20,
+  \texttt{max\_abs\_eta} 2.5 & config & 20, 2.5 & \ok \\
+$\tauh$ $\pt$, $|\eta|$ & \texttt{tight\_tau\_min\_pt} 20, \texttt{max\_abs\_eta} 2.5
+  & config & 20, 2.5 & \ok \\
+$\tauh$ vs-jet WP & \textbf{VVVLoose} (\texttt{wp: 1}) --- \emph{``looser taus needed
+  for tau misidentification estimate''} & config
+  & one \textbf{Medium}-equivalent bit & \no \\
+$\tauh$ vs-$e$ / vs-$\mu$ WP & VVVLoose / VLoose (\texttt{wp: 1}) & config
+  & --- (single bit) & \no \\
+$\tauh$ decay modes & \textbf{0, 1, 10, 11} (excludes DM 2) & config
+  & none --- Delphes has no decay modes & \no \\
+$\tauh$ $|d_z|$ & $0.2\,\si{\cm}$ & config & not available & \no \\
+Lepton $|d_{xy}|$, $|d_z|$ & $0.045$ / $0.2\,\si{\cm}$ & paper Tab.~1
+  & not available & \no \\
+Lepton ID / isolation & Tight ID $+$ isolation & paper Tab.~1
+  & card efficiency only & \no \\
+b-jet $\pt$, $|\eta|$ & \texttt{bjet\_min\_pt} 20, \texttt{bjet\_max\_abs\_eta} 2.5
+  (Run 3) & config & 20, 2.5 & \ok \\
+b-tag requirement & none at ntuple level & inferred$^{\dagger}$
+  & none (\texttt{btag\_min 0}) & \ok \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent{\footnotesize $^{\dagger}$ No b-tag requirement was found in the configuration;
+\texttt{bjet\_min\_pt} defines the collection rather than imposing a cut.}
+
+\section{Pair and event selection}
+
+\begin{table}[htbp]
+\centering\small
+\begin{tabular}{@{}lp{4.6cm}lp{4.3cm}c@{}}
+\toprule
+& \textbf{CROWN ntuple} & \textbf{source} & \textbf{Delphes \texttt{--crown}} & \\
+\midrule
+Channel assignment & $\mu\rightarrow$ mt, else $e\rightarrow$ et,
+  else 2 $\tauh\rightarrow$ tt & paper \S5 & same priority & \ok \\
+Opposite charge & \textbf{required} & --- & \textbf{not applied}: no
+  \texttt{Jet.charge} in these ntuples & \no \\
+$\Delta R(\ell,\tauh)$ & not found in the configuration & --- & $>0.5$ applied & \qm \\
+Extra-lepton veto & \texttt{loose\_\{muon,electron\}\_min\_pt} 10 & config
+  & veto counts leptons above \textbf{20} & \qm \\
+Elliptical signal region & \textbf{not applied} & --- & not applied & \ok \\
+Trigger & not at ntuple level & inferred & none & \ok \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Where the residual efficiency gap lives}
+
+\begin{description}\itemsep3pt
+\item[$\tauh$ working point --- the dominant term.] CROWN keeps $\tauh$ candidates at
+  VVVLoose and applies Medium later in the analysis, precisely so the misidentification
+  background can be estimated from the looser sample. A Delphes $\tauh$ carries a
+  \emph{single bit} already fixed at a Medium-equivalent working point: there is no
+  looser candidate to keep, because it was never written. \textsc{DeepTau} Medium is
+  $\sim$70\% efficient where VVVLoose is $\sim$98\%, so a factor $\sim$1.4 on the
+  $\tauh$ leg is expected and cannot be recovered by any selection change. This is the
+  same root cause as the $\tauh$-object rebuild on the tuning-v2 critical path.
+\item[Opposite charge --- works the other way.] We keep same-sign pairs that CROWN
+  rejects. Same-sign is CMS's QCD control region at $\sim$99\% purity, i.e.\ an
+  essentially pure fake-$\tau$ population, so \emph{our background is inflated} by its
+  absence. Delphes does write \texttt{Jet.Charge}; it was simply not carried into the
+  ntuple schema. Now added, and it arrives with the next ntuplisation --- no
+  re-simulation required.
+\item[Decay modes and impact parameters.] Not representable: Delphes has no HPS decay
+  modes and no track impact parameters. Both are acceptance-reducing on the CROWN side,
+  so their absence also inflates our yield slightly.
+\end{description}
+
+\section{Two rows worth confirming}
+
+Both are marked \qm\ above and both are one-line questions:
+
+\begin{enumerate}\itemsep2pt
+\item Does CROWN apply a $\Delta R(\ell,\tauh)$ requirement at ntuple level? None was
+  found in the configuration read; we apply $>0.5$, which would make us
+  \emph{tighter} if CROWN does not.
+\item What threshold does the extra-lepton veto use? CROWN's loose collections begin at
+  $\pt>10$, whereas our veto only counts leptons above 20 --- so \textbf{we keep events
+  CROWN vetoes}, making us looser on this row.
+\end{enumerate}
+
+\noindent Note that the two point in opposite directions, so they do not simply cancel:
+one would tighten us and the other loosen us relative to CROWN.
+
+\vspace{0.4cm}
+\noindent\footnotesize
+Implementation: \texttt{scripts/delphes\_to\_sbi.py} --- \texttt{CROWN\_SEL} and
+\texttt{cms\_select(thresholds=CROWN\_SEL)}, reached with \texttt{--crown} on both
+\texttt{delphes\_to\_sbi.py} and \texttt{cutflow.py}. Thresholds pinned against the
+CROWN configuration by tests in \texttt{tests/test\_cutflow.py}. A companion note,
+\texttt{selection\_comparison.tex}, compares the same converter against the published
+HIG-25-008 \emph{analysis} selection.
+
+\end{document}
