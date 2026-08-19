@@ -476,3 +476,43 @@ def test_tau_h_tau_h_can_be_enabled_explicitly(tmp_path):
     d, _, _ = S.features(NtupleEvents(p), cms=True, ellipse=False,
                          channels=("mt", "et", "tt"))
     assert len(d["m_hh"]) == 3 and set(d["channel"]) == {float(S.CHANNEL["tt"])}
+
+
+# --------------------------------------------------------------------------- #
+# The preselection is the counterpart of the CMS NTUPLE-level selection, not of
+# the analysis. Thresholds pinned against KIT-CMS/BBTauTauAnalysis-CROWN
+# (nmssm_config.py): pT > 20 on all three legs, |eta| 2.4 (mu) / 2.5 (e, tau_h),
+# and tau candidates kept at VVVLoose vs-jet -- Medium comes later.
+# --------------------------------------------------------------------------- #
+def test_the_preselection_thresholds_match_the_crown_baseline():
+    import inspect
+    d = {k: v.default for k, v in inspect.signature(S.select).parameters.items()}
+    assert d["lep_pt_min"] == 20.0        # tight_{muon,electron}_min_pt
+    assert d["tau_pt_min"] == 20.0        # tight_tau_min_pt
+    assert d["mu_eta_max"] == 2.4         # tight_muon_max_abs_eta
+    assert d["el_eta_max"] == 2.5         # tight_electron_max_abs_eta
+    assert d["tau_eta_max"] == 2.5        # tight_tau_max_abs_eta
+    assert d["jet_eta_max"] == 2.5        # bjet_max_abs_eta (Run 3)
+
+
+def test_electron_and_muon_eta_acceptances_differ(tmp_path):
+    """CROWN uses 2.5 for electrons and 2.4 for muons; one value for both is wrong."""
+    p = _write(tmp_path / "a.parquet", n=2)
+    a = ak.from_parquet(str(p))
+    fwd = ak.Array([[{"pt": 40.0, "eta": 2.45, "phi": 2.0, "charge": -1}]] * 2)
+    a = ak.with_field(a, fwd, "Electron")
+    a = ak.with_field(a, a["Muon"][:, :0], "Muon")
+    ak.to_parquet(a, str(p))
+    assert len(S.features(NtupleEvents(p))[0]["m_hh"]) == 2, "eta 2.45 electron is in"
+    a = ak.from_parquet(str(p))
+    a = ak.with_field(a, ak.with_field(a["Electron"], a["Electron"].eta * 0 + 2.45,
+                                       "eta")[:, :0], "Electron")
+    a = ak.with_field(a, fwd, "Muon")           # same eta, now a muon
+    ak.to_parquet(a, str(p))
+    assert len(S.features(NtupleEvents(p))[0]["m_hh"]) == 0, "eta 2.45 muon is out"
+
+
+def test_the_docstring_records_the_vvvloose_difference():
+    """A Delphes tau bit is Medium-equivalent; there is no VVVLoose to select."""
+    doc = S.select.__doc__
+    assert "VVVLoose" in doc and "CROWN" in doc

@@ -246,9 +246,9 @@ def _in_ellipse(ev, lep, tau, bb, idx, ch):
     return np.nan_to_num(r, nan=np.inf) < 1.0
 
 
-def select(ev, *, lep_pt_min=20.0, lep_eta_max=2.4,
-           tau_pt_min=20.0, tau_eta_max=2.3,
-           jet_pt_min=20.0, jet_eta_max=2.4, clean_dr=0.4,
+def select(ev, *, lep_pt_min=20.0, mu_eta_max=2.4, el_eta_max=2.5,
+           tau_pt_min=20.0, tau_eta_max=2.5,
+           jet_pt_min=20.0, jet_eta_max=2.5, clean_dr=0.4,
            btag_min=0, lep_veto=False):
     """The mt/et preselection: one light lepton, one tau_h, two jets.
 
@@ -256,15 +256,30 @@ def select(ev, *, lep_pt_min=20.0, lep_eta_max=2.4,
     tau_h *is* an AK4 jet, so without that removal the tau would be free to enter the b
     pair -- an artefact that lands on dr_bb and m_bb.
 
-    **This is a PRESELECTION, deliberately looser than the CMS analysis.** By default
-    ``btag_min=0``: the b pair is the two highest-btag jets, and an event with no tag at
-    all still passes. That is why the signal/ttbar acceptance ratio is ~2.5 rather than
-    the hundreds a real bbtautau selection gives. ``btag_min`` (the card's b-tag bit is
-    UParT-AK4 Medium, cut 0.1272, per card PATCH-6) and ``lep_veto`` tighten it; the
-    remaining CMS handles -- opposite charge, m_tautau window, m_T cuts, trigger,
-    b-tag categorisation -- are NOT applied here.
+    **This is a PRESELECTION, and it is the counterpart of the CMS NTUPLE-level
+    selection, not of the analysis.** The CROWN ntuples the NSBI test reads
+    (KIT-CMS/BBTauTauAnalysis-CROWN, nmssm_config.py) apply pT > 20 on muon, electron
+    and tau_h, |eta| < 2.4/2.5/2.5, and -- crucially -- keep tau candidates at the
+    **VVVLoose** vs-jet working point ("looser taus needed for tau misidentification
+    estimate"), applying Medium only later in the analysis. The trigger thresholds, the
+    elliptical signal region and the categorisation all come afterwards.
+
+    The thresholds here match that baseline. One difference cannot be matched: a Delphes
+    tau_h carries a single tag bit fixed at a Medium-equivalent working point, so there
+    is no VVVLoose to select. That accounts for most of the residual efficiency gap --
+    DeepTau Medium is ~70% efficient where VVVLoose is ~98%.
+
+    By default ``btag_min=0``: the b pair is the two highest-btag jets, and an event with
+    no tag at all still passes. ``btag_min`` (the card's bit is UParT-AK4 Medium, cut
+    0.1272, card PATCH-6) and ``lep_veto`` tighten it. Opposite charge, mass windows,
+    m_T cuts, trigger and b-tag categorisation are NOT applied -- see cms_select for
+    those.
     """
+    # Per-flavour |eta|, matching the CROWN ntuple baseline (BBTauTauAnalysis-CROWN
+    # nmssm_config.py): tight_muon_max_abs_eta 2.4, tight_electron_max_abs_eta 2.5.
     e, m = ev.electrons, ev.muons
+    e = e[np.abs(e.eta) <= el_eta_max]
+    m = m[np.abs(m.eta) <= mu_eta_max]
     lep = ak.concatenate([
         ak.zip({"pt": e.pt, "eta": e.eta, "phi": e.phi,
                 "mass": ak.zeros_like(e.pt),
@@ -273,7 +288,7 @@ def select(ev, *, lep_pt_min=20.0, lep_eta_max=2.4,
                 "mass": ak.zeros_like(m.pt),
                 "channel": ak.full_like(m.pt, CHANNEL["mt"])}),
     ], axis=1)
-    lep = lep[(lep.pt > lep_pt_min) & (np.abs(lep.eta) <= lep_eta_max)]
+    lep = lep[lep.pt > lep_pt_min]
     lep = lep[ak.argsort(lep.pt, axis=1, ascending=False, stable=True)]
 
     j = ev.jets
