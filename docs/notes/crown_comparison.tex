@@ -83,9 +83,10 @@ Channel assignment & $\mu\rightarrow$ mt, else $e\rightarrow$ et,
   else 2 $\tauh\rightarrow$ tt & paper \S5 & same priority & \ok \\
 Opposite charge & \textbf{required} & --- & \textbf{not applied}: no
   \texttt{Jet.charge} in these ntuples & \no \\
-$\Delta R(\ell,\tauh)$ & not found in the configuration & --- & $>0.5$ applied & \qm \\
-Extra-lepton veto & \texttt{loose\_\{muon,electron\}\_min\_pt} 10 & config
-  & veto counts leptons above \textbf{20} & \qm \\
+$\Delta R(\ell,\tauh)$ & $>0.5$ & CROWN author & $>0.5$ applied & \ok \\
+Extra-lepton veto & loose $e/\mu$ with $\pt>10$
+  (\texttt{loose\_\{muon,electron\}\_min\_pt}) & config, confirmed
+  & loose $e/\mu$ with $\pt>10$ & \ok \\
 Elliptical signal region & \textbf{not applied} & --- & not applied & \ok \\
 Trigger & not at ntuple level & inferred & none & \ok \\
 \bottomrule
@@ -114,21 +115,21 @@ Trigger & not at ntuple level & inferred & none & \ok \\
   so their absence also inflates our yield slightly.
 \end{description}
 
-\section{Two rows worth confirming}
+\section{Resolved since the first version of this note}
 
-Both are marked \qm\ above and both are one-line questions:
+Both open rows were confirmed by the CROWN author and are now matched:
 
 \begin{enumerate}\itemsep2pt
-\item Does CROWN apply a $\Delta R(\ell,\tauh)$ requirement at ntuple level? None was
-  found in the configuration read; we apply $>0.5$, which would make us
-  \emph{tighter} if CROWN does not.
-\item What threshold does the extra-lepton veto use? CROWN's loose collections begin at
-  $\pt>10$, whereas our veto only counts leptons above 20 --- so \textbf{we keep events
-  CROWN vetoes}, making us looser on this row.
+\item \textbf{$\Delta R(\ell,\tauh)>0.5$ is applied in CROWN}, as we already did ---
+  no change needed.
+\item \textbf{The extra-lepton veto uses loose $e/\mu$ at $\pt>10$}, not the
+  trigger-motivated selection thresholds. Our veto previously counted only leptons above
+  the selection threshold (20), so a second lepton at, say, $15\,\si{\GeV}$ was
+  invisible to it and the event was kept where CROWN rejects it. Now fixed: the veto
+  runs over loose collections at $\pt>10$, $|\eta|<2.4$ ($\mu$) / $2.5$ ($e$). This
+  \emph{tightens} the Delphes selection, so yields quoted before this change are
+  slightly high.
 \end{enumerate}
-
-\noindent Note that the two point in opposite directions, so they do not simply cancel:
-one would tighten us and the other loosen us relative to CROWN.
 
 \vspace{0.4cm}
 \noindent\footnotesize

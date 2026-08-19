@@ -70,6 +70,13 @@ CMS_SEL = {
 #: tight_{muon,electron,tau}_min_pt = 20, |eta| 2.4/2.5/2.5. NOT the paper's
 #: trigger thresholds -- those, the elliptical SR and the categorisation are applied
 #: later in the analysis. This is the stage the NSBI test's ntuples correspond to.
+#: The extra-lepton veto uses LOOSE collections, not the trigger-motivated selection
+#: thresholds: CROWN's loose_{muon,electron}_min_pt = 10 (confirmed by the CROWN author).
+#: Counting the veto at the selection threshold instead keeps events CROWN rejects --
+#: a second lepton at 15 GeV is invisible to a veto that starts at 20.
+VETO_LEP_PT = 10.0
+VETO_MU_ETA, VETO_EL_ETA = 2.4, 2.5
+
 CROWN_SEL = {
     "mt": {"lep_pt": 20.0, "lep_eta": 2.4, "tau_pt": 20.0},
     "et": {"lep_pt": 20.0, "lep_eta": 2.5, "tau_pt": 20.0},
@@ -176,12 +183,16 @@ def cms_select(ev, *, btag_min=1, ellipse=True, channels=("mt", "et"),
     # channel priority, Sec. 5: a muon makes it mt, else an electron makes it et
     is_mt = n_mu >= 1
     is_et = (~is_mt) & (n_el >= 1)
-    # additional-lepton veto (Table 1): no second light lepton of either flavour
-    veto = ((n_mu + n_el) == 1)
+    # Extra-lepton veto over the LOOSE collections (pT > 10), not the selection
+    # thresholds: exactly one loose lepton in a semileptonic event means no ADDITIONAL
+    # one beyond the selected leg.
+    n_loose = (ak.num(m[(m.pt > VETO_LEP_PT) & (np.abs(m.eta) <= VETO_MU_ETA)])
+               + ak.num(e[(e.pt > VETO_LEP_PT) & (np.abs(e.eta) <= VETO_EL_ETA)]))
+    veto = n_loose == 1
 
     # Sec. 5: no muon and no electron, but two tau_h -> tau_h tau_h
     tau_tt = tau_all[tau_all.pt > TH["tt"]["tau_pt"]]
-    no_lep = (n_mu == 0) & (n_el == 0)
+    no_lep = n_loose == 0                 # loose veto, same threshold as above
     is_tt = no_lep & (ak.num(tau_tt) >= 2)
 
     # The cutflow is read off the SAME masks the selection uses -- never recomputed --
@@ -196,7 +207,7 @@ def cms_select(ev, *, btag_min=1, ellipse=True, channels=("mt", "et"),
         if ch not in channels:
             continue
         if ch == "tt":
-            _cf(ch, "no light lepton", no_lep)
+            _cf(ch, f"no loose lepton pT>{VETO_LEP_PT:.0f}", no_lep)
             _cf(ch, f">=2 tau_h pT>{TH['tt']['tau_pt']:.0f}", is_tt)
             keep = ak.to_numpy(is_tt)
             if not keep.any():
@@ -212,7 +223,7 @@ def cms_select(ev, *, btag_min=1, ellipse=True, channels=("mt", "et"),
             m_veto = m_chan & veto
             m_tau = m_veto & (ak.num(tau) >= 1)
             _cf(ch, f"{lname} pT>{c['lep_pt']:.0f}, |eta|<{c['lep_eta']}", m_chan)
-            _cf(ch, "additional-lepton veto", m_veto)
+            _cf(ch, f"extra-lepton veto (loose pT>{VETO_LEP_PT:.0f})", m_veto)
             _cf(ch, f">=1 tau_h pT>{c['tau_pt']:.0f}", m_tau)
             keep = ak.to_numpy(m_tau)
             if not keep.any():
@@ -318,7 +329,9 @@ def select(ev, *, lep_pt_min=20.0, mu_eta_max=2.4, el_eta_max=2.5,
     estimate"), applying Medium only later in the analysis. The trigger thresholds, the
     elliptical signal region and the categorisation all come afterwards.
 
-    The thresholds here match that baseline. One difference cannot be matched: a Delphes
+    The thresholds here match that baseline, including the dR(l, tau_h) > 0.5 pair
+    requirement and the pT > 10 loose extra-lepton veto (both confirmed by the CROWN
+    author). One difference cannot be matched: a Delphes
     tau_h carries a single tag bit fixed at a Medium-equivalent working point, so there
     is no VVVLoose to select. That accounts for most of the residual efficiency gap --
     DeepTau Medium is ~70% efficient where VVVLoose is ~98%.

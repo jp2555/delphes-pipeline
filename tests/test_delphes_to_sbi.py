@@ -547,3 +547,41 @@ def test_a_nan_in_a_required_branch_still_drops_the_event(tmp_path):
     d, _, _ = S.features(NtupleEvents(_write(tmp_path / "a.parquet", n=3)))
     assert np.all(np.isfinite(d["m_hh"])) and np.all(np.isfinite(d["m_bb"]))
     assert set(S.REQUIRED) <= set(d)
+
+
+# --------------------------------------------------------------------------- #
+# The extra-lepton veto uses LOOSE collections at pT > 10 (CROWN
+# loose_{muon,electron}_min_pt), not the trigger-motivated selection thresholds.
+# Vetoing at the selection threshold keeps events CROWN rejects.
+# --------------------------------------------------------------------------- #
+def test_the_veto_threshold_is_ten_not_the_selection_threshold():
+    assert S.VETO_LEP_PT == 10.0
+    assert (S.VETO_MU_ETA, S.VETO_EL_ETA) == (2.4, 2.5)
+
+
+def test_a_second_lepton_below_the_selection_threshold_still_vetoes(tmp_path):
+    """A 15 GeV muon is invisible to a veto starting at 20, and CROWN rejects it."""
+    p = _cms_event(tmp_path, n=4)
+    a = ak.from_parquet(str(p))
+    m = a["Muon"]
+    soft = ak.zip({"pt": ak.full_like(m.pt, 15.0), "eta": ak.zeros_like(m.pt),
+                   "phi": ak.full_like(m.pt, 0.5),
+                   "charge": ak.full_like(m.charge, 1)})
+    a = ak.with_field(a, ak.concatenate([m, soft], axis=1), "Muon")
+    ak.to_parquet(a, str(p))
+    d, _, _ = S.features(NtupleEvents(p), cms=True, ellipse=False)
+    assert len(d["m_hh"]) == 0
+
+
+def test_a_lepton_below_the_veto_threshold_does_not_veto(tmp_path):
+    """8 GeV is below CROWN's loose collection and must be ignored."""
+    p = _cms_event(tmp_path, n=4)
+    a = ak.from_parquet(str(p))
+    m = a["Muon"]
+    tiny = ak.zip({"pt": ak.full_like(m.pt, 8.0), "eta": ak.zeros_like(m.pt),
+                   "phi": ak.full_like(m.pt, 0.5),
+                   "charge": ak.full_like(m.charge, 1)})
+    a = ak.with_field(a, ak.concatenate([m, tiny], axis=1), "Muon")
+    ak.to_parquet(a, str(p))
+    d, _, _ = S.features(NtupleEvents(p), cms=True, ellipse=False)
+    assert len(d["m_hh"]) == 4
