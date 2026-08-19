@@ -59,6 +59,19 @@ def collect(path, *, kl=None, max_events=None, sel_kw=None):
     return rows, n_read, n_final
 
 
+#: LaTeX text mode treats these as markup. `<` and `>` are MATH symbols -- in the
+#: default OT1 encoding they render as inverted punctuation -- and a bare `_` (as in
+#: "tau_h") is a hard error, not a cosmetic one.
+_TEX = {"\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$",
+        "#": r"\#", "_": r"\_", "{": r"\{", "}": r"\}", "~": r"\textasciitilde{}",
+        "^": r"\textasciicircum{}", "<": r"$<$", ">": r"$>$", "|": r"$|$"}
+
+
+def texesc(text: str) -> str:
+    """Escape a cutflow label for LaTeX text mode."""
+    return "".join(_TEX.get(c, c) for c in str(text))
+
+
 def _fmt(rows, n_read, n_final, title, tex=False):
     by_ch: dict[str, list] = {}
     for ch, label, n in rows:
@@ -69,11 +82,11 @@ def _fmt(rows, n_read, n_final, title, tex=False):
                "channel & selection & events & rel. & abs. \\\\", "\\midrule"]
         for ch, items in by_ch.items():
             prev = n_read
-            out.append(f"\\multicolumn{{5}}{{@{{}}l}}{{\\textbf{{{ch}}}}} \\\\")
+            out.append(f"\\multicolumn{{5}}{{@{{}}l}}{{\\textbf{{{texesc(ch)}}}}} \\\\")
             out.append(f" & events read & {n_read:,} & --- & 100\\% \\\\")
             for label, n in items:
                 rel = 100 * n / prev if prev else 0.0
-                out.append(f" & {label} & {n:,} & {rel:.1f}\\% & "
+                out.append(f" & {texesc(label)} & {n:,} & {rel:.1f}\\% & "
                            f"{100 * n / n_read:.3f}\\% \\\\")
                 prev = n
             out.append("\\midrule")

@@ -82,3 +82,51 @@ def test_the_latex_table_is_emitted_on_request(tmp_path):
     tex = C._fmt(rows, n_read, n_final, "t", tex=True)
     assert tex.startswith("\\begin{tabular}") and tex.rstrip().endswith("\\end{tabular}")
     assert "\\toprule" in tex and "events read" in tex
+
+
+# --------------------------------------------------------------------------- #
+# LaTeX text mode: `<` and `>` are MATH symbols (OT1 renders them as inverted
+# punctuation), and a bare `_` -- as in "tau_h" -- is a hard error.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("raw,want", [
+    (">=1 tau_h", "$>$=1 tau\\_h"),
+    ("|eta|<2.5", "$|$eta$|$$<$2.5"),
+    ("100%", "100\\%"),
+    ("a&b", "a\\&b"),
+    ("x^2", "x\\textasciicircum{}2"),
+])
+def test_tex_escaping(raw, want):
+    assert C.texesc(raw) == want
+
+
+def test_the_emitted_table_has_no_bare_math_characters(tmp_path):
+    p = _write(tmp_path / "a.parquet", n=4)
+    rows, n_read, n_final = C.collect(p)
+    tex = C._fmt(rows, n_read, n_final, "t", tex=True)
+    body = [ln for ln in tex.splitlines() if ln.startswith(" & ")]
+    assert body
+    for ln in body:
+        label = ln.split("&")[1] if ln.count("&") > 1 else ""
+        # every < > | _ in a label must be wrapped or escaped, never bare
+        for i, c in enumerate(label):
+            if c in "<>|":
+                assert label[i - 1] == "$" or label[i + 1] == "$", ln
+            if c == "_":
+                assert label[i - 1] == "\\", ln
+
+
+def test_the_emitted_table_compiles(tmp_path):
+    """The only test that actually proves it: run pdflatex over it."""
+    import shutil
+    import subprocess
+    if not shutil.which("pdflatex"):
+        pytest.skip("no pdflatex")
+    p = _write(tmp_path / "a.parquet", n=4)
+    rows, n_read, n_final = C.collect(p)
+    doc = ("\\documentclass{article}\\usepackage{booktabs}\\begin{document}\n"
+           + C._fmt(rows, n_read, n_final, "t", tex=True)
+           + "\n\\end{document}\n")
+    (tmp_path / "t.tex").write_text(doc)
+    r = subprocess.run(["pdflatex", "-interaction=nonstopmode", "t.tex"],
+                       cwd=tmp_path, capture_output=True, text=True)
+    assert (tmp_path / "t.pdf").exists(), r.stdout[-1500:]
