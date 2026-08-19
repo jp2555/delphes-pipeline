@@ -117,7 +117,8 @@ def _dR(eta1, phi1, eta2, phi2):
     return np.hypot(eta1 - eta2, _dphi(phi1, phi2))
 
 
-def cms_select(ev, *, btag_min=1, ellipse=True, channels=("mt", "et")):
+def cms_select(ev, *, btag_min=1, ellipse=True, channels=("mt", "et"),
+               cutflow=None):
     """The HIG-25-008 resolved selection, as far as Delphes can support it.
 
     APPLIED (Table 1 / Sec. 5-6):
@@ -169,7 +170,14 @@ def cms_select(ev, *, btag_min=1, ellipse=True, channels=("mt", "et")):
 
     # Sec. 5: no muon and no electron, but two tau_h -> tau_h tau_h
     tau_tt = tau_all[tau_all.pt > CMS_SEL["tt"]["tau_pt"]]
-    is_tt = (n_mu == 0) & (n_el == 0) & (ak.num(tau_tt) >= 2)
+    no_lep = (n_mu == 0) & (n_el == 0)
+    is_tt = no_lep & (ak.num(tau_tt) >= 2)
+
+    # The cutflow is read off the SAME masks the selection uses -- never recomputed --
+    # so it cannot drift away from what the converter actually does.
+    def _cf(ch, label, mask):
+        if cutflow is not None:
+            cutflow.append((ch, label, int(ak.sum(mask))))
 
     out = []
     for ch, lepcoll, chan_mask in (("mt", mu, is_mt), ("et", el, is_et),
@@ -177,6 +185,8 @@ def cms_select(ev, *, btag_min=1, ellipse=True, channels=("mt", "et")):
         if ch not in channels:
             continue
         if ch == "tt":
+            _cf(ch, "no light lepton", no_lep)
+            _cf(ch, f">=2 tau_h pT>{CMS_SEL['tt']['tau_pt']:.0f}", is_tt)
             keep = ak.to_numpy(is_tt)
             if not keep.any():
                 continue
@@ -185,12 +195,22 @@ def cms_select(ev, *, btag_min=1, ellipse=True, channels=("mt", "et")):
             L, T, J = pair[:, 0:1], pair[:, 1:2], j[keep]
         else:
             tau = tau_all[tau_all.pt > CMS_SEL[ch]["tau_pt"]]
-            keep = ak.to_numpy(chan_mask & veto & (ak.num(tau) >= 1))
+            c = CMS_SEL[ch]
+            lname = "muon" if ch == "mt" else "electron"
+            m_chan = chan_mask
+            m_veto = m_chan & veto
+            m_tau = m_veto & (ak.num(tau) >= 1)
+            _cf(ch, f"{lname} pT>{c['lep_pt']:.0f}, |eta|<{c['lep_eta']}", m_chan)
+            _cf(ch, "additional-lepton veto", m_veto)
+            _cf(ch, f">=1 tau_h pT>{c['tau_pt']:.0f}", m_tau)
+            keep = ak.to_numpy(m_tau)
             if not keep.any():
                 continue
             L, T, J = lepcoll[keep][:, :1], tau[keep][:, :1], j[keep]
         far_pair = _dR(L[:, 0].eta, L[:, 0].phi, T[:, 0].eta, T[:, 0].phi) > CMS_PAIR_DR
         ok = ak.to_numpy(far_pair)
+        if cutflow is not None:
+            cutflow.append((ch, f"dR(leg1,leg2)>{CMS_PAIR_DR}", int(ok.sum())))
         L, T, J = L[ok], T[ok], J[ok]
         idx = np.flatnonzero(keep)[ok]
 
@@ -201,8 +221,13 @@ def cms_select(ev, *, btag_min=1, ellipse=True, channels=("mt", "et")):
         J = J[ak.argsort(J.pt, axis=1, ascending=False, stable=True)]
         bb = J[ak.argsort(J.btag, axis=1, ascending=False, stable=True)][:, :2]
         ok2 = ak.to_numpy(ak.num(bb) >= 2)
+        if cutflow is not None:
+            cutflow.append((ch, f">=2 jets pT>{CMS_JET_PT:.0f} "
+                                f"|eta|<{CMS_JET_ETA}, dR>{CMS_JET_DR}", int(ok2.sum())))
         if btag_min:
             ok2 &= ak.to_numpy(ak.sum(bb.btag == 1, axis=1) >= btag_min)
+            if cutflow is not None:
+                cutflow.append((ch, f">={btag_min} b-tag", int(ok2.sum())))
         L, T, bb, J, idx = L[ok2][:, 0], T[ok2][:, 0], bb[ok2], J[ok2], idx[ok2]
         if len(idx) == 0:
             continue
@@ -213,6 +238,8 @@ def cms_select(ev, *, btag_min=1, ellipse=True, channels=("mt", "et")):
         extra["fastmtt"] = _fastmtt(ev, L, T, idx, ch)
         if ellipse:
             keep_e = _in_ellipse(ev, L, T, bb, idx, ch)
+            if cutflow is not None:
+                cutflow.append((ch, "elliptical SR (Eqs. 2-4)", int(keep_e.sum())))
             L, T, bb, idx = L[keep_e], T[keep_e], bb[keep_e], idx[keep_e]
             extra = {k: (tuple(a[keep_e] for a in v) if k == "fastmtt" else v[keep_e])
                      for k, v in extra.items()}
@@ -249,7 +276,7 @@ def _in_ellipse(ev, lep, tau, bb, idx, ch):
 def select(ev, *, lep_pt_min=20.0, mu_eta_max=2.4, el_eta_max=2.5,
            tau_pt_min=20.0, tau_eta_max=2.5,
            jet_pt_min=20.0, jet_eta_max=2.5, clean_dr=0.4,
-           btag_min=0, lep_veto=False):
+           btag_min=0, lep_veto=False, cutflow=None):
     """The mt/et preselection: one light lepton, one tau_h, two jets.
 
     Jets are cleaned against BOTH selected legs before the b pair is chosen. On Delphes a
@@ -297,7 +324,13 @@ def select(ev, *, lep_pt_min=20.0, mu_eta_max=2.4, el_eta_max=2.5,
 
     n_lep = ak.num(lep)
     ok_lep = (n_lep == 1) if lep_veto else (n_lep >= 1)
-    keep = ak.to_numpy(ok_lep & (ak.num(tau) >= 1))
+    has_tau = ok_lep & (ak.num(tau) >= 1)
+    if cutflow is not None:
+        cutflow.append(("pre", f"{'==1' if lep_veto else '>=1'} lepton "
+                               f"pT>{lep_pt_min:.0f}", int(ak.sum(ok_lep))))
+        cutflow.append(("pre", f">=1 tau_h pT>{tau_pt_min:.0f}, "
+                               f"|eta|<{tau_eta_max}", int(ak.sum(has_tau))))
+    keep = ak.to_numpy(has_tau)
     lep, tau, j = lep[keep][:, :1], tau[keep][:, :1], j[keep]
 
     j = j[(j.pt > jet_pt_min) & (np.abs(j.eta) <= jet_eta_max)]
@@ -309,9 +342,14 @@ def select(ev, *, lep_pt_min=20.0, mu_eta_max=2.4, el_eta_max=2.5,
     bb = j[ak.argsort(j.btag, axis=1, ascending=False, stable=True)][:, :2]
 
     ok = ak.to_numpy(ak.num(bb) >= 2)
+    if cutflow is not None:
+        cutflow.append(("pre", f">=2 jets pT>{jet_pt_min:.0f} |eta|<{jet_eta_max}, "
+                               f"dR>{clean_dr}", int(ok.sum())))
     if btag_min:
         # count over the CLEANED jets, then require it of the pair actually used
         ok &= ak.to_numpy(ak.sum(bb.btag == 1, axis=1) >= btag_min)
+        if cutflow is not None:
+            cutflow.append(("pre", f">={btag_min} b-tag", int(ok.sum())))
     idx = np.flatnonzero(keep)[ok]
     extra = {"n_jets": ak.to_numpy(ak.num(j[ok])),
              "n_btag": ak.to_numpy(ak.sum(j[ok].btag == 1, axis=1))}
@@ -322,19 +360,20 @@ def _mt(pt1, phi1, pt2, phi2):
     return np.sqrt(np.maximum(2 * pt1 * pt2 * (1 - np.cos(phi1 - phi2)), 0.0))
 
 
-def features(ev, *, cms=False, **sel_kw):
+def features(ev, *, cms=False, cutflow=None, **sel_kw):
     """The 12 required branches plus the Table 6.1 extras the CMS ntuple carries."""
     if cms:
         blocks = cms_select(ev, btag_min=sel_kw.get("btag_min", 1),
                             ellipse=sel_kw.get("ellipse", True),
-                            channels=sel_kw.get("channels", ("mt", "et")))
+                            channels=sel_kw.get("channels", ("mt", "et")),
+                            cutflow=cutflow)
         if not blocks:
             return {k: np.array([]) for k in REQUIRED}, 0, 0
         outs = [_build(ev, *b) for b in blocks]
         keys = set(outs[0][0]).intersection(*[set(o[0]) for o in outs])
         merged = {k: np.concatenate([o[0][k] for o in outs]) for k in keys}
         return merged, sum(o[1] for o in outs), sum(o[2] for o in outs)
-    return _build(ev, *select(ev, **sel_kw))
+    return _build(ev, *select(ev, cutflow=cutflow, **sel_kw))
 
 
 def _build(ev, lep, tau, bb, idx, extra):
