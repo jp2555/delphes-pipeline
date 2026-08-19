@@ -34,7 +34,7 @@ def collect(path, *, kl=None, max_events=None, sel_kw=None):
     """(cutflow rows, n_read, n_final). Rows are (channel, label, n_remaining)."""
     sel_kw = dict(sel_kw or {})
     rows: list[tuple[str, str, int]] = []
-    n_read = n_final = 0
+    n_read = n_final = n_nonfinite = n_mixed = 0
     acc: dict[tuple[str, str], int] = {}
     order: list[tuple[str, str]] = []
     for f in resolve_ntuple_paths(path):
@@ -47,8 +47,10 @@ def collect(path, *, kl=None, max_events=None, sel_kw=None):
             continue
         n_read += ev.n
         cf: list[tuple[str, str, int]] = []
-        d, _, _ = features(ev, cutflow=cf, **sel_kw)
+        d, dropped, dropped_mixed = features(ev, cutflow=cf, **sel_kw)
         n_final += len(d["m_hh"])
+        n_nonfinite += dropped
+        n_mixed += dropped_mixed
         for ch, label, n in cf:
             key = (ch, label)
             if key not in acc:
@@ -56,6 +58,10 @@ def collect(path, *, kl=None, max_events=None, sel_kw=None):
                 order.append(key)
             acc[key] += n
     rows = [(ch, label, acc[(ch, label)]) for ch, label in order]
+    if n_nonfinite:
+        rows.append(("all", "dropped: non-finite required branch", -n_nonfinite))
+    if n_mixed:
+        rows.append(("all", "dropped: dataset_id = -1 (mixed shard)", -n_mixed))
     return rows, n_read, n_final
 
 
@@ -85,6 +91,9 @@ def _fmt(rows, n_read, n_final, title, tex=False):
             out.append(f"\\multicolumn{{5}}{{@{{}}l}}{{\\textbf{{{texesc(ch)}}}}} \\\\")
             out.append(f" & events read & {n_read:,} & --- & 100\\% \\\\")
             for label, n in items:
+                if n < 0:
+                    out.append(f" & {texesc(label)} & {-n:,} & --- & --- \\\\")
+                    continue
                 rel = 100 * n / prev if prev else 0.0
                 out.append(f" & {texesc(label)} & {n:,} & {rel:.1f}\\% & "
                            f"{100 * n / n_read:.3f}\\% \\\\")
@@ -103,6 +112,9 @@ def _fmt(rows, n_read, n_final, title, tex=False):
         prev = n_read
         out.append(f"  {'events read':{w - 2}s} {n_read:>12,} {'':>8s} {100.0:>8.3f}%")
         for label, n in items:
+            if n < 0:                      # a reported LOSS, not a survivor count
+                out.append(f"  {label:{w - 2}s} {-n:>12,} {'':>8s}")
+                continue
             rel = 100 * n / prev if prev else 0.0
             out.append(f"  {label:{w - 2}s} {n:>12,} {rel:>7.1f}% "
                        f"{100 * n / max(n_read, 1):>8.3f}%")

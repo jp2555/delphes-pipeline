@@ -162,3 +162,21 @@ def test_the_crown_cutflow_labels_show_the_looser_thresholds(tmp_path):
     labels = " ".join(l for _, l, _ in rows)
     assert "pT>20" in labels and "pT>22" not in labels
     assert not any("b-tag" in l for _, l, _ in rows), "CROWN has no b-tag requirement"
+
+
+def test_post_selection_losses_are_shown_not_hidden(tmp_path, monkeypatch):
+    """A factor-3 loss between the last cut and the final count must be visible."""
+    import delphes_to_sbi as D
+    p = _cms_event(tmp_path, n=6)
+    real = D._sum_p4
+
+    def break_mbb(a, b):
+        pt, eta, phi, m = real(a, b)
+        return pt, eta, phi, np.where(np.arange(len(np.atleast_1d(m))) % 2 == 0,
+                                      np.nan, m)
+
+    monkeypatch.setattr(D, "_sum_p4", break_mbb)
+    rows, n_read, n_final = C.collect(p, sel_kw={"cms": True, "ellipse": False})
+    losses = [(l, n) for _, l, n in rows if n < 0]
+    assert losses, "a non-finite drop must appear as its own row"
+    assert any("non-finite" in l for l, _ in losses)

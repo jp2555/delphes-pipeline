@@ -516,3 +516,34 @@ def test_the_docstring_records_the_vvvloose_difference():
     """A Delphes tau bit is Medium-equivalent; there is no VVVLoose to select."""
     doc = S.select.__doc__
     assert "VVVLoose" in doc and "CROWN" in doc
+
+
+# --------------------------------------------------------------------------- #
+# Finiteness must gate only the REQUIRED branches. FastMTT returns NaN where its
+# likelihood is everywhere zero; gating on it discarded ~2/3 of good events on a
+# diagnostic the selection does not use when the ellipse is off.
+# --------------------------------------------------------------------------- #
+def test_a_nan_in_an_optional_branch_does_not_drop_the_event(tmp_path, monkeypatch):
+    import delphes_to_sbi as D
+    p = _cms_event(tmp_path, n=6)
+    n_ok = len(S.features(NtupleEvents(p), cms=True, ellipse=False)[0]["m_hh"])
+    assert n_ok == 6
+
+    real = D._fastmtt
+
+    def all_nan(ev, lep, tau, idx, ch):
+        m, x1, x2 = real(ev, lep, tau, idx, ch)
+        return np.full_like(m, np.nan), x1, x2
+
+    monkeypatch.setattr(D, "_fastmtt", all_nan)
+    d, dropped, _ = S.features(NtupleEvents(p), cms=True, ellipse=False)
+    assert len(d["m_hh"]) == 6, "a failed FastMTT must not veto the event"
+    assert dropped == 0
+    assert np.all(np.isnan(d["m_tautau_fastmtt"])), "the NaN stays in its own column"
+
+
+def test_a_nan_in_a_required_branch_still_drops_the_event(tmp_path):
+    """The filter must still protect the branches the fit actually consumes."""
+    d, _, _ = S.features(NtupleEvents(_write(tmp_path / "a.parquet", n=3)))
+    assert np.all(np.isfinite(d["m_hh"])) and np.all(np.isfinite(d["m_bb"]))
+    assert set(S.REQUIRED) <= set(d)

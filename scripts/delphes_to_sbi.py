@@ -472,9 +472,15 @@ def _build(ev, lep, tau, bb, idx, extra):
         out["dataset_id"] = ak.to_numpy(ev.array["dataset_id"])[idx].astype(np.float64)
 
     out = {k: np.asarray(v, dtype=np.float64) for k, v in out.items()}
+    # Finiteness gates ONLY the REQUIRED branches. The optional extras include the
+    # FastMTT quantities, and FastMTT returns NaN wherever its likelihood is everywhere
+    # zero -- gating on those threw away ~2/3 of otherwise good events, on a diagnostic
+    # the selection does not even use when the ellipse is off. A failed FastMTT leaves a
+    # NaN in its own column and nothing else.
     good = np.ones(len(out["m_hh"]), dtype=bool)
-    for v in out.values():
-        good &= np.isfinite(v)
+    for k in REQUIRED:
+        if k in out:
+            good &= np.isfinite(out[k])
     if "dataset_id" in out:
         # -1 marks events whose SHARD straddled two primary datasets. Their cross section
         # is genuinely ambiguous; keeping them would mean normalising with a number
