@@ -34,7 +34,8 @@ def test_counts_are_monotonically_non_increasing(tmp_path):
     p = _cms_event(tmp_path, n=8)
     rows, n_read, _ = C.collect(p, sel_kw={"cms": True, "ellipse": False})
     for ch in {r[0] for r in rows}:
-        seq = [n for c, _, n in rows if c == ch]
+        # None marks a cut that is NOT APPLIED; it has no survivor count
+        seq = [n for c, _, n in rows if c == ch and n is not None]
         assert seq == sorted(seq, reverse=True), f"{ch}: {seq}"
         assert seq[0] <= n_read
 
@@ -177,6 +178,62 @@ def test_post_selection_losses_are_shown_not_hidden(tmp_path, monkeypatch):
 
     monkeypatch.setattr(D, "_sum_p4", break_mbb)
     rows, n_read, n_final = C.collect(p, sel_kw={"cms": True, "ellipse": False})
-    losses = [(l, n) for _, l, n in rows if n < 0]
+    losses = [(l, n) for _, l, n in rows if n is not None and n < 0]
     assert losses, "a non-finite drop must appear as its own row"
     assert any("non-finite" in l for l, _ in losses)
+
+
+# --------------------------------------------------------------------------- #
+# A cut that is NOT APPLIED must be visible. Silently omitting the row is how an
+# absent selection becomes invisible -- the same failure as the finiteness loss.
+# --------------------------------------------------------------------------- #
+def test_opposite_charge_is_reported_as_not_applied_without_jet_charge(tmp_path):
+    p = _cms_event(tmp_path, n=4)                 # fixture has no Jet.charge
+    assert not NtupleEvents(p).has_jet_charge
+    rows, _, _ = C.collect(p, sel_kw={"cms": True, "ellipse": False})
+    os_rows = [(l, n) for _, l, n in rows if "opposite charge" in l]
+    assert os_rows, "an unapplied cut must still appear"
+    label, n = os_rows[0]
+    assert n is None and "NOT APPLIED" in label and "no Jet.charge" in label
+
+
+def _with_charge(tmp, jet_q, lep_q, n=6):
+    """A CMS-selectable event whose legs carry explicit charges."""
+    jets = [[{"pt": 90.0, "eta": 0.5, "phi": 0.0, "mass": 8.0, "btag": 1,
+              "tautag": 0, "hadronFlavour": 5, "charge": 0.1},
+             {"pt": 70.0, "eta": -0.4, "phi": 2.8, "mass": 7.0, "btag": 1,
+              "tautag": 0, "hadronFlavour": 5, "charge": -0.1},
+             {"pt": 45.0, "eta": 1.0, "phi": 1.4, "mass": 1.2, "btag": 0,
+              "tautag": 1, "hadronFlavour": 0, "charge": jet_q}]] * n
+    f = {"Jet": ak.Array(jets),
+         "Electron": ak.Array([[{"pt": 9.0, "eta": 0.0, "phi": 0.0,
+                                "charge": 1}]] * n)[:, :0],
+         "Muon": ak.Array([[{"pt": 40.0, "eta": -0.2, "phi": 2.0,
+                             "charge": lep_q}]] * n),
+         "MET_pt": np.full(n, 55.0, dtype=np.float32),
+         "MET_phi": np.full(n, 1.0, dtype=np.float32),
+         "genWeight": np.ones(n, dtype=np.float32)}
+    q = tmp / "q.parquet"
+    ak.to_parquet(ak.zip(f, depth_limit=1), str(q))
+    return q
+
+
+def test_opposite_charge_is_applied_when_the_column_exists(tmp_path):
+    p = _with_charge(tmp_path, jet_q=+1.0, lep_q=-1)      # opposite -> kept
+    assert NtupleEvents(p).has_jet_charge
+    rows, _, n_final = C.collect(p, sel_kw={"cms": True, "ellipse": False})
+    os_rows = [n for _, l, n in rows if l == "opposite charge"]
+    assert os_rows and os_rows[0] == 6 and n_final == 6
+
+
+def test_same_sign_pairs_are_rejected(tmp_path):
+    p = _with_charge(tmp_path, jet_q=-1.0, lep_q=-1)      # same sign -> cut
+    rows, _, n_final = C.collect(p, sel_kw={"cms": True, "ellipse": False})
+    os_rows = [n for _, l, n in rows if l == "opposite charge"]
+    assert os_rows and os_rows[0] == 0 and n_final == 0
+
+
+def test_the_os_cut_can_be_disabled_explicitly(tmp_path):
+    p = _with_charge(tmp_path, jet_q=-1.0, lep_q=-1)
+    _, _, n = C.collect(p, sel_kw={"cms": True, "ellipse": False, "os_cut": False})
+    assert n == 6, "same-sign kept when the cut is off"

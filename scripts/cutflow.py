@@ -54,9 +54,10 @@ def collect(path, *, kl=None, max_events=None, sel_kw=None):
         for ch, label, n in cf:
             key = (ch, label)
             if key not in acc:
-                acc[key] = 0
+                acc[key] = None if n is None else 0
                 order.append(key)
-            acc[key] += n
+            if n is not None:
+                acc[key] = (acc[key] or 0) + n
     rows = [(ch, label, acc[(ch, label)]) for ch, label in order]
     if n_nonfinite:
         rows.append(("all", "dropped: non-finite required branch", -n_nonfinite))
@@ -91,6 +92,9 @@ def _fmt(rows, n_read, n_final, title, tex=False):
             out.append(f"\\multicolumn{{5}}{{@{{}}l}}{{\\textbf{{{texesc(ch)}}}}} \\\\")
             out.append(f" & events read & {n_read:,} & --- & 100\\% \\\\")
             for label, n in items:
+                if n is None:
+                    out.append(f" & {texesc(label)} & --- & --- & --- \\\\")
+                    continue
                 if n < 0:
                     out.append(f" & {texesc(label)} & {-n:,} & --- & --- \\\\")
                     continue
@@ -112,6 +116,9 @@ def _fmt(rows, n_read, n_final, title, tex=False):
         prev = n_read
         out.append(f"  {'events read':{w - 2}s} {n_read:>12,} {'':>8s} {100.0:>8.3f}%")
         for label, n in items:
+            if n is None:                  # a cut that is NOT APPLIED
+                out.append(f"  {label:{w - 2}s} {'--':>12s}")
+                continue
             if n < 0:                      # a reported LOSS, not a survivor count
                 out.append(f"  {label:{w - 2}s} {-n:>12,} {'':>8s}")
                 continue
@@ -138,6 +145,7 @@ def main(argv=None):
     ap.add_argument("--btag-min", type=int, default=0)
     ap.add_argument("--lep-veto", action="store_true")
     ap.add_argument("--no-ellipse", action="store_true")
+    ap.add_argument("--no-os", action="store_true")
     ap.add_argument("--tex", action="store_true", help="emit a LaTeX tabular")
     args = ap.parse_args(argv)
 
@@ -148,6 +156,7 @@ def main(argv=None):
                   "btag_min": args.btag_min if args.crown else max(args.btag_min, 1),
                   "ellipse": not args.no_ellipse,
                   "thresholds": CROWN_SEL if args.crown else CMS_SEL,
+                  "os_cut": not args.no_os,
                   "channels": tuple(c.strip() for c in args.channels.split(","))}
         mode = ("CROWN ntuple baseline" if args.crown
                 else "CMS HIG-25-008 resolved")

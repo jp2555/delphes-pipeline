@@ -380,6 +380,17 @@ class NtupleEvents:
                        "btag": j.btag, "tautag": j.tautag, "flavor": j.hadronFlavour,
                        "charge": charge})
 
+    @property
+    def has_jet_charge(self) -> bool:
+        """Whether the ntuple carries a real Jet.Charge, or only the zeros fallback.
+
+        A tau_h IS a jet here, so this is what decides whether an opposite-sign
+        requirement can be applied at all. Ntuples written before the column was added
+        to the schema report False, and the cut must then be reported as NOT APPLIED
+        rather than silently skipped.
+        """
+        return "charge" in ak.fields(self.array["Jet"])
+
     @cached_property
     def taus(self) -> ak.Array:
         return self.array["Tau"]

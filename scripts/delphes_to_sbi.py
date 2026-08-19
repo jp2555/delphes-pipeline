@@ -128,7 +128,7 @@ def _dR(eta1, phi1, eta2, phi2):
 
 
 def cms_select(ev, *, btag_min=1, ellipse=True, channels=("mt", "et"),
-               cutflow=None, thresholds=None):
+               cutflow=None, thresholds=None, os_cut=True):
     """The HIG-25-008 resolved selection, as far as Delphes can support it.
 
     APPLIED (Table 1 / Sec. 5-6):
@@ -168,7 +168,7 @@ def cms_select(ev, *, btag_min=1, ellipse=True, channels=("mt", "et"),
         # zip in the massless four-vector field the builder expects; the raw ntuple
         # lepton carries only pt/eta/phi/charge
         sel = ak.zip({"pt": sel.pt, "eta": sel.eta, "phi": sel.phi,
-                      "mass": ak.zeros_like(sel.pt)})
+                      "mass": ak.zeros_like(sel.pt), "charge": sel.charge})
         return sel[ak.argsort(sel.pt, axis=1, ascending=False, stable=True)]
 
     mu, el = _lep(m, "mt"), _lep(e, "et")
@@ -222,6 +222,22 @@ def cms_select(ev, *, btag_min=1, ellipse=True, channels=("mt", "et"),
         ok = ak.to_numpy(far_pair)
         if cutflow is not None:
             cutflow.append((ch, f"dR(leg1,leg2)>{CMS_PAIR_DR}", int(ok.sum())))
+
+        # Opposite sign. A tau_h IS a jet here, so its "charge" is Delphes' pT-weighted
+        # JET charge -- a continuous, noisy proxy for the sum of the prong charges CMS
+        # uses, which is an exact +-1. Applying it is still much closer to CROWN than
+        # keeping same-sign pairs, which are CMS's ~99%-pure QCD control region.
+        if os_cut and ev.has_jet_charge:
+            q1 = ak.to_numpy(L[:, 0].charge)
+            q2 = ak.to_numpy(T[:, 0].charge)
+            opp = (q1 * q2) < 0
+            ok &= opp
+            if cutflow is not None:
+                cutflow.append((ch, "opposite charge", int(ok.sum())))
+        elif cutflow is not None:
+            why = ("no Jet.charge in this ntuple" if not ev.has_jet_charge
+                   else "disabled")
+            cutflow.append((ch, f"opposite charge: NOT APPLIED ({why})", None))
         L, T, J = L[ok], T[ok], J[ok]
         idx = np.flatnonzero(keep)[ok]
 
@@ -378,7 +394,8 @@ def features(ev, *, cms=False, cutflow=None, **sel_kw):
                             ellipse=sel_kw.get("ellipse", True),
                             channels=sel_kw.get("channels", ("mt", "et")),
                             cutflow=cutflow,
-                            thresholds=sel_kw.get("thresholds"))
+                            thresholds=sel_kw.get("thresholds"),
+                            os_cut=sel_kw.get("os_cut", True))
         if not blocks:
             return {k: np.array([]) for k in REQUIRED}, 0, 0
         outs = [_build(ev, *b) for b in blocks]
@@ -566,6 +583,9 @@ def main(argv=None):
                          "CMS's most sensitive channel, but then the Delphes sample "
                          "covers a final state the CMS test does not and the two are no "
                          "longer comparable.")
+    ap.add_argument("--no-os", action="store_true",
+                    help="skip the opposite-sign requirement even when the ntuple "
+                         "carries Jet.charge (it is applied by default where possible)")
     ap.add_argument("--no-ellipse", action="store_true",
                     help="with --cms-selection: skip the elliptical (m_tautau, m_bb) SR")
     ap.add_argument("--lep-veto", action="store_true",
@@ -582,7 +602,8 @@ def main(argv=None):
         sel_kw = {"cms": True, "channels": chans,
                   "btag_min": args.btag_min if args.crown else max(args.btag_min, 1),
                   "ellipse": not args.no_ellipse,
-                  "thresholds": CROWN_SEL if args.crown else CMS_SEL}
+                  "thresholds": CROWN_SEL if args.crown else CMS_SEL,
+                  "os_cut": not args.no_os}
         mode = "CROWN ntuple baseline" if args.crown else "CMS HIG-25-008 resolved"
         print(f"[sbi] selection: {mode}, channels={','.join(chans)}, "
               f"btag_min={sel_kw['btag_min']}, ellipse={sel_kw['ellipse']}")
