@@ -40,6 +40,10 @@ if [ -n "${PROXY}" ]; then
 fi
 
 SHARD_GB="${SHARD_GB:-20}"
+# Files per shard. The byte cap alone assumes constant bytes-per-event, which low-mass
+# DY breaks badly: its events are soft and compress well, so a 20 GB shard held enough
+# of them to exhaust even a 45 GB slot. 60 bounds the concatenate regardless.
+SHARD_FILES="${SHARD_FILES:-60}"
 # Measured: peak RSS ~1.3x the shard's INPUT size (22.0 GB mean / 26.7 GB max at 20 GB
 # shards). Request 30 GB, never below the measured mean -- dropping it to 16 GB held 20
 # running jobs mid-flight.
@@ -55,7 +59,8 @@ $RUN scripts/make_shards.py \
     --sample dy_1j   "${SRC}/*DYto2Tau*Bin-1J-MLL-50*" none "${SUB_BKG}" \
     --sample dy_2j   "${SRC}/*DYto2Tau*Bin-2J-MLL-50*" none "${SUB_BKG}" \
     --sample dy_low  "${SRC}/*DYto2Tau*Bin-MLL-10to50*" none "${SUB_BKG}" \
-    --out "${OUT}" --shard-gb "${SHARD_GB}" --memory "${MEMORY}" ${PROXYARG} \
+    --out "${OUT}" --shard-gb "${SHARD_GB}" --shard-files "${SHARD_FILES}" \
+    --memory "${MEMORY}" ${PROXYARG} \
     ${REFRESH:+--refresh}
 
 cat <<EOF

@@ -174,6 +174,15 @@ def list_dirs(pattern, subtree=None, cache=None, refresh=False):
     return 0
 
 
+#: primary dataset a file belongs to; shards must not straddle two of them
+_DATASET_PATH_RE = re.compile(r"/([A-Za-z0-9][^/]*?_TuneCP5_[^/]*?)_Delphes")
+
+
+def _dataset_of_path(f):
+    m = _DATASET_PATH_RE.search(f)
+    return m.group(1) if m else None
+
+
 def maps_fingerprint(path):
     """sha256 of a maps file, so a plan pins map CONTENT and not just a filename.
 
@@ -378,7 +387,7 @@ def main(argv=None):
                          "subtree), so always pair it with '_Delphes_v1/'.")
     ap.add_argument("--out", help="output directory for the parquet shards "
                                   "(not needed with --verify)")
-    ap.add_argument("--shard-files", type=int, default=400,
+    ap.add_argument("--shard-files", type=int, default=60,
                     help="fallback cap on files per shard, used when sizes are unavailable "
                          "and as a hard ceiling otherwise — without it a listing that "
                          "reports no sizes would put the entire sample in one job")
@@ -469,7 +478,16 @@ def main(argv=None):
         counts = [_events(f) for f, _ in files] if args.count_events else [None] * len(files)
         target = args.shard_events if by_events else args.shard_gb * 1e9
         shards, cur, acc = [], [], 0.0
+        # Break at a DATASET boundary as well as on size/count. One --sample can span
+        # several CMS primary datasets (ttbar globs three decay channels, DY is binned),
+        # and a shard straddling two of them holds events with different cross sections
+        # that cannot be labelled -- 450k such events had to be discarded last campaign.
+        prev_ds = None
         for (f, size), c in zip(files, counts):
+            ds = _dataset_of_path(f)
+            if cur and ds != prev_ds:
+                shards.append(cur); cur, acc = [], 0.0
+            prev_ds = ds
             cur.append(f)
             acc += (c or 0) if by_events else size
             if acc >= target or len(cur) >= args.shard_files:

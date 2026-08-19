@@ -768,3 +768,37 @@ def test_a_local_source_needs_no_proxy(tmp_path):
     make_shards.main(["--sample", "sig", str(src / "*.root"), "none",
                       "--out", str(tmp_path / "o3"), "--shard-gb", "1e-9"])
     assert (tmp_path / "o3" / "_plan" / "manifest.json").exists()
+
+
+# --------------------------------------------------------------------------- #
+# A shard must not straddle two primary datasets: their cross sections differ, so
+# the events cannot be labelled. 450k events were discarded for this last time.
+# --------------------------------------------------------------------------- #
+def _multi_ds_src(tmp, per=3):
+    for name in ("TTto2L2Nu", "TTto4Q", "TTtoLNu2Q"):
+        d = tmp / f"{name}_TuneCP5_13p6TeV_powheg-pythia8_Delphes_v1" / "tree"
+        d.mkdir(parents=True)
+        for i in range(per):
+            (d / f"f{i}.root").write_bytes(b"x" * 4096)
+    return tmp
+
+
+def test_shards_never_straddle_a_dataset_boundary(tmp_path):
+    src = _multi_ds_src(tmp_path)
+    out = tmp_path / "out"
+    make_shards.main(["--sample", "ttbar", str(src / "*TT*"), "none",
+                      "--out", str(out), "--shard-gb", "1"])   # 1 GB: size never binds
+    plan = json.load(open(out / "_plan" / "manifest.json"))["shards"]
+    assert plan
+    for e in plan:
+        names = {make_shards._dataset_of_path(f) for f in e["files"]}
+        assert len(names) == 1, f"shard {e['shard']} spans {names}"
+
+
+def test_the_default_file_cap_is_small_enough_for_dense_samples():
+    """400 files let low-mass DY shards hold enough events to exhaust 45 GB."""
+    import argparse
+    ap = [a for a in make_shards.main.__doc__ or ""] if False else None
+    import inspect
+    src = inspect.getsource(make_shards.main)
+    assert '"--shard-files", type=int, default=60' in src
