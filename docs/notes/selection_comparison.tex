@@ -1,0 +1,211 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue,urlcolor=blue]{hyperref}
+\usepackage{siunitx}
+
+\newcommand{\tauh}{\tau_{h}}
+\newcommand{\mtautau}{m_{\tau\tau}}
+\newcommand{\mbb}{m_{bb}}
+\newcommand{\mhh}{m_{HH}}
+\newcommand{\ptmiss}{p_{T}^{\mathrm{miss}}}
+\newcommand{\yes}{\textcolor{teal}{\ding{51}}}
+\usepackage{pifont}
+\newcommand{\ok}{\textcolor{teal}{$\checkmark$}}
+\newcommand{\no}{\textcolor{red}{$\times$}}
+\newcommand{\pt}{p_{T}}
+
+\title{\vspace{-1.5cm}Delphes event selection vs.\ CMS HIG-25-008\\
+\large what the ntuple converter applies, and what it cannot}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+\vspace{-0.8cm}
+
+\begin{abstract}
+\noindent
+Comparison of the CMS Run-3 HH$\rightarrow b\bar b\tau\tau$ selection (HIG-25-008,
+Table~1 and Sections~5--6) against the two selections implemented in the Delphes
+ntuple converter: a deliberately loose \emph{preselection} (the default) and
+\texttt{--cms-selection}. The purpose is to make every difference explicit, so that
+yields and sensitivities computed on the Delphes samples are read with the right
+caveats rather than compared naively against the published numbers.
+\end{abstract}
+
+\section{Scope}
+
+The converter (\texttt{scripts/delphes\_to\_sbi.py}) turns merged Delphes ntuples into
+the flat SBI input format. It has two selection modes serving different purposes:
+
+\begin{description}\itemsep2pt
+\item[Preselection (default).] One light lepton, one $\tauh$, two jets. Built to mirror
+  the \emph{inputs of the NSBI test}, not the CMS analysis. It applies no b-tag
+  requirement, no charge requirement, no vetoes and no mass windows. This is why its
+  signal$/t\bar t$ acceptance ratio is $\sim$2.5 rather than the hundreds a real
+  $b\bar b\tau\tau$ selection gives.
+\item[\texttt{--cms-selection}.] The HIG-25-008 resolved selection, as far as Delphes
+  can support it. Intended for a comparison against the published expected results.
+\end{description}
+
+Both are semi-leptonic by default ($\tau_\mu\tauh$, $\tau_e\tauh$);
+\texttt{--channels mt,et,tt} adds $\tauh\tauh$.
+
+\section{Event content and channels}
+
+\begin{table}[htbp]
+\centering\small
+\begin{tabular}{@{}lp{4.3cm}p{3.4cm}p{4.0cm}@{}}
+\toprule
+& \textbf{CMS HIG-25-008} & \textbf{preselection} & \textbf{\texttt{--cms-selection}} \\
+\midrule
+Channels & $\tau_\mu\tauh$, $\tau_e\tauh$, $\tauh\tauh$, boosted-$\tauh\tauh$
+         & $\ell\tauh$ only & $\tau_\mu\tauh$, $\tau_e\tauh$ \ok;
+           $\tauh\tauh$ opt-in \\
+Channel assignment & $\mu \rightarrow \tau_\mu\tauh$, else $e \rightarrow \tau_e\tauh$,
+                     else 2nd $\tauh \rightarrow \tauh\tauh$ (\S5)
+                   & none & same priority \ok \\
+Trigger & single-$\ell$, cross $\ell$-$\tau$, di-$\tau$, di-$\tau$+jet, HH-Parking,
+          VBF, boosted (\S5) & \no\ none & \no\ none \\
+Categories & boosted / VBF / resolved 1b1j / resolved 2b $\rightarrow$ 10 SRs (\S6)
+           & \no\ none & \no\ none \\
+Discriminant & ggHH and qqHH DNNs, 5-fold ensemble (\S6) & --- & --- (NSBI replaces it) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Object selection}
+
+\begin{table}[htbp]
+\centering\small
+\begin{tabular}{@{}lp{4.6cm}p{3.1cm}p{3.9cm}@{}}
+\toprule
+& \textbf{CMS (Table~1)} & \textbf{preselection} & \textbf{\texttt{--cms-selection}} \\
+\midrule
+Muon $\pt$ & $>22/26/6\,\si{\GeV}$ (cross $\mu$-$\tau$ / single $\mu$ / VBF+$\mu$)
+           & $>20$ & $>22$ (cross) \ok \\
+Muon $|\eta|$ & $<2.4$ & $\le 2.4$ \ok & $\le 2.4$ \ok \\
+Muon ID, isolation & Tight Muon ID, PF rel.\ iso $<0.15$ & \no\ none & \no\ none \\
+\midrule
+Electron $\pt$ & $>25/31/13(18)\,\si{\GeV}$ (cross $e$-$\tau$ / single $e$ / VBF+$e$)
+               & $>20$ & $>25$ (cross) \ok \\
+Electron $|\eta|$ & $<2.5$ & $\le 2.4$ & $\le 2.5$ \ok \\
+Electron ID & Tight MVA Isolation+ID (80\% eff.) & \no\ none & \no\ none \\
+\midrule
+Lepton $|d_{xy}|$, $|d_z|$ & $<0.045$, $<0.2\,\si{\cm}$ & \no\ n/a & \no\ n/a \\
+\midrule
+$\tauh$ $\pt$ & 32 ($\tau_\mu\tauh$), 35 ($\tau_e\tauh$),
+                40/35/25 ($\tauh\tauh$, trigger-dependent)
+              & $>20$ & 32 / 35 \ok; 40 ($\tauh\tauh$) \ok \\
+$\tauh$ $|\eta|$, $|d_z|$ & $<2.5$, $<0.2\,\si{\cm}$ & $\le 2.3$ & $\le 2.5$ \ok, no $d_z$ \\
+$\tauh$ identification & \textsc{DeepTau}: $D^\tau_{\mathrm{jet}}$ Medium,
+                         $D^\tau_e$ VVLoose, $D^\tau_\mu$ VLoose/Tight
+                       & one tag bit & \no\ one tag bit \\
+$\tauh$ object & HPS; decay modes 1-prong$+0,1,2\pi^0$, 3-prong$+0,1\pi^0$
+               & \no\ AK4 jet with a tag bit & \no\ AK4 jet with a tag bit \\
+\midrule
+$H\rightarrow b\bar b$ jets & AK4, $\pt>20$, $|\eta|<2.5$,
+                              $\Delta R(j,\ell)>0.5$ from both $\tau$ candidates (\S5)
+                            & $\pt>20$, $|\eta|\le2.4$, $\Delta R>0.4$
+                            & \ok\ exactly as CMS \\
+b-jet pair assignment & HH-\textsc{bTag} DNN (\S5) & two highest b-tag
+                      & \no\ two highest b-tag \\
+b-tagging & \textsc{UParT} (2024); categories split at the \textbf{10\% mistag} WP (\S6)
+          & \no\ none required
+          & \texttt{--btag-min} at \textsc{UParT} Medium ($\sim$1\% mistag) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Pair selection and signal region}
+
+\begin{table}[htbp]
+\centering\small
+\begin{tabular}{@{}lp{4.6cm}p{3.1cm}p{3.9cm}@{}}
+\toprule
+& \textbf{CMS} & \textbf{preselection} & \textbf{\texttt{--cms-selection}} \\
+\midrule
+Opposite charge & required (Table~1) & \no\ no & \no\ no --- see \S\ref{sec:cannot} \\
+$\Delta R(\ell,\tauh)$ & $>0.5$ (resolved); $<0.8$ (boosted) & none & $>0.5$ \ok \\
+Additional-lepton veto & required (Table~1, \S5) & \no\ no & yes \ok \\
+Signal region & ellipse in $(\mtautau,\mbb)$, Eqs.~2--4 & \no\ none & yes \ok \\
+$\mtautau$ used in the ellipse & DNN-regressed $\tau\tau$ mass (\S5) & --- & FastMTT
+  (closest available) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent The elliptical selections implemented, from Eqs.~2--4:
+\begin{align*}
+\frac{(\mtautau-116)^2}{61^2} + \frac{(\mbb-114)^2}{228^2} &< 1 \qquad (\tau_\mu\tauh) \\
+\frac{(\mtautau-119)^2}{57^2} + \frac{(\mbb-109)^2}{232^2} &< 1 \qquad (\tau_e\tauh) \\
+\frac{(\mtautau-117)^2}{54^2} + \frac{(\mbb-134)^2}{169^2} &< 1 \qquad (\tauh\tauh)
+\end{align*}
+CMS quotes $\sim$99\% signal efficiency for these, with background efficiencies of
+62\%, 60\% and 54\% respectively.
+
+\section{What Delphes cannot support, and why}
+\label{sec:cannot}
+
+\begin{description}\itemsep3pt
+\item[Opposite charge.] The ntuple's \texttt{Jet} collection carried no charge field, so
+  the $\tauh$ leg had no charge to compare and \texttt{--cms-selection} is charge-blind.
+  This matters more than it sounds: same-sign pairs are CMS's QCD control region at
+  $\sim$99\% purity (\S7), i.e.\ an essentially pure fake-$\tau$ population that CMS
+  removes and we keep. \emph{Delphes does write \texttt{Jet.Charge}} --- it was simply not
+  carried into the ntuple schema. Now added; it requires a re-ntuplisation (not a
+  re-simulation) to take effect.
+\item[Lepton ID, isolation, impact parameters.] Delphes leptons carry only the card's
+  efficiency parameterisation. There is no ID discriminant, no isolation and no $d_{xy}$
+  or $d_z$ to cut on.
+\item[$\tauh$ object and identification.] A Delphes $\tauh$ \emph{is} an AK4 jet carrying
+  a single tag bit, not an HPS-reconstructed visible $\tau$. Consequences: jet-level
+  four-vector (underlying event inside $R=0.4$), no decay modes, and one bit in place of
+  the three \textsc{DeepTau} discriminants. This shifts the whole $\tau\tau$ block ---
+  $\mtautau$, $\Delta R_{\tau\tau}$, and the ellipse acceptance --- and no selection
+  change addresses it.
+\item[b-jet pair assignment.] CMS uses the HH-\textsc{bTag} DNN; we take the two
+  highest-b-tag jets. This lands directly on $\mbb$ and $\Delta R_{bb}$.
+\item[b-tag working point.] The Delphes bit is \textsc{UParT}-AK4 Medium (cut $0.1272$;
+  card PATCH-6), i.e.\ $\sim$1\% mistag. CMS's resolved 1b1j/2b split uses the
+  \textbf{10\% mistag} working point. \texttt{--btag-min 2} is therefore \emph{tighter}
+  than CMS's 2b category boundary, not equivalent to it.
+\item[Trigger and categorisation.] No trigger is applied, and the sample is flat rather
+  than split into the ten category$\times$channel signal regions CMS fits.
+\item[Boosted and VBF topologies.] AK8 jets and the VBF jet pair are not written to the
+  ntuple, so those categories are absent entirely.
+\end{description}
+
+\section{Consequences worth stating alongside any number}
+
+\begin{enumerate}\itemsep3pt
+\item \textbf{The default preselection is not the CMS selection} and should never be
+  compared directly against published yields. Its purpose is comparability with the NSBI
+  test's own inputs.
+\item \textbf{$\mhh$ and $\mtautau$ are visible masses} in the converter output. The CMS
+  reference ntuple takes $\mhh$ from a branch (\texttt{mass\_tautaubb}) whose definition
+  should be confirmed --- if it is the corrected $\tau\tau$ system, the two are different
+  observables and any $\mhh$ threshold behaves differently on each. FastMTT-corrected
+  versions (\texttt{m\_hh\_fastmtt}, \texttt{m\_tautau\_fastmtt}) are carried alongside
+  for exactly this reason.
+\item \textbf{The stock (untuned) card underestimates the $j\rightarrow\tauh$ fake rate.}
+  CMS quotes $10^{-2}$--$10^{-3}$ (\S7); in the untuned samples the fully-hadronic
+  $t\bar t$ component contributes essentially nothing. The fake background is therefore
+  \emph{too small}, and $S/B$ correspondingly optimistic. This is a detector-model
+  deficiency, not a selection one, and is what the tuning $\tau$-mistag map addresses.
+\item \textbf{$\Delta R(j,\ell)$ differs between the two modes} (0.4 vs 0.5). Small, but
+  it lands on $\Delta R_{bb}$ and $\mbb$, both of which are training features.
+\end{enumerate}
+
+\vspace{0.4cm}
+\noindent\footnotesize
+Implementation: \texttt{scripts/delphes\_to\_sbi.py} ---
+\texttt{cms\_select()} (CMS selection), \texttt{select()} (preselection),
+\texttt{\_in\_ellipse()} (Eqs.~2--4), with the Table~1 thresholds and ellipse
+coefficients pinned by tests in \texttt{tests/test\_delphes\_to\_sbi.py}.
+
+\end{document}
