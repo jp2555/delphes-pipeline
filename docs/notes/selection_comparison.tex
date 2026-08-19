@@ -30,50 +30,46 @@
 \begin{abstract}
 \noindent
 Comparison of the CMS Run-3 HH$\rightarrow b\bar b\tau\tau$ selection (HIG-25-008,
-Table~1 and Sections~5--6) against the two selections implemented in the Delphes
-ntuple converter: a deliberately loose \emph{preselection} (the default) and
-\texttt{--cms-selection}. The purpose is to make every difference explicit, so that
-yields and sensitivities computed on the Delphes samples are read with the right
-caveats rather than compared naively against the published numbers.
+Table~1 and Sections~5--6) against the selection applied to the Delphes samples. The
+purpose is to make every difference explicit, so that yields and sensitivities computed
+on the Delphes samples are read with the right caveats rather than compared naively
+against the published numbers.
 \end{abstract}
 
 \section{Scope}
 
-The converter (\texttt{scripts/delphes\_to\_sbi.py}) turns merged Delphes ntuples into
-the flat SBI input format. It has two selection modes serving different purposes:
+The ``Delphes'' column throughout describes the HIG-25-008 resolved selection as
+implemented in \texttt{scripts/delphes\_to\_sbi.py}, invoked with
+\texttt{--cms-selection}. \textbf{It is not the default.} Without that flag the
+converter applies a deliberately loose preselection --- one light lepton, one $\tauh$,
+two jets, with no b-tag requirement, no charge requirement, no vetoes and no mass
+windows --- which exists to mirror the inputs of the NSBI test rather than the CMS
+analysis, and whose signal$/t\bar t$ acceptance ratio is correspondingly $\sim$2.5
+rather than the hundreds a real $b\bar b\tau\tau$ selection gives. Numbers quoted from
+Delphes should always state which of the two was used.
 
-\begin{description}\itemsep2pt
-\item[Preselection (default).] One light lepton, one $\tauh$, two jets. Built to mirror
-  the \emph{inputs of the NSBI test}, not the CMS analysis. It applies no b-tag
-  requirement, no charge requirement, no vetoes and no mass windows. This is why its
-  signal$/t\bar t$ acceptance ratio is $\sim$2.5 rather than the hundreds a real
-  $b\bar b\tau\tau$ selection gives.
-\item[\texttt{--cms-selection}.] The HIG-25-008 resolved selection, as far as Delphes
-  can support it. Intended for a comparison against the published expected results.
-\end{description}
-
-Both are semi-leptonic by default ($\tau_\mu\tauh$, $\tau_e\tauh$);
-\texttt{--channels mt,et,tt} adds $\tauh\tauh$.
+Both modes are semi-leptonic by default ($\tau_\mu\tauh$, $\tau_e\tauh$), matching the
+scope of the NSBI test; \texttt{--channels mt,et,tt} adds $\tauh\tauh$, CMS's most
+sensitive channel.
 
 \section{Event content and channels}
 
 \begin{table}[htbp]
 \centering\small
-\begin{tabular}{@{}lp{4.3cm}p{3.4cm}p{4.0cm}@{}}
+\begin{tabular}{@{}lp{5.6cm}p{5.4cm}@{}}
 \toprule
-& \textbf{CMS HIG-25-008} & \textbf{preselection} & \textbf{\texttt{--cms-selection}} \\
+& \textbf{CMS HIG-25-008} & \textbf{Delphes} \\
 \midrule
 Channels & $\tau_\mu\tauh$, $\tau_e\tauh$, $\tauh\tauh$, boosted-$\tauh\tauh$
-         & $\ell\tauh$ only & $\tau_\mu\tauh$, $\tau_e\tauh$ \ok;
-           $\tauh\tauh$ opt-in \\
+         & $\tau_\mu\tauh$, $\tau_e\tauh$ \ok; $\tauh\tauh$ opt-in \\
 Channel assignment & $\mu \rightarrow \tau_\mu\tauh$, else $e \rightarrow \tau_e\tauh$,
                      else 2nd $\tauh \rightarrow \tauh\tauh$ (\S5)
-                   & none & same priority \ok \\
+                   & same priority \ok \\
 Trigger & single-$\ell$, cross $\ell$-$\tau$, di-$\tau$, di-$\tau$+jet, HH-Parking,
-          VBF, boosted (\S5) & \no\ none & \no\ none \\
+          VBF, boosted (\S5) & \no\ none \\
 Categories & boosted / VBF / resolved 1b1j / resolved 2b $\rightarrow$ 10 SRs (\S6)
-           & \no\ none & \no\ none \\
-Discriminant & ggHH and qqHH DNNs, 5-fold ensemble (\S6) & --- & --- (NSBI replaces it) \\
+           & \no\ none \\
+Discriminant & ggHH and qqHH DNNs, 5-fold ensemble (\S6) & --- (NSBI replaces it) \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -82,40 +78,37 @@ Discriminant & ggHH and qqHH DNNs, 5-fold ensemble (\S6) & --- & --- (NSBI repla
 
 \begin{table}[htbp]
 \centering\small
-\begin{tabular}{@{}lp{4.6cm}p{3.1cm}p{3.9cm}@{}}
+\begin{tabular}{@{}lp{5.6cm}p{5.4cm}@{}}
 \toprule
-& \textbf{CMS (Table~1)} & \textbf{preselection} & \textbf{\texttt{--cms-selection}} \\
+& \textbf{CMS (Table~1)} & \textbf{Delphes} \\
 \midrule
 Muon $\pt$ & $>22/26/6\,\si{\GeV}$ (cross $\mu$-$\tau$ / single $\mu$ / VBF+$\mu$)
-           & $>20$ & $>22$ (cross) \ok \\
-Muon $|\eta|$ & $<2.4$ & $\le 2.4$ \ok & $\le 2.4$ \ok \\
-Muon ID, isolation & Tight Muon ID, PF rel.\ iso $<0.15$ & \no\ none & \no\ none \\
+           & $>22$ (cross) \ok \\
+Muon $|\eta|$ & $<2.4$ & $\le 2.4$ \ok \\
+Muon ID, isolation & Tight Muon ID, PF rel.\ iso $<0.15$ & \no\ none \\
 \midrule
 Electron $\pt$ & $>25/31/13(18)\,\si{\GeV}$ (cross $e$-$\tau$ / single $e$ / VBF+$e$)
-               & $>20$ & $>25$ (cross) \ok \\
-Electron $|\eta|$ & $<2.5$ & $\le 2.4$ & $\le 2.5$ \ok \\
-Electron ID & Tight MVA Isolation+ID (80\% eff.) & \no\ none & \no\ none \\
+               & $>25$ (cross) \ok \\
+Electron $|\eta|$ & $<2.5$ & $\le 2.5$ \ok \\
+Electron ID & Tight MVA Isolation+ID (80\% eff.) & \no\ none \\
 \midrule
-Lepton $|d_{xy}|$, $|d_z|$ & $<0.045$, $<0.2\,\si{\cm}$ & \no\ n/a & \no\ n/a \\
+Lepton $|d_{xy}|$, $|d_z|$ & $<0.045$, $<0.2\,\si{\cm}$ & \no\ not available \\
 \midrule
 $\tauh$ $\pt$ & 32 ($\tau_\mu\tauh$), 35 ($\tau_e\tauh$),
                 40/35/25 ($\tauh\tauh$, trigger-dependent)
-              & $>20$ & 32 / 35 \ok; 40 ($\tauh\tauh$) \ok \\
-$\tauh$ $|\eta|$, $|d_z|$ & $<2.5$, $<0.2\,\si{\cm}$ & $\le 2.3$ & $\le 2.5$ \ok, no $d_z$ \\
+              & 32 / 35 \ok; 40 ($\tauh\tauh$) \ok \\
+$\tauh$ $|\eta|$, $|d_z|$ & $<2.5$, $<0.2\,\si{\cm}$ & $\le 2.5$ \ok, no $d_z$ \\
 $\tauh$ identification & \textsc{DeepTau}: $D^\tau_{\mathrm{jet}}$ Medium,
                          $D^\tau_e$ VVLoose, $D^\tau_\mu$ VLoose/Tight
-                       & one tag bit & \no\ one tag bit \\
+                       & \no\ one tag bit \\
 $\tauh$ object & HPS; decay modes 1-prong$+0,1,2\pi^0$, 3-prong$+0,1\pi^0$
-               & \no\ AK4 jet with a tag bit & \no\ AK4 jet with a tag bit \\
+               & \no\ AK4 jet with a tag bit \\
 \midrule
 $H\rightarrow b\bar b$ jets & AK4, $\pt>20$, $|\eta|<2.5$,
                               $\Delta R(j,\ell)>0.5$ from both $\tau$ candidates (\S5)
-                            & $\pt>20$, $|\eta|\le2.4$, $\Delta R>0.4$
                             & \ok\ exactly as CMS \\
-b-jet pair assignment & HH-\textsc{bTag} DNN (\S5) & two highest b-tag
-                      & \no\ two highest b-tag \\
+b-jet pair assignment & HH-\textsc{bTag} DNN (\S5) & \no\ two highest b-tag \\
 b-tagging & \textsc{UParT} (2024); categories split at the \textbf{10\% mistag} WP (\S6)
-          & \no\ none required
           & \texttt{--btag-min} at \textsc{UParT} Medium ($\sim$1\% mistag) \\
 \bottomrule
 \end{tabular}
@@ -125,16 +118,16 @@ b-tagging & \textsc{UParT} (2024); categories split at the \textbf{10\% mistag} 
 
 \begin{table}[htbp]
 \centering\small
-\begin{tabular}{@{}lp{4.6cm}p{3.1cm}p{3.9cm}@{}}
+\begin{tabular}{@{}lp{5.6cm}p{5.4cm}@{}}
 \toprule
-& \textbf{CMS} & \textbf{preselection} & \textbf{\texttt{--cms-selection}} \\
+& \textbf{CMS} & \textbf{Delphes} \\
 \midrule
-Opposite charge & required (Table~1) & \no\ no & \no\ no --- see \S\ref{sec:cannot} \\
-$\Delta R(\ell,\tauh)$ & $>0.5$ (resolved); $<0.8$ (boosted) & none & $>0.5$ \ok \\
-Additional-lepton veto & required (Table~1, \S5) & \no\ no & yes \ok \\
-Signal region & ellipse in $(\mtautau,\mbb)$, Eqs.~2--4 & \no\ none & yes \ok \\
-$\mtautau$ used in the ellipse & DNN-regressed $\tau\tau$ mass (\S5) & --- & FastMTT
-  (closest available) \\
+Opposite charge & required (Table~1) & \no\ no --- see \S\ref{sec:cannot} \\
+$\Delta R(\ell,\tauh)$ & $>0.5$ (resolved); $<0.8$ (boosted) & $>0.5$ \ok \\
+Additional-lepton veto & required (Table~1, \S5) & yes \ok \\
+Signal region & ellipse in $(\mtautau,\mbb)$, Eqs.~2--4 & yes \ok \\
+$\mtautau$ used in the ellipse & DNN-regressed $\tau\tau$ mass (\S5)
+  & FastMTT (closest available) \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -183,9 +176,9 @@ CMS quotes $\sim$99\% signal efficiency for these, with background efficiencies 
 \section{Consequences worth stating alongside any number}
 
 \begin{enumerate}\itemsep3pt
-\item \textbf{The default preselection is not the CMS selection} and should never be
-  compared directly against published yields. Its purpose is comparability with the NSBI
-  test's own inputs.
+\item \textbf{The selection described here is not the converter's default.} It requires
+  \texttt{--cms-selection}; the default preselection is much looser and must never be
+  compared directly against published yields.
 \item \textbf{$\mhh$ and $\mtautau$ are visible masses} in the converter output. The CMS
   reference ntuple takes $\mhh$ from a branch (\texttt{mass\_tautaubb}) whose definition
   should be confirmed --- if it is the corrected $\tau\tau$ system, the two are different
