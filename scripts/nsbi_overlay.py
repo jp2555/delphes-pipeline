@@ -124,6 +124,23 @@ def _nano_by_kl(nano_dir, select=None):
     return out
 
 
+def _manifest_root(ntuple):
+    """Directory holding manifest.json for an --ntuple that may be a dir OR a glob.
+
+    A plain ``os.path.dirname`` fallback silently resolves a path that does not exist
+    to its PARENT, so a mistyped or not-yet-merged directory is reported as a missing
+    manifest one level up -- which reads as "the merge lacks labels" when the truth is
+    "the merge was never run".
+    """
+    if os.path.isdir(ntuple):
+        return ntuple
+    hits = glob.glob(ntuple)
+    if not hits:
+        raise SystemExit(f"[overlay] --ntuple {ntuple!r} is neither a directory nor a "
+                         f"glob matching any file — has the merge been run?")
+    return os.path.dirname(hits[0])
+
+
 def _ntuple_maps(ntuple):
     """What a merged ntuple was actually BUILT with, per its merge manifest.
 
@@ -132,7 +149,10 @@ def _ntuple_maps(ntuple):
     untuned ntuple "(tuned)" whenever a tuned config is passed, which is exactly how a
     tuned-vs-untuned comparison gets silently mislabelled.
     """
-    root = ntuple if os.path.isdir(ntuple) else os.path.dirname(ntuple)
+    try:
+        root = _manifest_root(ntuple)
+    except SystemExit:
+        return None
     mpath = os.path.join(root, "manifest.json")
     if not os.path.exists(mpath):
         return None
@@ -159,8 +179,7 @@ def _maps_tag(ntuple, tuning):
 
 def _dataset_id(ntuple, select):
     """dataset_id the merge assigned to the one dataset matching ``select``."""
-    root = ntuple if os.path.isdir(ntuple) else os.path.dirname(ntuple)
-    mpath = os.path.join(root, "manifest.json")
+    mpath = os.path.join(_manifest_root(ntuple), "manifest.json")
     if not os.path.exists(mpath):
         raise SystemExit(f"[overlay] --dataset needs {mpath}, written by merge_shards.py")
     with open(mpath) as fh:
