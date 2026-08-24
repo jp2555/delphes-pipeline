@@ -8,6 +8,13 @@
 \usepackage[colorlinks=true,linkcolor=blue,urlcolor=blue,citecolor=blue]{hyperref}
 \usepackage{siunitx}
 
+% Default float parameters strand Table 2 + Fig 1 on a page that is a third
+% whitespace. Let floats pack with text instead.
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\bottomfraction}{0.8}
+\renewcommand{\textfraction}{0.07}
+\renewcommand{\floatpagefraction}{0.75}
+
 \newcommand{\tauh}{\tau_{h}}
 \newcommand{\tautau}{\tauh\tauh}
 \newcommand{\mtautau}{m_{\tau\tau}}
@@ -42,7 +49,11 @@ lepton scale factors (Sec.~\ref{sec:leptons}); and the $b$-jet energy \emph{reso
 untuned by construction, only its scale (Sec.~\ref{sec:mbb}). One physics residual remains:
 Delphes makes too many wide-angle $\tau$ pairs, visible as an excess at
 $\dR_{\tau\tau}\simeq2.5$--$3.2$ and as high tails on $\mtautau$ and $\mvis$
-(Sec.~\ref{sec:drtautau}).
+(Sec.~\ref{sec:drtautau}). Since the last note the $t\bar t$ background has also been
+compared against its own CMS anchor for the first time and the correction works
+(Sec.~\ref{sec:ttbar}), and one new defect was found: FastMTT returns no solution for the
+majority of events, because a Delphes $\tauh$ carries a jet mass far above $\mtau$
+(Sec.~\ref{sec:fastmtt}).
 \end{abstract}
 
 \section{Where we stand}
@@ -168,6 +179,21 @@ Delphes/CMS: $30\,491/28\,181$ ($\kl=0$), $32\,783/31\,442$ ($\kl=1$), $24\,218/
 ($\kl=5$).\label{tab:features}}
 \end{table}
 
+\subsection{The $t\bar t$ background}
+\label{sec:ttbar}
+
+The $t\bar t$ maps (\texttt{maps\_ttbar\_v1.json}) were applied to every $t\bar t$ event in
+the production but had never been compared back against the anchor they came from. They now
+have been, on \texttt{TTto2L2Nu} with the same selection on both sides, and the correction
+works: the stock card over-produces $\tauh$ candidates by $1.68\times$ ($42\,293$ against
+CMS' $25\,241$ in the same 200k events) and the re-tag brings that to $1.22\times$. Selected
+yield moves from $0.70$ to $0.89$ of CMS.
+
+All ten NSBI features agree in shape both before and after --- which is the part to read
+carefully. The overlays are density-normalised, so a $1.68\times$ error in $\tauh$
+\emph{rate} is invisible in them. Shape agreement is not evidence that the $\tauh$ object is
+right, and the $22\%$ residual after tuning appears in no panel.
+
 \section{Open items}
 
 \subsection{$\dR_{\tau\tau}$: too many wide-angle $\tau$ pairs}
@@ -195,10 +221,39 @@ be found rather than worked around.
 The leading hypothesis is $\tauh$ mistag: a fake $\tau$ from the opposite hemisphere pairs
 with a real one at $\dR\simeq\pi$. This is directly testable --- the overlay can split each
 side into gen-matched and fake $\tau$ pairs and report the fake fraction --- and has not yet
-been run at full statistics. It is also actionable if confirmed: the
-\texttt{tau\_fake\_response} map has its top three $p_{T}$ bins below the 200-entry
+been run at full statistics. The $t\bar t$ overlay (Sec.~\ref{sec:ttbar}) now supplies a first
+measurement of the size of the effect: the stock card makes $1.68\times$ too many $\tauh$
+candidates, so there is a real fake excess to account for. It is also actionable if
+confirmed: the \texttt{tau\_fake\_response} map has its top three $p_{T}$ bins below the 200-entry
 threshold and is borrowing them from neighbours, so the high-$p_{T}$ fake response is
 extrapolated rather than measured.
+
+\subsection{FastMTT returns no solution for most events}
+\label{sec:fastmtt}
+
+Found while preparing the CROWN-matched ntuples, and the more serious of the two new items.
+$\mtautau$, $m_{HH}$ and $p_{T}^{HH}$ taken from FastMTT are \texttt{NaN} on $69\%$ of
+signal and $80\%$ of $t\bar t$ events, while every other branch on those rows is finite.
+
+The mechanism is exact rather than statistical. The hadronic decay weight is non-zero only
+for $x\ge(\mvis/\mtau)^{2}$, with $\mtau=1.777\,$GeV, so a leg whose visible mass exceeds
+$\mtau$ has zero likelihood on the whole scan grid and the fit returns nothing. A Delphes
+$\tauh$ \emph{is} an AK4 jet and carries the jet mass --- $5$--$15\,$GeV for a
+$30$--$50\,$GeV jet, three to eight times $\mtau$, where a real HPS $\tauh$ never exceeds
+the $a_{1}$ mass. Failures therefore track the $\tau$ jet mass rather than being a random
+subset, which is why failing events have a higher visible $\mtautau$ ($92$ vs $72\,$GeV).
+
+Two consequences. The elliptical signal region evaluates to \texttt{NaN} on those events and
+rejects them, so it silently doubles as a FastMTT-success filter: a cut CMS quotes at $99\%$
+signal efficiency runs at roughly $31\%$ here, on survivors biased in the very mass it
+selects on. And the failure rate differs between processes, so FastMTT does not cancel
+between signal and background as Sec.~\ref{sec:limits} assumed.
+
+Mitigation is one line --- clamp the $\tauh$ mass to a physical $\tau$ visible mass before
+the fit --- which removes the failures but leaves the jet-level energy scale untouched. The
+real fix is to rebuild the $\tauh$ four-vector from the particle-flow constituents, already
+written to the Delphes files, which would also supply decay modes and a prong-summed $\tau$
+charge.
 
 \subsection{$m_{bb}$ width: the $b$-jet resolution is untuned}
 \label{sec:mbb}
@@ -231,6 +286,8 @@ introduces no bias; the shortfall is recorded in the merged manifest rather than
 \item \textbf{Confirm the lepton working points} against the CMS $b\bar b\tau\tau$ baseline.
       Everything downstream follows from them, and the current values are conventional
       choices rather than the analysis's.
+\item \textbf{Clamp the $\tauh$ mass in FastMTT} (Sec.~\ref{sec:fastmtt}). One line, and
+      it unblocks every $\mtautau$-based quantity; until it is in, use the visible mass.
 \item \textbf{Run the gen-matched/fake split at full statistics} to test whether the
       $\dR_{\tau\tau}$ excess is $\tau$ mistag. Cheap, and it decides whether
       Sec.~\ref{sec:drtautau} is a fixable map problem or something deeper.
@@ -242,10 +299,13 @@ introduces no bias; the shortfall is recorded in the merged manifest rather than
 \end{enumerate}
 
 \section{Known limitations}
+\label{sec:limits}
 
-\emph{Accepted by design.} FastMTT is covariance-free but is run identically on both sides,
-so it cancels in the comparison and bounds the absolute $\mtautau$ resolution rather than the
-agreement. The card runs without pileup, so jet energy resolution is untuned and pileup jets
+\emph{Accepted by design.} FastMTT is covariance-free and is run identically on both sides.
+The cancellation argument made here previously no longer holds as stated:
+Sec.~\ref{sec:fastmtt} shows the fit fails at different rates for signal and $t\bar t$, so
+the failures do not divide out. Until the mass clamp is in, $\mtautau$ from FastMTT should
+be treated as unreliable and the visible mass used in its place. The card runs without pileup, so jet energy resolution is untuned and pileup jets
 cannot exist; neither is fixable downstream. $\ptmiss$ smearing is now binned in jet $H_{T}$
 but remains isotropic where the real resolution is anisotropic.
 
