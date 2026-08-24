@@ -300,15 +300,15 @@ def resolve_ntuple_paths(path: PathLike) -> list[str]:
     return files
 
 
-def _kl_column_index(pf):
-    """Index of the flat ``kl`` column in the parquet schema, or None.
+def _kl_column_index(pf, name="kl"):
+    """Index of a flat column in the parquet schema, or None.
 
     Looked up by ``path_in_schema`` rather than by position: the jagged collections
     expand to leaf columns (``Jet.list.item.pt``), so a name-to-index lookup on the
     arrow schema does not line up with the parquet column order.
     """
     names = pf.metadata.schema.names
-    return names.index("kl") if "kl" in names else None
+    return names.index(name) if name in names else None
 
 
 class NtupleEvents:
@@ -326,9 +326,11 @@ class NtupleEvents:
     """
 
     def __init__(self, path: PathLike, *, kl: Optional[float] = None,
+                 dataset: Optional[int] = None,
                  entry_stop: Optional[int] = None, columns=None):
         self.paths = resolve_ntuple_paths(path)
         self.kl = kl
+        self.dataset = dataset
         parts, have = [], 0
         for p in self.paths:
             if entry_stop is not None and have >= entry_stop:
@@ -338,8 +340,16 @@ class NtupleEvents:
             # Reading only what is asked for turns a 145 GB scan into a ~1 GB one.
             cols = None
             if columns is not None:
-                want = set(columns) | ({"kl"} if kl is not None else set())
+                want = (set(columns) | ({"kl"} if kl is not None else set())
+                        | ({"dataset_id"} if dataset is not None else set()))
                 cols = [c for c in want if c in pf.schema_arrow.names] or None
+            jds = _kl_column_index(pf, "dataset_id") if dataset is not None else None
+            if dataset is not None and jds is None:
+                # no dataset_id column: an ntuple written before per-dataset labelling.
+                # Silently reading it would return the WHOLE mixture under a name that
+                # says one dataset, so refuse rather than mislead.
+                raise ValueError(f"{p!r} has no dataset_id column; it cannot be "
+                                 f"filtered to dataset {dataset}")
             jkl = _kl_column_index(pf) if kl is not None else None
             if kl is not None and jkl is None:
                 # no kl column at all: a sample that was never generated per kl (ttbar
@@ -353,16 +363,23 @@ class NtupleEvents:
                     st = pf.metadata.row_group(i).column(jkl).statistics
                     if st is not None and st.has_min_max and not (st.min <= kl <= st.max):
                         continue
+                if jds is not None:
+                    st = pf.metadata.row_group(i).column(jds).statistics
+                    if st is not None and st.has_min_max and not (st.min <= dataset <= st.max):
+                        continue
                 a = ak.from_parquet(p, row_groups=[i], columns=cols)
                 if kl is not None:
                     a = a[np.isclose(ak.to_numpy(a["kl"]), kl)]
+                if dataset is not None:
+                    a = a[ak.to_numpy(a["dataset_id"]) == dataset]
                 if entry_stop is not None:
                     a = a[: entry_stop - have]
                 if len(a):
                     parts.append(a)
                     have += len(a)
         if not parts:
-            raise ValueError(f"no events in {path!r}" + (f" at kl={kl}" if kl else ""))
+            raise ValueError(f"no events in {path!r}" + (f" at kl={kl}" if kl else "")
+                             + (f" for dataset_id={dataset}" if dataset is not None else ""))
         self.array = ak.concatenate(parts) if len(parts) > 1 else parts[0]
 
     @property

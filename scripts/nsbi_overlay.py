@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import json
 import os
 import re
 
@@ -121,6 +122,29 @@ def _nano_by_kl(nano_dir, select=None):
         print(f"[overlay] kl={kl}: CMS {prods[0]}"
               + (f" (+{len(ds) - 1} extension)" if len(ds) > 1 else ""))
     return out
+
+
+def _dataset_id(ntuple, select):
+    """dataset_id the merge assigned to the one dataset matching ``select``."""
+    root = ntuple if os.path.isdir(ntuple) else os.path.dirname(ntuple)
+    mpath = os.path.join(root, "manifest.json")
+    if not os.path.exists(mpath):
+        raise SystemExit(f"[overlay] --dataset needs {mpath}, written by merge_shards.py")
+    with open(mpath) as fh:
+        names = json.load(fh).get("datasets", {})
+    if not names:
+        raise SystemExit(f"[overlay] {mpath} has no 'datasets' map (pre-labelling merge)")
+    hits = {int(i): n for i, n in names.items() if select in n}
+    if not hits:
+        raise SystemExit(f"[overlay] no dataset matches {select!r}; {mpath} has:\n  "
+                         + "\n  ".join(sorted(names.values())))
+    if len(hits) > 1:
+        raise SystemExit(f"[overlay] {select!r} matches {len(hits)} datasets:\n  "
+                         + "\n  ".join(sorted(hits.values()))
+                         + "\n[overlay] narrow --dataset")
+    i, n = next(iter(hits.items()))
+    print(f"[overlay] Delphes dataset_id {i} = {n}")
+    return i
 
 
 def _nano_background(nano_dir, select):
@@ -469,6 +493,13 @@ def main(argv=None) -> int:
                          "OWN maps (maps_ttbar_v1.json), so this validates a different "
                          "detector model from the signal overlay -- see docs/"
                          "tuning_for_nsbi_audit.md section 6.")
+    ap.add_argument("--dataset", metavar="SUBSTRING",
+                    help="pin the Delphes side to ONE dataset, resolved by name through "
+                         "the merge manifest. Merged files are named per SAMPLE "
+                         "(ttbar.0000.parquet), so every tt decay mode shares them and "
+                         "only dataset_id separates them -- without this the overlay "
+                         "compares the whole cross-section mixture against one CMS "
+                         "dataset and shows a COMPOSITION difference as a detector one.")
     ap.add_argument("--out", default="plots/nsbi_overlay")
     ap.add_argument("--max-events", type=int, default=20000)
     ap.add_argument("--tuned", dest="tuned", action="store_true", default=True)
@@ -532,6 +563,10 @@ def main(argv=None) -> int:
     if args.background:
         nano_by_kl = {args.background: _nano_background(args.nano_dir, args.nano_select)}
         sources = [(args.background, None)]
+        if not args.dataset:
+            print("[overlay] WARNING: --background without --dataset overlays the FULL "
+                  "sample mixture against one CMS dataset; differences will be dominated "
+                  "by composition, not by the detector model.")
     else:
         nano_by_kl = _nano_by_kl(args.nano_dir, args.nano_select)
 
@@ -582,7 +617,9 @@ def main(argv=None) -> int:
         if args.ntuple:
             from delphes_pipeline.core.io import NtupleEvents
             kl_val = None if args.background else _kl_value(kl)
-            dev = NtupleEvents(args.ntuple, kl=kl_val, entry_stop=args.max_events)
+            ds_id = _dataset_id(args.ntuple, args.dataset) if args.dataset else None
+            dev = NtupleEvents(args.ntuple, kl=kl_val, dataset=ds_id,
+                               entry_stop=args.max_events)
             print(f"[overlay] merged ntuple: {dev.n:,} events "
                   + ("(all kl -- background)" if kl_val is None else f"at kl={kl_val}")
                   + " (tuning already applied at ntuplization)")

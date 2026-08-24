@@ -7,6 +7,8 @@ read and concatenate them and honour a total ``entry_stop`` across files.
 from __future__ import annotations
 
 import awkward as ak
+import numpy as np
+import pytest
 from make_fixture import make_fixture
 
 from delphes_pipeline.core.io import DelphesEvents, resolve_paths
@@ -74,3 +76,46 @@ def test_lazy_open_stops_early(tmp_path):
     ev = DelphesEvents(str(sample), entry_stop=100)  # satisfied by the first file
     assert ev.n == 100
     assert len(ev._used) == 1  # did not open the other two files
+
+
+def _mixed_ntuple(path, per_ds=100, n_ds=3):
+    """A merged ntuple holding several datasets in ONE file, as merge_shards writes it."""
+    rng = np.random.default_rng(0)
+    n = per_ds * n_ds
+    a = ak.Array({"dataset_id": np.repeat(np.arange(n_ds), per_ds).astype("int16"),
+                  "Jet": ak.unflatten(ak.Array({"pt": rng.uniform(20, 200, n * 2)}), 2),
+                  "MET_pt": rng.uniform(0, 200, n)})
+    ak.to_parquet(a, str(path), row_group_size=per_ds // 2)
+    return n
+
+
+def test_dataset_filter_selects_one_dataset(tmp_path):
+    # Merged files are named per SAMPLE, so every tt decay mode shares them and only
+    # dataset_id separates them. Overlaying the mixture against one CMS dataset would
+    # read as a detector difference, so the filter has to actually isolate a dataset.
+    from delphes_pipeline.core.io import NtupleEvents
+    _mixed_ntuple(tmp_path / "ttbar.0000.parquet")
+
+    for want in (0, 1, 2):
+        ev = NtupleEvents(str(tmp_path), dataset=want)
+        assert ev.n == 100
+        assert set(np.unique(ak.to_numpy(ev.array["dataset_id"]))) == {want}
+
+    assert NtupleEvents(str(tmp_path)).n == 300      # unfiltered = the whole mixture
+
+
+def test_dataset_filter_refuses_an_absent_dataset(tmp_path):
+    from delphes_pipeline.core.io import NtupleEvents
+    _mixed_ntuple(tmp_path / "ttbar.0000.parquet")
+    with pytest.raises(ValueError, match="dataset_id=99"):
+        NtupleEvents(str(tmp_path), dataset=99)
+
+
+def test_dataset_filter_refuses_an_unlabelled_ntuple(tmp_path):
+    # An ntuple predating per-dataset labelling has no dataset_id column. Returning the
+    # full mixture under a name that says one dataset is the failure mode to avoid.
+    from delphes_pipeline.core.io import NtupleEvents
+    ak.to_parquet(ak.Array({"MET_pt": np.arange(10.0)}),
+                  str(tmp_path / "ttbar.0000.parquet"))
+    with pytest.raises(ValueError, match="no dataset_id column"):
+        NtupleEvents(str(tmp_path), dataset=0)
