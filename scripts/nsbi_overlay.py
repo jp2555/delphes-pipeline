@@ -131,9 +131,19 @@ def _dataset_id(ntuple, select):
     if not os.path.exists(mpath):
         raise SystemExit(f"[overlay] --dataset needs {mpath}, written by merge_shards.py")
     with open(mpath) as fh:
-        names = json.load(fh).get("datasets", {})
+        man = json.load(fh)
+    # merge_shards writes {sample: {..., "datasets": {id: name}}} -- the map lives PER
+    # SAMPLE, not at the top level. ids come from one counter shared across the run, so
+    # they are unique across samples and the union is well defined.
+    names = dict(man.get("datasets") or {})
+    for v in man.values():
+        if isinstance(v, dict):
+            names.update(v.get("datasets") or {})
     if not names:
-        raise SystemExit(f"[overlay] {mpath} has no 'datasets' map (pre-labelling merge)")
+        raise SystemExit(
+            f"[overlay] {mpath} has no 'datasets' map: this merge predates per-dataset "
+            f"labelling, so the ntuple has no dataset_id column to filter on. Re-merge "
+            f"the sample (scripts/merge_shards.py --sample ...) to get one.")
     hits = {int(i): n for i, n in names.items() if select in n}
     if not hits:
         raise SystemExit(f"[overlay] no dataset matches {select!r}; {mpath} has:\n  "
