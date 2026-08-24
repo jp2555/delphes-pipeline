@@ -124,6 +124,39 @@ def _nano_by_kl(nano_dir, select=None):
     return out
 
 
+def _ntuple_maps(ntuple):
+    """What a merged ntuple was actually BUILT with, per its merge manifest.
+
+    In ``--ntuple`` mode the tuning is baked in at ntuplisation and the config's
+    ``tuning_maps`` is NOT applied -- so labelling the figure from the config titles an
+    untuned ntuple "(tuned)" whenever a tuned config is passed, which is exactly how a
+    tuned-vs-untuned comparison gets silently mislabelled.
+    """
+    root = ntuple if os.path.isdir(ntuple) else os.path.dirname(ntuple)
+    mpath = os.path.join(root, "manifest.json")
+    if not os.path.exists(mpath):
+        return None
+    with open(mpath) as fh:
+        man = json.load(fh)
+    maps = set()
+    for v in man.values():
+        if isinstance(v, dict):
+            maps.update(v.get("maps") or [])
+    return maps or None
+
+
+def _maps_tag(ntuple, tuning):
+    """The provenance string for the figure title."""
+    if not ntuple:
+        return "  (tuned)" if tuning is not None else "  (stock)"
+    m = _ntuple_maps(ntuple)
+    if not m:
+        return "  (tuning UNKNOWN: no merge manifest)"
+    if m == {"none"}:
+        return "  (untuned)"
+    return "  (tuned: " + ", ".join(sorted(os.path.basename(x) for x in m)) + ")"
+
+
 def _dataset_id(ntuple, select):
     """dataset_id the merge assigned to the one dataset matching ``select``."""
     root = ntuple if os.path.isdir(ntuple) else os.path.dirname(ntuple)
@@ -560,7 +593,12 @@ def main(argv=None) -> int:
     if maps_path:
         from delphes_pipeline.tuning.maps import TuningMaps
         tuning = TuningMaps.load(maps_path)
-        print(f"[overlay] applying tuning maps from {maps_path}")
+        if args.ntuple:
+            print(f"[overlay] NOT applying {maps_path}: --ntuple carries its tuning "
+                  f"baked in from ntuplisation; the figure is labelled from the merge "
+                  f"manifest, not from this config")
+        else:
+            print(f"[overlay] applying tuning maps from {maps_path}")
     os.makedirs(args.out, exist_ok=True)
 
     if args.cms_dnn:
@@ -686,7 +724,7 @@ def main(argv=None) -> int:
             ax.set_ylim(bottom=0)
             ax.set_xlabel(feat); ax.legend(fontsize=8)
         head = kl if args.background else f"$\\kappa_\\lambda$ = {kl}"
-        fig.suptitle(head + ("  (tuned)" if tuning is not None else "  (stock)")
+        fig.suptitle(head + _maps_tag(args.ntuple, tuning)
                      + ("  · symmetric cleaning" if args.clean else "  · legacy selection"))
         out = os.path.join(args.out, f"{'cmsdnn' if args.cms_dnn else 'nsbi'}_{kl}.png")
         fig.tight_layout(); fig.savefig(out, dpi=110); plt.close(fig)
