@@ -123,6 +123,30 @@ def _nano_by_kl(nano_dir, select=None):
     return out
 
 
+def _nano_background(nano_dir, select):
+    """[directories] for ONE background production.
+
+    ``--nano-select`` is mandatory here. A background directory carries no kl tag to
+    disambiguate it, so without a substring the glob would sweep up every dataset under
+    ``--nano-dir`` -- signal included -- and silently overlay a mixture.
+    """
+    if not select:
+        raise SystemExit("[overlay] --background needs --nano-select to pick the CMS "
+                         "dataset (e.g. --nano-select TTto2L2Nu)")
+    dirs = [d for d in glob.glob(os.path.join(nano_dir, "*"))
+            if os.path.isdir(d) and select in os.path.basename(d)]
+    if not dirs:
+        raise SystemExit(f"[overlay] no directory under {nano_dir} matches {select!r}")
+    prods = sorted({_EXT.sub("", os.path.basename(x)) for x in dirs})
+    if len(prods) > 1:
+        raise SystemExit(f"[overlay] {select!r} matches {len(prods)} productions:\n  "
+                         + "\n  ".join(prods)
+                         + "\n[overlay] these must not be mixed; narrow --nano-select")
+    print(f"[overlay] background {select}: CMS {prods[0]}"
+          + (f" (+{len(dirs) - 1} extension)" if len(dirs) > 1 else ""))
+    return sorted(dirs)
+
+
 def _kl(path):
     m = _KL.search(os.path.basename(os.path.normpath(path)))
     return m.group(1) if m else None
@@ -438,6 +462,13 @@ def main(argv=None) -> int:
     ap.add_argument("--nano-select", metavar="SUBSTRING",
                     help="pick the CMS production when several match one kl "
                          "(e.g. 'PowhegBugFix' or '150X-kit-private')")
+    ap.add_argument("--background", metavar="LABEL",
+                    help="overlay a BACKGROUND process (e.g. ttbar) instead of the "
+                         "kappa_lambda points: ONE figure, Delphes vs CMS, with the CMS "
+                         "dataset picked by --nano-select. Background is tuned with its "
+                         "OWN maps (maps_ttbar_v1.json), so this validates a different "
+                         "detector model from the signal overlay -- see docs/"
+                         "tuning_for_nsbi_audit.md section 6.")
     ap.add_argument("--out", default="plots/nsbi_overlay")
     ap.add_argument("--max-events", type=int, default=20000)
     ap.add_argument("--tuned", dest="tuned", action="store_true", default=True)
@@ -469,6 +500,11 @@ def main(argv=None) -> int:
 
     if not (args.ntuple or args.delphes_dir):
         ap.error("one of --delphes-dir or --ntuple is required")
+    if args.background and args.kl_compare:
+        ap.error("--background overlays ONE process; --kl-compare ranks kl points")
+    if args.background and not args.ntuple:
+        # raw Delphes is laid out one directory per kl; a background has no such tree
+        ap.error("--background requires --ntuple")
     if args.ntuple and not args.tuned:
         # the merged ntuple was written through the maps; there is no untuned view of
         # it, and silently ignoring --no-tuned would misreport what was plotted
@@ -493,11 +529,17 @@ def main(argv=None) -> int:
         print(f"\n[cms-dnn] overlaying the {len(_CMS)} inputs it can, in the rotated frame\n",
               flush=True)
 
-    nano_by_kl = _nano_by_kl(args.nano_dir, args.nano_select)
+    if args.background:
+        nano_by_kl = {args.background: _nano_background(args.nano_dir, args.nano_select)}
+        sources = [(args.background, None)]
+    else:
+        nano_by_kl = _nano_by_kl(args.nano_dir, args.nano_select)
 
     # Raw Delphes is one directory per kl; the merged ntuple is one file set with a kl
     # column, so drive the loop from the CMS side, which has a directory either way.
-    if args.ntuple:
+    if args.background:
+        pass                                    # sources already set above
+    elif args.ntuple:
         # The CMS side has kl points the Delphes production has not generated yet
         # (0, 1, 5 so far). Report and skip those rather than dying part-way through.
         from delphes_pipeline.core.io import available_kl
@@ -539,9 +581,11 @@ def main(argv=None) -> int:
         print(f"[kl {kl}] reconstructing features ...", flush=True)
         if args.ntuple:
             from delphes_pipeline.core.io import NtupleEvents
-            dev = NtupleEvents(args.ntuple, kl=_kl_value(kl), entry_stop=args.max_events)
-            print(f"[overlay] merged ntuple: {dev.n:,} events at kl={_kl_value(kl)} "
-                  f"(tuning already applied at ntuplization)")
+            kl_val = None if args.background else _kl_value(kl)
+            dev = NtupleEvents(args.ntuple, kl=kl_val, entry_stop=args.max_events)
+            print(f"[overlay] merged ntuple: {dev.n:,} events "
+                  + ("(all kl -- background)" if kl_val is None else f"at kl={kl_val}")
+                  + " (tuning already applied at ntuplization)")
         else:
             dev = DelphesEvents(d, entry_stop=args.max_events)
         if not args.ntuple and tuning is not None:
@@ -594,7 +638,8 @@ def main(argv=None) -> int:
             # sawtooth. Anchoring at 0 puts every panel on the same footing.
             ax.set_ylim(bottom=0)
             ax.set_xlabel(feat); ax.legend(fontsize=8)
-        fig.suptitle(f"$\\kappa_\\lambda$ = {kl}" + ("  (tuned)" if tuning is not None else "  (stock)")
+        head = kl if args.background else f"$\\kappa_\\lambda$ = {kl}"
+        fig.suptitle(head + ("  (tuned)" if tuning is not None else "  (stock)")
                      + ("  · symmetric cleaning" if args.clean else "  · legacy selection"))
         out = os.path.join(args.out, f"{'cmsdnn' if args.cms_dnn else 'nsbi'}_{kl}.png")
         fig.tight_layout(); fig.savefig(out, dpi=110); plt.close(fig)
