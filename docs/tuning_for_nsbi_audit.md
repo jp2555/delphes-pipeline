@@ -200,7 +200,12 @@ variance and it means the tuned sample is one realisation. Does NSBI training tr
 correctly, or should the correction be applied multiple times per event (an ensemble) to
 represent the response distribution rather than one draw from it?
 
-**Q5 — κ_λ-side consistency.** All three κ_λ points use one map file, so the κ_λ ratio should
+**Q5 — κ_λ-side consistency.** *(ANSWERED 2026-08-24 — and the reasoning below is wrong.
+Measured, the tuned Delphes/CMS acceptance ratio varies 13.6% across the {0,1,5} basis where
+the untuned one is flat to 1.9%: tuning INTRODUCES κ_λ dependence. See
+`tuning_consistency_handoff.md`, now the blocking item.)*
+
+All three κ_λ points use one map file, so the κ_λ ratio should
 be clean. But the shards are contiguous per κ_λ and seeded per shard, so each κ_λ point sees a
 *different RNG stream*. We believe this is harmless (different streams, same distribution) —
 please confirm there is no route by which it correlates with κ_λ.
