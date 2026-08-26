@@ -158,12 +158,17 @@ re-merged with `--allow-mixed-datasets --force` to get the `dataset_id` column; 
 before and after* — which is the caution, not the reassurance: the overlays are
 density-normalised, so a 1.68× rate error is invisible in them.
 
-**FastMTT returns no solution for most events.** m_ττ, m_HH, pT^HH from FastMTT are NaN on
-69 % of signal and 80 % of tt̄. The hadronic decay weight is non-zero only for
+**FastMTT returns no solution on the untuned samples.** m_ττ, m_HH, pT^HH from FastMTT are
+NaN on 69 % of signal and 80 % of tt̄ **in the untuned production**. The hadronic decay weight is non-zero only for
 x ≥ (m_vis/m_τ)², m_τ = 1.777 GeV; a Delphes τ_h *is* an AK4 jet carrying 5–15 GeV of jet
 mass, so the likelihood is identically zero. The elliptical signal region maps NaN → ∞ and
 rejects those events, silently acting as a FastMTT-success filter (~31 % where CMS quotes
 99 %), on survivors biased in the very mass it cuts on. **The failure rate is
 process-dependent (69 % vs 80 %), so it does not cancel between signal and background.**
-Mitigation is one line (clamp the τ_h leg mass to a physical τ visible mass); the real fix is
-the τ_h rebuild from PF constituents. See `docs/notes/production_validation.tex` §3.2.
+The tuned arm does not have this failure: `tau_mass` redraws the visible mass from the CMS
+anchor and caps it at 1.70 GeV (`maps.py:490`), which is precisely the failure that map was
+written to remove. So this is an untuned-arm limitation, not an open defect — but the
+CROWN-matched NSBI inputs are currently built from the untuned production, so they should be
+regenerated from the tuned one or have the cap applied. Still genuinely open: the ellipse
+rejects a failed fit via NaN→∞ rather than explicitly, so "fit failed" and "outside the mass
+window" are not separable in a cutflow. See `docs/notes/production_validation.tex` §3.2.

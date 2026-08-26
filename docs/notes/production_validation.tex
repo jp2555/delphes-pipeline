@@ -228,12 +228,14 @@ confirmed: the \texttt{tau\_fake\_response} map has its top three $p_{T}$ bins b
 threshold and is borrowing them from neighbours, so the high-$p_{T}$ fake response is
 extrapolated rather than measured.
 
-\subsection{FastMTT returns no solution for most events}
+\subsection{FastMTT returns no solution on the \emph{untuned} samples}
 \label{sec:fastmtt}
 
-Found while preparing the CROWN-matched ntuples, and the more serious of the two new items.
-$\mtautau$, $m_{HH}$ and $p_{T}^{HH}$ taken from FastMTT are \texttt{NaN} on $69\%$ of
-signal and $80\%$ of $t\bar t$ events, while every other branch on those rows is finite.
+Found while preparing the CROWN-matched ntuples, which are built from the \emph{untuned}
+production. $\mtautau$, $m_{HH}$ and $p_{T}^{HH}$ taken from FastMTT are \texttt{NaN} on
+$69\%$ of signal and $80\%$ of $t\bar t$ events there, while every other branch on those rows
+is finite. The tuned arm does not have this failure, and the reason is worth stating
+because it is the clearest example of a map earning its keep.
 
 The mechanism is exact rather than statistical. The hadronic decay weight is non-zero only
 for $x\ge(\mvis/\mtau)^{2}$, with $\mtau=1.777\,$GeV, so a leg whose visible mass exceeds
@@ -246,14 +248,19 @@ subset, which is why failing events have a higher visible $\mtautau$ ($92$ vs $7
 Two consequences. The elliptical signal region evaluates to \texttt{NaN} on those events and
 rejects them, so it silently doubles as a FastMTT-success filter: a cut CMS quotes at $99\%$
 signal efficiency runs at roughly $31\%$ here, on survivors biased in the very mass it
-selects on. And the failure rate differs between processes, so FastMTT does not cancel
-between signal and background as Sec.~\ref{sec:limits} assumed.
+selects on. And the failure rate differs between processes ($69\%$ vs $80\%$), so on
+the untuned samples FastMTT does not cancel between signal and background.
 
-Mitigation is one line --- clamp the $\tauh$ mass to a physical $\tau$ visible mass before
-the fit --- which removes the failures but leaves the jet-level energy scale untouched. The
-real fix is to rebuild the $\tauh$ four-vector from the particle-flow constituents, already
-written to the Delphes files, which would also supply decay modes and a prong-summed $\tau$
-charge.
+The tuning already fixes exactly this: the \texttt{tau\_mass} map redraws the $\tauh$
+visible mass from the CMS anchor and hard-caps it at $1.70\,$GeV, just below $\mtau$, which
+is the failure that map was written to remove. So this is a limitation of the untuned arm
+rather than an open defect --- but the untuned arm is what the CROWN-matched NSBI inputs are
+currently built from, so it bites in practice and those inputs should be regenerated from the
+tuned production or have the cap applied. Two things remain genuinely open: the ellipse
+should reject a failed fit \emph{explicitly} rather than through \texttt{NaN}$\rightarrow\infty$,
+so the two rejection reasons are separable in a cutflow; and capping the mass leaves the
+jet-level energy scale untouched, which only a $\tauh$ rebuild from the particle-flow
+constituents would address.
 
 \subsection{$m_{bb}$ width: the $b$-jet resolution is untuned}
 \label{sec:mbb}
@@ -302,10 +309,11 @@ introduces no bias; the shortfall is recorded in the merged manifest rather than
 \label{sec:limits}
 
 \emph{Accepted by design.} FastMTT is covariance-free and is run identically on both sides.
-The cancellation argument made here previously no longer holds as stated:
-Sec.~\ref{sec:fastmtt} shows the fit fails at different rates for signal and $t\bar t$, so
-the failures do not divide out. Until the mass clamp is in, $\mtautau$ from FastMTT should
-be treated as unreliable and the visible mass used in its place. The card runs without pileup, so jet energy resolution is untuned and pileup jets
+The cancellation argument
+holds for the tuned samples, where \texttt{tau\_mass} keeps the $\tauh$ leg below $\mtau$. It
+does \emph{not} hold for the untuned ones: Sec.~\ref{sec:fastmtt} shows the fit there fails at
+different rates for signal and $t\bar t$, so the failures do not divide out and the visible
+mass should be used instead. The card runs without pileup, so jet energy resolution is untuned and pileup jets
 cannot exist; neither is fixable downstream. $\ptmiss$ smearing is now binned in jet $H_{T}$
 but remains isotropic where the real resolution is anisotropic.
 
